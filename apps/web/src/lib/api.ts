@@ -102,6 +102,29 @@ export const executions = {
   get: (id: string) => api<Execution>(`/api/executions/${id}`),
 };
 
+// Approvals
+export interface Approval {
+  id: string;
+  status: string;
+  message?: string | null;
+  context?: unknown;
+  createdAt: string;
+  decidedAt?: string | null;
+  executionId: string;
+  userId: string;
+  approverId?: string | null;
+  execution?: {
+    id: string;
+    workflow?: { id: string; name: string } | null;
+  } | null;
+}
+
+export const approvals = {
+  list: () => api<Approval[]>("/api/approvals"),
+  approve: (id: string) => api(`/api/approvals/${id}/approve`, { method: "POST" }),
+  reject: (id: string) => api(`/api/approvals/${id}/reject`, { method: "POST" }),
+};
+
 // Credentials
 export interface Credential {
   id: string;

@@ -1,9 +1,26 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
+import { executeWorkflow } from "../services/executor.js";
 
 export async function executionRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
+
+  app.post("/trigger", async (request, reply) => {
+    const body = request.body as { workflowId?: unknown; input?: unknown };
+    if (!body || typeof body.workflowId !== "string" || !body.workflowId) {
+      return reply.badRequest("workflowId required");
+    }
+
+    const userId = userIdFromRequest(request);
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: body.workflowId, owner: { id: userId } },
+    });
+    if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const execution = await executeWorkflow(body.workflowId, body.input);
+    return reply.status(201).send(execution);
+  });
 
   app.get("/", async (request) => {
     const userId = userIdFromRequest(request);

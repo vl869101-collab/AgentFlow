@@ -1,11 +1,81 @@
 import type { FastifyInstance } from "fastify";
+import Stripe from "stripe";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
 
-export async function billingRoutes(app: FastifyInstance) {
-  app.addHook("onRequest", requireAuth);
+type StripeObject = Record<string, any>;
 
-  app.get("/subscription", async (request) => {
+function idOf(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "id" in value) return String((value as { id: unknown }).id);
+  return undefined;
+}
+
+function dateFromUnix(value: unknown): Date | null {
+  return typeof value === "number" ? new Date(value * 1000) : null;
+}
+
+function subscriptionData(subscription: StripeObject) {
+  const price = subscription.items?.data?.[0]?.price;
+  return {
+    stripeCustomerId: idOf(subscription.customer),
+    stripeSubscriptionId: idOf(subscription.id),
+    stripePriceId: idOf(subscription.stripePriceId) ?? idOf(price),
+    status: subscription.status ?? "active",
+    currentPeriodStart: dateFromUnix(subscription.current_period_start),
+    currentPeriodEnd: dateFromUnix(subscription.current_period_end),
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+  };
+}
+
+async function ownerForSubscription(source: StripeObject) {
+  const metadata = source.metadata ?? {};
+  const customerId = idOf(source.customer);
+  const userId = metadata.userId ?? source.client_reference_id;
+
+  const user = userId
+    ? await prisma.user.findUnique({ where: { id: userId } })
+    : customerId
+      ? await prisma.user.findUnique({ where: { stripeCustomerId: customerId } })
+      : null;
+  if (!user) return null;
+
+  const membership = await prisma.organizationMember.findFirst({ where: { userId: user.id } });
+  const orgId = metadata.orgId ?? membership?.orgId;
+  return orgId ? { userId: user.id, orgId } : null;
+}
+
+async function upsertSubscription(source: StripeObject) {
+  const data = subscriptionData(source);
+  if (!data.stripeSubscriptionId) return;
+
+  const existing = await prisma.subscription.findFirst({
+    where: { stripeSubscriptionId: data.stripeSubscriptionId },
+  });
+  if (existing) {
+    await prisma.subscription.update({ where: { id: existing.id }, data });
+    return;
+  }
+
+  const owner = await ownerForSubscription(source);
+  if (!owner) return;
+
+  await prisma.subscription.create({ data: { ...data, ...owner } });
+}
+
+export async function billingRoutes(app: FastifyInstance) {
+  // Stripe signs raw JSON, so preserve it while still exposing parsed bodies to routes.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
+    const rawBody = typeof body === "string" ? body : body.toString("utf8");
+    (request as typeof request & { rawBody?: string }).rawBody = rawBody;
+    try {
+      done(null, JSON.parse(rawBody));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
+  });
+
+  app.get("/subscription", { preHandler: requireAuth }, async (request) => {
     const userId = userIdFromRequest(request);
     const sub = await prisma.subscription.findFirst({
       where: { userId },
@@ -14,7 +84,7 @@ export async function billingRoutes(app: FastifyInstance) {
     return sub ?? { status: "free" };
   });
 
-  app.get("/usage", async (request) => {
+  app.get("/usage", { preHandler: requireAuth }, async (request) => {
     const userId = userIdFromRequest(request);
     const records = await prisma.usageRecord.findMany({
       where: { userId },
@@ -25,7 +95,7 @@ export async function billingRoutes(app: FastifyInstance) {
   });
 
   // ponytail: Stripe checkout stub — wire up real Stripe when key is set
-  app.post("/checkout", async (request) => {
+  app.post("/checkout", { preHandler: requireAuth }, async (request) => {
     const { priceId } = request.body as { priceId: string };
     const userId = userIdFromRequest(request);
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
@@ -38,13 +108,48 @@ export async function billingRoutes(app: FastifyInstance) {
     return { url: `https://checkout.stripe.com/pay/cs_stub_${user.id}_${priceId}` };
   });
 
-  app.post("/webhook", async (request) => {
-    // ponytail: Stripe webhook handler — verify signature in production
-    const body = request.body as any;
-    const event = body?.type;
-    if (event === "checkout.session.completed") {
-      // TODO: activate subscription
+  app.post("/webhook", async (request, reply) => {
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      return reply.code(503).send({ error: "Stripe webhook is not configured", code: "STRIPE_NOT_CONFIGURED" });
     }
+
+    const signature = request.headers["stripe-signature"];
+    if (typeof signature !== "string") {
+      return reply.code(400).send({ error: "Missing Stripe signature", code: "MISSING_SIGNATURE" });
+    }
+
+    let event: Stripe.Event;
+    try {
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "sk_test_webhook_only");
+      const rawBody = (request as typeof request & { rawBody?: string }).rawBody;
+      event = stripe.webhooks.constructEvent(rawBody ?? JSON.stringify(request.body), signature, webhookSecret);
+    } catch {
+      return reply.code(400).send({ error: "Invalid Stripe webhook signature", code: "INVALID_SIGNATURE" });
+    }
+
+    const source = event.data.object as unknown as StripeObject;
+    switch (event.type) {
+      case "checkout.session.completed":
+        await upsertSubscription({
+          ...source,
+          id: idOf(source.subscription),
+          status: "active",
+        });
+        break;
+      case "customer.subscription.updated":
+        await upsertSubscription(source);
+        break;
+      case "customer.subscription.deleted": {
+        const subscriptionId = idOf(source.id);
+        if (subscriptionId) {
+          const existing = await prisma.subscription.findFirst({ where: { stripeSubscriptionId: subscriptionId } });
+          if (existing) await prisma.subscription.delete({ where: { id: existing.id } });
+        }
+        break;
+      }
+    }
+
     return { received: true };
   });
 }

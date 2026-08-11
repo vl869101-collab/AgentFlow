@@ -29,6 +29,8 @@ function find(table: Map<string, any>, where: any): any | null {
   for (const v of table.values()) {
     if (where.id !== undefined && v.id !== where.id) continue;
     if (where.email !== undefined && v.email !== where.email) continue;
+    if (where.stripeCustomerId !== undefined && v.stripeCustomerId !== where.stripeCustomerId) continue;
+    if (where.stripeSubscriptionId !== undefined && v.stripeSubscriptionId !== where.stripeSubscriptionId) continue;
     if (where.slug !== undefined && v.slug !== where.slug) continue;
     if (where.path !== undefined && v.path !== where.path) continue;
     if (where.userId !== undefined && v.userId !== where.userId) continue;
@@ -44,7 +46,12 @@ function findMany<T>(table: Map<string, T>, where?: any): T[] {
   if (!where) return result;
   for (const [key, val] of Object.entries(where)) {
     if (val === undefined) continue;
-    result = result.filter((v: any) => v[key] === val);
+    result = result.filter((v: any) => {
+      if (val && typeof val === "object" && "gte" in val) {
+        return new Date(v[key]) >= new Date((val as any).gte);
+      }
+      return v[key] === val;
+    });
   }
   return result;
 }
@@ -287,11 +294,31 @@ export const store = {
     async findFirst({ where }: { where: any }) {
       return find(subscriptions, where);
     },
+    async create({ data }: { data: any }) {
+      const subscription = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };
+      subscriptions.set(subscription.id, subscription);
+      return subscription;
+    },
+    async update({ where, data }: { where: any; data: any }) {
+      const subscription = find(subscriptions, where);
+      if (!subscription) throw new Error("Record not found");
+      Object.assign(subscription, data, { updatedAt: now() });
+      return subscription;
+    },
+    async delete({ where }: { where: any }) {
+      subscriptions.delete(where.id);
+      return { count: 1 };
+    },
   },
 
   usageRecord: {
     async findMany({ where }: { where?: any }) {
       return findMany(usageRecords, where);
+    },
+    async create({ data }: { data: any }) {
+      const record = { id: cuid(), ...data, createdAt: now() };
+      usageRecords.set(record.id, record);
+      return record;
     },
   },
 

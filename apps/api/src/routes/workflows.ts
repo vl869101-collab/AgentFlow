@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
+import { checkQuota } from "../middleware/quota.js";
 import { createWorkflowSchema, updateWorkflowSchema, saveWorkflowCanvasSchema } from "@agentflow/shared";
 
 export async function workflowRoutes(app: FastifyInstance) {
@@ -117,7 +118,7 @@ export async function workflowRoutes(app: FastifyInstance) {
   });
 
   // run workflow
-  app.post("/:id/run", async (request, reply) => {
+  app.post("/:id/run", { preHandler: checkQuota }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
     const workflow = await prisma.workflow.findFirst({ where: { id, owner: { id: userId } } });
@@ -125,6 +126,9 @@ export async function workflowRoutes(app: FastifyInstance) {
 
     const execution = await prisma.workflowExecution.create({
       data: { workflowId: id, userId, orgId: workflow.orgId, status: "PENDING", trigger: "manual" },
+    });
+    await prisma.usageRecord.create({
+      data: { type: "execution", quantity: 1, orgId: workflow.orgId, userId },
     });
 
     // ponytail: enqueue to BullMQ worker
