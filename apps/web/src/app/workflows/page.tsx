@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
-import { workflows as workflowsApi, type Workflow, getToken } from "@/lib/api";
+import { workflows, type Workflow } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/utils";
 
 function workflowStatus(status: string): BadgeStatus {
@@ -21,7 +21,7 @@ function workflowStatusLabel(status: string) {
 }
 
 export default function WorkflowsPage() {
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [data, setData] = useState<Workflow[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
@@ -29,30 +29,23 @@ export default function WorkflowsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) { window.location.href = "/login"; return; }
-    workflowsApi.list(token).then((data) => { setWorkflows(data); setLoading(false); }).catch(() => setLoading(false));
+    workflows.list().then(setData).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const filtered = useMemo(
-    () => workflows.filter((wf) =>
+    () => data.filter((wf) =>
       (filter === "all" || wf.status === filter) &&
       `${wf.name} ${wf.description}`.toLowerCase().includes(query.toLowerCase())
     ),
-    [filter, query, workflows]
+    [filter, query, data]
   );
 
   async function createWorkflow(event: React.FormEvent) {
     event.preventDefault();
     if (!newWorkflow.name.trim()) return;
-    const token = getToken();
-    if (!token) return;
     try {
-      const created = await workflowsApi.create(
-        { name: newWorkflow.name, description: newWorkflow.description },
-        token
-      );
-      setWorkflows((items) => [created, ...items]);
+      const created = await workflows.create({ name: newWorkflow.name, description: newWorkflow.description });
+      setData((items) => [created, ...items]);
       setNewWorkflow({ name: "", description: "" });
       setCreateOpen(false);
     } catch {}
@@ -106,9 +99,9 @@ export default function WorkflowsPage() {
 
         <div className="mt-6 grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <AnimatePresence mode="popLayout">
-            {filtered.map((workflow, index) => (
+            {filtered.map((wf, index) => (
               <motion.div
-                key={workflow.id}
+                key={wf.id}
                 layout
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -120,24 +113,19 @@ export default function WorkflowsPage() {
                     <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">
                       <WorkflowIcon className="h-4 w-4" />
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Badge status={workflowStatus(workflow.status)}>{workflowStatusLabel(workflow.status)}</Badge>
-                      <button type="button" className="rounded-lg p-1.5 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-white/5 hover:text-zinc-300" aria-label="More workflow actions">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </div>
+                    <Badge status={workflowStatus(wf.status)}>{workflowStatusLabel(wf.status)}</Badge>
                   </div>
-                  <Link href={`/workflows/${workflow.id}/editor`} className="mt-5 text-base font-medium text-zinc-100 hover:text-violet-300">
-                    {workflow.name}
+                  <Link href={`/workflows/${wf.id}/editor`} className="mt-5 text-base font-medium text-zinc-100 hover:text-violet-300">
+                    {wf.name}
                   </Link>
-                  <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-zinc-500">{workflow.description}</p>
+                  <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-zinc-500">{wf.description}</p>
                   <div className="mt-auto flex items-center justify-between pt-5 text-xs text-zinc-600">
                     <span className="flex items-center gap-1.5">
-                      <Clock3 className="h-3.5 w-3.5" />{formatRelativeTime(workflow.updatedAt)}
+                      <Clock3 className="h-3.5 w-3.5" />{formatRelativeTime(wf.updatedAt)}
                     </span>
                   </div>
                   <Link
-                    href={`/workflows/${workflow.id}/editor`}
+                    href={`/workflows/${wf.id}/editor`}
                     className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-zinc-700"
                   >
                     Open editor <ArrowUpRight className="h-3.5 w-3.5" />

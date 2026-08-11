@@ -7,9 +7,10 @@ export async function credentialRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
   app.get("/", async (request) => {
-    const { orgId } = request.query as { orgId: string };
-    if (!orgId) return [];
-    return prisma.credential.findMany({ where: { orgId }, orderBy: { createdAt: "desc" } });
+    const userId = userIdFromRequest(request);
+    const membership = await prisma.organizationMember.findFirst({ where: { userId } });
+    if (!membership) return [];
+    return prisma.credential.findMany({ where: { orgId: membership.orgId }, orderBy: { createdAt: "desc" } });
   });
 
   app.post("/", async (request, reply) => {

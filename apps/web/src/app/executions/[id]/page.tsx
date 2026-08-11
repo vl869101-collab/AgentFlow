@@ -1,35 +1,106 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, ChevronDown, Clock3, Copy, Download, MessageSquareText, Play } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock3, Copy, Download, Play } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { mockExecutions } from "@/lib/mock-data";
-
-const timeline = [
-  { id: "trigger-order", label: "Order received", type: "Webhook", status: "SUCCESS", time: "14:12:00.230", duration: "420ms", input: { orderId: "ord_10482", total: 1840, currency: "USD" }, output: { accepted: true, event: "order.created" } },
-  { id: "risk-agent", label: "Assess order risk", type: "AI Agent", status: "SUCCESS", time: "14:12:00.650", duration: "8.2s", input: { event: "order.created", total: 1840 }, output: { score: 0.82, classification: "review" } },
-  { id: "high-value", label: "High-value order", type: "Condition", status: "SUCCESS", time: "14:12:08.850", duration: "12ms", input: { score: 0.82, threshold: 0.7 }, output: { branch: "true" } },
-  { id: "notify-ops", label: "Notify operations", type: "Discord", status: "SUCCESS", time: "14:12:08.862", duration: "3.7s", input: { channel: "#ops-alerts", orderId: "ord_10482" }, output: { messageId: "msg_98D21", delivered: true } },
-  { id: "write-sheet", label: "Record in tracker", type: "Google Sheets", status: "SUCCESS", time: "14:12:12.562", duration: "1.9s", input: { sheet: "Orders", row: { orderId: "ord_10482", risk: "review" } }, output: { rowNumber: 842, updated: true } },
-];
+import { executions, type Execution } from "@/lib/api";
 
 function statusFor(status: string): BadgeStatus { return status === "SUCCESS" ? "success" : status === "FAILED" ? "error" : status === "RUNNING" ? "warning" : "neutral"; }
+function labelFor(status: string) { return status === "WAITING_APPROVAL" ? "Waiting approval" : status.charAt(0) + status.slice(1).toLowerCase(); }
 
 export default function ExecutionDetailPage() {
   const params = useParams<{ id: string }>();
-  const execution = mockExecutions.find((item) => item.id === params.id) ?? mockExecutions[0];
-  const [expanded, setExpanded] = useState(timeline[0].id);
-  const [message, setMessage] = useState("");
-  return <AppLayout><div className="animate-in fade-in duration-300"><Link href="/executions" className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200"><ArrowLeft className="h-4 w-4" /> Back to executions</Link><div className="mt-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><div className="flex flex-wrap items-center gap-3"><h1 className="text-3xl font-bold tracking-tight text-zinc-50">{execution.workflow}</h1><Badge status={statusFor(execution.status)}>{execution.status === "WAITING_APPROVAL" ? "Waiting approval" : execution.status.charAt(0) + execution.status.slice(1).toLowerCase()}</Badge></div><p className="mt-2 font-mono text-xs text-zinc-600">{execution.id} · started Aug 10, 2026 at 14:12:00 UTC</p></div><div className="flex items-center gap-2"><Button variant="secondary" size="sm"><Download className="h-3.5 w-3.5" /> Export JSON</Button><Button size="sm"><Play className="h-3.5 w-3.5" /> Re-run</Button></div></div><div className="mt-8 grid gap-4 sm:grid-cols-3"><Card><p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Duration</p><p className="mt-2 text-xl font-semibold text-zinc-100">{execution.duration}</p><p className="mt-1 flex items-center gap-1 text-xs text-zinc-600"><Clock3 className="h-3.5 w-3.5" /> End to end</p></Card><Card><p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Nodes completed</p><p className="mt-2 text-xl font-semibold text-zinc-100">{execution.nodes} <span className="text-sm font-normal text-zinc-600">/ {execution.nodes}</span></p><p className="mt-1 flex items-center gap-1 text-xs text-green-400"><CheckCircle2 className="h-3.5 w-3.5" /> All steps passed</p></Card><Card><p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Trigger</p><p className="mt-2 text-xl font-semibold text-zinc-100">{execution.trigger}</p><p className="mt-1 text-xs text-zinc-600">Manual replay available</p></Card></div><div className="mt-8 grid gap-6 xl:grid-cols-[0.85fr_1.15fr]"><Card><div className="flex items-center justify-between border-b border-white/10 pb-4"><div><h2 className="text-lg font-medium text-zinc-100">Execution timeline</h2><p className="mt-1 text-xs text-zinc-600">Every node, in order.</p></div><span className="text-xs text-zinc-600">{timeline.length} steps</span></div><div className="mt-5 space-y-1">{timeline.map((step, index) => { const isOpen = expanded === step.id; return <div key={step.id} className="relative flex gap-3"><div className="flex w-5 shrink-0 flex-col items-center">{index < timeline.length - 1 ? <span className="absolute top-5 h-full w-px bg-white/10" /> : null}<span className="relative z-10 mt-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500/10 text-green-400"><CheckCircle2 className="h-3.5 w-3.5" /></span></div><button type="button" onClick={() => setExpanded(isOpen ? "" : step.id)} className="mb-2 flex min-w-0 flex-1 items-start justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-white/5"><span className="min-w-0"><span className="block truncate text-sm font-medium text-zinc-300">{step.label}</span><span className="mt-1 block text-[11px] text-zinc-600">{step.type} · {step.duration}</span></span><ChevronDown className={`mt-1 h-3.5 w-3.5 shrink-0 text-zinc-600 transition-transform ${isOpen ? "rotate-180" : ""}`} /></button>{isOpen ? <div className="absolute left-8 top-16 z-10 w-[calc(100%-2rem)] rounded-lg border border-white/10 bg-zinc-900 p-3 text-xs shadow-xl shadow-black/30"><div className="flex justify-between gap-3 text-zinc-600"><span>{step.time}</span><span className="font-mono">{step.id}</span></div><p className="mt-2 text-zinc-500">Input and output available in the inspector.</p></div> : null}</div>; })}</div></Card><div className="space-y-6"><JsonPanel title="Input payload" value={timeline[0].input} /><JsonPanel title="Selected node output" value={timeline.find((step) => step.id === expanded)?.output ?? timeline[0].output} /><Card><div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><MessageSquareText className="h-4 w-4 text-violet-300" /> Need help with this run?</div><p className="mt-2 text-xs leading-5 text-zinc-500">Ask AgentFlow to explain a node, suggest a retry, or summarize the full execution.</p><Button variant="secondary" size="sm" className="mt-4" onClick={() => setMessage("AI explanation queued for this execution.")}><SparkIcon /> Explain with AI</Button>{message ? <p className="mt-3 text-xs text-green-400">{message}</p> : null}</Card></div></div></div></AppLayout>;
+  const [exec, setExec] = useState<Execution | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!params.id) return;
+    executions.get(params.id).then(setExec).catch(() => {}).finally(() => setLoading(false));
+  }, [params.id]);
+
+  if (loading) return <AppLayout><div className="p-8 text-center text-sm text-zinc-600">Loading...</div></AppLayout>;
+  if (!exec) return <AppLayout><div className="p-8 text-center text-sm text-zinc-600">Execution not found.</div></AppLayout>;
+
+  return (
+    <AppLayout>
+      <div className="animate-in fade-in duration-300">
+        <Link href="/executions" className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200">
+          <ArrowLeft className="h-4 w-4" /> Back to executions
+        </Link>
+
+        <div className="mt-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-3xl font-bold tracking-tight text-zinc-50">{exec.workflowId}</h1>
+              <Badge status={statusFor(exec.status)}>{labelFor(exec.status)}</Badge>
+            </div>
+            <p className="mt-2 font-mono text-xs text-zinc-600">{exec.id}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm"><Download className="h-3.5 w-3.5" /> Export JSON</Button>
+            <Button size="sm"><Play className="h-3.5 w-3.5" /> Re-run</Button>
+          </div>
+        </div>
+
+        <div className="mt-8 grid gap-4 sm:grid-cols-3">
+          <Card>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Duration</p>
+            <p className="mt-2 text-xl font-semibold text-zinc-100">{exec.duration != null ? `${exec.duration}ms` : "—"}</p>
+            <p className="mt-1 flex items-center gap-1 text-xs text-zinc-600"><Clock3 className="h-3.5 w-3.5" /> End to end</p>
+          </Card>
+          <Card>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Nodes completed</p>
+            <p className="mt-2 text-xl font-semibold text-zinc-100">{exec.nodes ?? 0}</p>
+            <p className="mt-1 flex items-center gap-1 text-xs text-green-400"><CheckCircle2 className="h-3.5 w-3.5" /> Completed</p>
+          </Card>
+          <Card>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Trigger</p>
+            <p className="mt-2 text-xl font-semibold text-zinc-100">{exec.trigger ?? "Manual"}</p>
+            <p className="mt-1 text-xs text-zinc-600">Manual replay available</p>
+          </Card>
+        </div>
+
+        {exec.input != null && (
+          <div className="mt-8">
+            <JsonPanel title="Input" value={exec.input} />
+          </div>
+        )}
+        {exec.output != null && (
+          <div className="mt-4">
+            <JsonPanel title="Output" value={exec.output} />
+          </div>
+        )}
+        {exec.error && (
+          <div className="mt-4">
+            <JsonPanel title="Error" value={{ message: exec.error }} />
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
 }
 
 function JsonPanel({ title, value }: { title: string; value: unknown }) {
-  return <Card className="overflow-hidden p-0"><div className="flex items-center justify-between border-b border-white/10 px-5 py-4"><h2 className="text-sm font-medium text-zinc-200">{title}</h2><button type="button" className="rounded-lg p-1.5 text-zinc-600 hover:bg-white/5 hover:text-zinc-300" aria-label={`Copy ${title}`} onClick={() => navigator.clipboard?.writeText(JSON.stringify(value, null, 2))}><Copy className="h-3.5 w-3.5" /></button></div><pre className="max-h-52 overflow-auto p-5 font-mono text-xs leading-6 text-zinc-500">{JSON.stringify(value, null, 2)}</pre></Card>;
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+        <h2 className="text-sm font-medium text-zinc-200">{title}</h2>
+        <button
+          type="button"
+          className="rounded-lg p-1.5 text-zinc-600 hover:bg-white/5 hover:text-zinc-300"
+          onClick={() => navigator.clipboard?.writeText(JSON.stringify(value, null, 2))}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <pre className="max-h-52 overflow-auto p-5 font-mono text-xs leading-6 text-zinc-500">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </Card>
+  );
 }
-
-function SparkIcon() { return <span className="text-violet-300">✦</span>; }

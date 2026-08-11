@@ -3,7 +3,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 interface ApiOptions {
   method?: string;
   body?: unknown;
-  token?: string;
 }
 
 export class ApiError extends Error {
@@ -13,9 +12,23 @@ export class ApiError extends Error {
   }
 }
 
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("agentflow_token");
+}
+
+export function setToken(token: string) {
+  localStorage.setItem("agentflow_token", token);
+}
+
+export function clearToken() {
+  localStorage.removeItem("agentflow_token");
+}
+
 export async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise<T> {
-  const { method = "GET", body, token } = options;
+  const { method = "GET", body } = options;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -55,14 +68,14 @@ export interface Workflow {
 }
 
 export const workflows = {
-  list: (token: string) => api<Workflow[]>("/api/workflows", { token }),
-  get: (id: string, token: string) => api<Workflow>(`/api/workflows/${id}`, { token }),
-  create: (data: { name: string; description?: string }, token: string) =>
-    api<Workflow>("/api/workflows", { method: "POST", body: data, token }),
-  update: (id: string, data: Partial<Workflow>, token: string) =>
-    api<Workflow>(`/api/workflows/${id}`, { method: "PATCH", body: data, token }),
-  delete: (id: string, token: string) =>
-    api<void>(`/api/workflows/${id}`, { method: "DELETE", token }),
+  list: () => api<Workflow[]>("/api/workflows"),
+  get: (id: string) => api<Workflow>(`/api/workflows/${id}`),
+  create: (data: { name: string; description?: string }) =>
+    api<Workflow>("/api/workflows", { method: "POST", body: data }),
+  update: (id: string, data: Partial<Workflow>) =>
+    api<Workflow>(`/api/workflows/${id}`, { method: "PATCH", body: data }),
+  delete: (id: string) =>
+    api<void>(`/api/workflows/${id}`, { method: "DELETE" }),
 };
 
 // Executions
@@ -73,42 +86,47 @@ export interface Execution {
   startedAt: string;
   finishedAt?: string;
   duration?: number;
-  triggerType: string;
-  nodesExecuted: number;
+  nodes?: number;
+  trigger?: string;
+  input?: unknown;
+  output?: unknown;
   error?: string;
+  workflow?: { id: string; name: string };
 }
 
 export const executions = {
-  list: (token: string, workflowId?: string) => {
+  list: (workflowId?: string) => {
     const q = workflowId ? `?workflowId=${workflowId}` : "";
-    return api<Execution[]>(`/api/executions${q}`, { token });
+    return api<Execution[]>(`/api/executions${q}`);
   },
-  get: (id: string, token: string) => api<Execution>(`/api/executions/${id}`, { token }),
+  get: (id: string) => api<Execution>(`/api/executions/${id}`),
 };
 
 // Credentials
 export interface Credential {
   id: string;
   name: string;
+  provider: string;
   type: string;
+  data: string;
   createdAt: string;
-  lastUsedAt?: string;
+  updatedAt: string;
 }
 
 export const credentials = {
-  list: (token: string) => api<Credential[]>("/api/credentials", { token }),
-  create: (data: { name: string; type: string; config: Record<string, string> }, token: string) =>
-    api<Credential>("/api/credentials", { method: "POST", body: data, token }),
-  delete: (id: string, token: string) =>
-    api<void>(`/api/credentials/${id}`, { method: "DELETE", token }),
+  list: () => api<Credential[]>("/api/credentials"),
+  create: (data: { name: string; provider: string; value: string; type: string }) =>
+    api<Credential>("/api/credentials", { method: "POST", body: { name: data.name, provider: data.provider, type: data.type, data: { value: data.value } } }),
+  delete: (id: string) =>
+    api<void>(`/api/credentials/${id}`, { method: "DELETE" }),
 };
 
 // AI
 export const ai = {
-  generate: (prompt: string, token: string) =>
+  generate: (prompt: string) =>
     api<{ workflow: { name: string; description: string; nodes: unknown[]; edges: unknown[] } }>(
       "/api/ai/generate",
-      { method: "POST", body: { prompt }, token }
+      { method: "POST", body: { prompt } }
     ),
 };
 
@@ -121,21 +139,7 @@ export interface Subscription {
 }
 
 export const billing = {
-  getSubscription: (token: string) => api<Subscription>("/api/billing/subscription", { token }),
-  createCheckout: (priceId: string, token: string) =>
-    api<{ url: string }>("/api/billing/checkout", { method: "POST", body: { priceId }, token }),
+  getSubscription: () => api<Subscription>("/api/billing/subscription"),
+  createCheckout: (priceId: string) =>
+    api<{ url: string }>("/api/billing/checkout", { method: "POST", body: { priceId } }),
 };
-
-// Token management (client-side)
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("agentflow_token");
-}
-
-export function setToken(token: string) {
-  localStorage.setItem("agentflow_token", token);
-}
-
-export function clearToken() {
-  localStorage.removeItem("agentflow_token");
-}
