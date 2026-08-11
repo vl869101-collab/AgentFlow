@@ -1,36 +1,189 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpRight, Clock3, MoreHorizontal, Plus, Search, Workflow } from "lucide-react";
+import { ArrowUpRight, Clock3, MoreHorizontal, Plus, Search, Workflow as WorkflowIcon } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
-import { mockWorkflows, type MockWorkflow } from "@/lib/mock-data";
+import { workflows as workflowsApi, type Workflow, getToken } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/utils";
 
-function workflowStatus(status: string): BadgeStatus { return status === "ACTIVE" ? "success" : status === "PAUSED" ? "warning" : status === "DRAFT" ? "info" : "neutral"; }
-function workflowStatusLabel(status: string) { return status.charAt(0) + status.slice(1).toLowerCase(); }
+function workflowStatus(status: string): BadgeStatus {
+  return status === "ACTIVE" ? "success" : status === "PAUSED" ? "warning" : status === "DRAFT" ? "info" : "neutral";
+}
+function workflowStatusLabel(status: string) {
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}
 
 export default function WorkflowsPage() {
-  const [workflows, setWorkflows] = useState(mockWorkflows);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [newWorkflow, setNewWorkflow] = useState({ name: "", description: "" });
-  const filtered = useMemo(() => workflows.filter((workflow) => (filter === "all" || workflow.status === filter) && `${workflow.name} ${workflow.description}`.toLowerCase().includes(query.toLowerCase())), [filter, query, workflows]);
+  const [loading, setLoading] = useState(true);
 
-  function createWorkflow(event: React.FormEvent) {
+  useEffect(() => {
+    const token = getToken();
+    if (!token) { window.location.href = "/login"; return; }
+    workflowsApi.list(token).then((data) => { setWorkflows(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  const filtered = useMemo(
+    () => workflows.filter((wf) =>
+      (filter === "all" || wf.status === filter) &&
+      `${wf.name} ${wf.description}`.toLowerCase().includes(query.toLowerCase())
+    ),
+    [filter, query, workflows]
+  );
+
+  async function createWorkflow(event: React.FormEvent) {
     event.preventDefault();
     if (!newWorkflow.name.trim()) return;
-    const workflow: MockWorkflow = { id: newWorkflow.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: newWorkflow.name, description: newWorkflow.description || "A new workflow ready to be shaped.", status: "DRAFT", updatedAt: new Date().toISOString(), runs: 0, successRate: 0, nodes: 1, lastRun: new Date().toISOString() };
-    setWorkflows((items) => [workflow, ...items]); setNewWorkflow({ name: "", description: "" }); setCreateOpen(false);
+    const token = getToken();
+    if (!token) return;
+    try {
+      const created = await workflowsApi.create(
+        { name: newWorkflow.name, description: newWorkflow.description },
+        token
+      );
+      setWorkflows((items) => [created, ...items]);
+      setNewWorkflow({ name: "", description: "" });
+      setCreateOpen(false);
+    } catch {}
   }
 
-  return <AppLayout><div className="animate-in fade-in duration-300"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs font-medium uppercase tracking-wider text-violet-400">Automation library</p><h1 className="mt-2 text-4xl font-bold tracking-tight text-zinc-50">Workflows</h1><p className="mt-2 text-sm text-zinc-500">Design repeatable systems for the work your team does every day.</p></div><Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New workflow</Button></div><div className="mt-8 flex flex-col gap-3 sm:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search workflows" className="w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2.5 pl-10 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-transparent focus:ring-2 focus:ring-violet-500" /></div><Select value={filter} onChange={(event) => setFilter(event.target.value)} options={[{ value: "all", label: "All statuses" }, { value: "ACTIVE", label: "Active" }, { value: "DRAFT", label: "Draft" }, { value: "PAUSED", label: "Paused" }, { value: "ARCHIVED", label: "Archived" }]} className="sm:w-44" /></div><div className="mt-6 grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"><AnimatePresence mode="popLayout">{filtered.map((workflow, index) => <motion.div key={workflow.id} layout initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ delay: index * 0.03 }}><Card className="group flex h-full flex-col transition-all duration-200 hover:scale-[1.02] hover:border-white/20"><div className="flex items-start justify-between gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300"><Workflow className="h-4 w-4" /></div><div className="flex items-center gap-1"><Badge status={workflowStatus(workflow.status)}>{workflowStatusLabel(workflow.status)}</Badge><button type="button" className="rounded-lg p-1.5 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-white/5 hover:text-zinc-300" aria-label="More workflow actions"><MoreHorizontal className="h-4 w-4" /></button></div></div><Link href={`/workflows/${workflow.id}/editor`} className="mt-5 text-base font-medium text-zinc-100 hover:text-violet-300">{workflow.name}</Link><p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-zinc-500">{workflow.description}</p><div className="mt-5 grid grid-cols-2 gap-3 border-t border-white/10 pt-4"><div><p className="text-[10px] uppercase tracking-wider text-zinc-600">Runs</p><p className="mt-1 text-sm font-medium text-zinc-300">{workflow.runs.toLocaleString()}</p></div><div><p className="text-[10px] uppercase tracking-wider text-zinc-600">Success</p><p className="mt-1 text-sm font-medium text-green-400">{workflow.successRate ? `${workflow.successRate}%` : "—"}</p></div></div><div className="mt-auto flex items-center justify-between pt-5 text-xs text-zinc-600"><span className="flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{formatRelativeTime(workflow.updatedAt)}</span><span>{workflow.nodes} nodes</span></div><Link href={`/workflows/${workflow.id}/editor`} className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-zinc-700">Open editor <ArrowUpRight className="h-3.5 w-3.5" /></Link></Card></motion.div>)}</AnimatePresence></div>{filtered.length === 0 ? <div className="mt-6 rounded-xl border border-dashed border-white/10 p-12 text-center text-sm text-zinc-600">No workflows match those filters.</div> : null}</div><Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create workflow" description="Start with a clear name. You can shape the flow in the editor."><form onSubmit={createWorkflow} className="space-y-5"><Input label="Workflow name" value={newWorkflow.name} onChange={(event) => setNewWorkflow({ ...newWorkflow, name: event.target.value })} placeholder="e.g. Qualify inbound leads" autoFocus required /><div className="space-y-2"><label htmlFor="workflow-description" className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Description</label><textarea id="workflow-description" value={newWorkflow.description} onChange={(event) => setNewWorkflow({ ...newWorkflow, description: event.target.value })} rows={4} placeholder="What should this workflow accomplish?" className="w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-transparent focus:ring-2 focus:ring-violet-500" /></div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button><Button type="submit">Create workflow</Button></div></form></Modal></AppLayout>;
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-64">
+          <p className="text-zinc-500">Loading workflows...</p>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  return (
+    <AppLayout>
+      <div className="animate-in fade-in duration-300">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-violet-400">Automation library</p>
+            <h1 className="mt-2 text-4xl font-bold tracking-tight text-zinc-50">Workflows</h1>
+            <p className="mt-2 text-sm text-zinc-500">Design repeatable systems for the work your team does every day.</p>
+          </div>
+          <Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New workflow</Button>
+        </div>
+
+        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search workflows"
+              className="w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2.5 pl-10 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-transparent focus:ring-2 focus:ring-violet-500"
+            />
+          </div>
+          <Select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            options={[
+              { value: "all", label: "All statuses" },
+              { value: "ACTIVE", label: "Active" },
+              { value: "DRAFT", label: "Draft" },
+              { value: "PAUSED", label: "Paused" },
+              { value: "ARCHIVED", label: "Archived" },
+            ]}
+            className="sm:w-44"
+          />
+        </div>
+
+        <div className="mt-6 grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <AnimatePresence mode="popLayout">
+            {filtered.map((workflow, index) => (
+              <motion.div
+                key={workflow.id}
+                layout
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                transition={{ delay: index * 0.03 }}
+              >
+                <Card className="group flex h-full flex-col transition-all duration-200 hover:scale-[1.02] hover:border-white/20">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">
+                      <WorkflowIcon className="h-4 w-4" />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Badge status={workflowStatus(workflow.status)}>{workflowStatusLabel(workflow.status)}</Badge>
+                      <button type="button" className="rounded-lg p-1.5 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-white/5 hover:text-zinc-300" aria-label="More workflow actions">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <Link href={`/workflows/${workflow.id}/editor`} className="mt-5 text-base font-medium text-zinc-100 hover:text-violet-300">
+                    {workflow.name}
+                  </Link>
+                  <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-zinc-500">{workflow.description}</p>
+                  <div className="mt-auto flex items-center justify-between pt-5 text-xs text-zinc-600">
+                    <span className="flex items-center gap-1.5">
+                      <Clock3 className="h-3.5 w-3.5" />{formatRelativeTime(workflow.updatedAt)}
+                    </span>
+                  </div>
+                  <Link
+                    href={`/workflows/${workflow.id}/editor`}
+                    className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-zinc-700"
+                  >
+                    Open editor <ArrowUpRight className="h-3.5 w-3.5" />
+                  </Link>
+                </Card>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+
+        {filtered.length === 0 && (
+          <div className="mt-6 rounded-xl border border-dashed border-white/10 p-12 text-center text-sm text-zinc-600">
+            No workflows match those filters.
+          </div>
+        )}
+
+        <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create workflow" description="Start with a clear name. You can shape the flow in the editor.">
+          <form onSubmit={createWorkflow} className="space-y-5">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Workflow name</label>
+              <input
+                value={newWorkflow.name}
+                onChange={(e) => setNewWorkflow({ ...newWorkflow, name: e.target.value })}
+                placeholder="e.g. Qualify inbound leads"
+                className="w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:ring-2 focus:ring-violet-500"
+                autoFocus
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Description</label>
+              <textarea
+                value={newWorkflow.description}
+                onChange={(e) => setNewWorkflow({ ...newWorkflow, description: e.target.value })}
+                rows={4}
+                placeholder="What should this workflow accomplish?"
+                className="w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:ring-2 focus:ring-violet-500"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
+              <Button type="submit">Create workflow</Button>
+            </div>
+          </form>
+        </Modal>
+      </div>
+    </AppLayout>
+  );
 }
