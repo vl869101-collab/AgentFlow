@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   ChevronRight,
+  CreditCard,
   KeyRound,
   LayoutDashboard,
   PanelLeftClose,
@@ -23,6 +24,7 @@ const navigation = [
   { label: "Executions", href: "/executions", icon: Activity },
   { label: "Credentials", href: "/credentials", icon: KeyRound },
   { label: "Approvals", href: "/approvals", icon: ShieldCheck, badge: "3" },
+  { label: "Billing", href: "/billing", icon: CreditCard },
 ];
 
 export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClose }: { collapsed: boolean; onCollapsedChange: (value: boolean) => void; mobileOpen: boolean; onMobileClose: () => void }) {
