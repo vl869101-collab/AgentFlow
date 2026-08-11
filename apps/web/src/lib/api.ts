@@ -100,6 +100,8 @@ export const executions = {
     return api<Execution[]>(`/api/executions${q}`);
   },
   get: (id: string) => api<Execution>(`/api/executions/${id}`),
+  trigger: (workflowId: string, input?: unknown) =>
+    api<Execution>("/api/executions/trigger", { method: "POST", body: { workflowId, input } }),
 };
 
 // Approvals

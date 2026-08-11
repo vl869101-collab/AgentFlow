@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { addEdge, useEdgesState, useNodesState, type OnConnect } from "@xyflow/react";
 import { ArrowLeft, Check, Play, Save, Sparkles } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -12,20 +13,45 @@ import { NodeConfigPanel } from "@/components/workflow/NodeConfigPanel";
 import { NodePalette } from "@/components/workflow/NodePalette";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { createCanvasNode, type NodeTypeKey, type WorkflowCanvasNode, type WorkflowNodeData } from "@/lib/workflow";
-import { cloneEditorNodes, editorWorkflow } from "@/lib/mock-data";
+import { workflows, executions, type Workflow } from "@/lib/api";
+
+const defaultNodes: WorkflowCanvasNode[] = [];
+const defaultEdges: any[] = [];
 
 export default function WorkflowEditorPage() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowCanvasNode>(cloneEditorNodes());
-  const [edges, setEdges, onEdgesChange] = useEdgesState(editorWorkflow.edges);
+  const params = useParams();
+  const router = useRouter();
+  const workflowId = params.id as string;
+  const [workflow, setWorkflow] = useState<Workflow | null>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowCanvasNode>(defaultNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(defaultEdges);
   const [selectedId, setSelectedId] = useState<string>();
-  const [name, setName] = useState(editorWorkflow.name);
-  const [description, setDescription] = useState(editorWorkflow.description);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [aiOpen, setAiOpen] = useState(false);
   const [saved, setSaved] = useState(true);
   const [saving, setSaving] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [toast, setToast] = useState("");
+  const [loading, setLoading] = useState(true);
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedId), [nodes, selectedId]);
+
+  useEffect(() => {
+    workflows.get(workflowId).then((wf) => {
+      setWorkflow(wf);
+      setName(wf.name);
+      setDescription(wf.description);
+      if (wf.nodes && Array.isArray(wf.nodes)) {
+        setNodes(wf.nodes as WorkflowCanvasNode[]);
+      }
+      if (wf.edges && Array.isArray(wf.edges)) {
+        setEdges(wf.edges);
+      }
+      setLoading(false);
+    }).catch(() => {
+      setLoading(false);
+    });
+  }, [workflowId, setNodes, setEdges]);
 
   const onConnect: OnConnect = useCallback((connection) => {
     setEdges((current) => addEdge({ ...connection, animated: true, style: { stroke: "url(#edge-gradient)", strokeWidth: 2 } }, current));
@@ -54,15 +80,34 @@ export default function WorkflowEditorPage() {
     setSaved(false);
   }
 
-  function saveWorkflow() {
+  async function saveWorkflow() {
     setSaving(true);
-    window.setTimeout(() => { setSaving(false); setSaved(true); setToast("Workflow saved"); window.setTimeout(() => setToast(""), 2200); }, 550);
+    try {
+      await workflows.update(workflowId, { name, description, nodes: nodes as unknown, edges: edges as unknown });
+      setSaved(true);
+      setToast("Workflow saved");
+      window.setTimeout(() => setToast(""), 2200);
+    } catch (e: any) {
+      setToast("Save failed: " + (e.message || "unknown error"));
+      window.setTimeout(() => setToast(""), 3000);
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function executeWorkflow() {
+  async function executeWorkflow() {
     setExecuting(true);
-    setToast("Execution started");
-    window.setTimeout(() => { setExecuting(false); setToast("Execution completed successfully"); window.setTimeout(() => setToast(""), 2400); }, 1200);
+    setToast("Execution started...");
+    try {
+      await executions.trigger(workflowId);
+      setToast("Execution completed successfully");
+      window.setTimeout(() => setToast(""), 2400);
+    } catch (e: any) {
+      setToast("Execution failed: " + (e.message || "unknown error"));
+      window.setTimeout(() => setToast(""), 3000);
+    } finally {
+      setExecuting(false);
+    }
   }
 
   function generateWorkflow(nextDescription: string) {
