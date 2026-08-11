@@ -1,0 +1,356 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════
+// Auth & Organizations
+// ═══════════════════════════════════════════
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
+  avatarUrl     String?
+  emailVerified Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  memberships       OrganizationMember[]
+  workflows         Workflow[]            @relation("WorkflowOwner")
+  apiKeys           ApiKey[]
+  executions        WorkflowExecution[]   @relation("ExecutionUser")
+  approvals         Approval[]
+  auditLogs         AuditLog[]
+  usageRecords      UsageRecord[]
+  stripeCustomerId  String?
+  subscription      Subscription?
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  logoUrl   String?
+  plan      Plan     @default(FREE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members           OrganizationMember[]
+  workflows         Workflow[]
+  credentials       Credential[]
+  integrations      Integration[]
+  webhooks          Webhook[]
+  executions        WorkflowExecution[]
+  usageRecords      UsageRecord[]
+  subscriptions     Subscription[]
+  auditLogs         AuditLog[]
+}
+
+model OrganizationMember {
+  id     String @id @default(cuid())
+  role   MemberRole @default(MEMBER)
+  userId String
+  orgId  String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+}
+
+// ═══════════════════════════════════════════
+// Workflows
+// ═══════════════════════════════════════════
+
+model Workflow {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  status      WorkflowStatus @default(DRAFT)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  ownerId   String
+  owner     User   @relation("WorkflowOwner", fields: [ownerId], references: [id])
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  versions      WorkflowVersion[]
+  executions    WorkflowExecution[]
+  nodes         WorkflowNode[]
+  edges         WorkflowEdge[]
+  webhooks      Webhook[]
+}
+
+model WorkflowVersion {
+  id        String   @id @default(cuid())
+  version   Int
+  snapshot  Json     // Full workflow state as JSON
+  createdAt DateTime @default(now())
+
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, version])
+}
+
+model WorkflowNode {
+  id       String  @id @default(cuid())
+  type     String  // webhook, cron, http, email, discord, telegram, sheets, condition, transform, delay, ai_agent, approval
+  label    String?
+  config   Json    @default("{}")
+  position Json    @default("{\"x\": 0, \"y\": 0}")
+  width    Float?
+  height   Float?
+
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  sourceEdges WorkflowEdge[] @relation("EdgeSource")
+  targetEdges WorkflowEdge[] @relation("EdgeTarget")
+  executions  NodeExecution[]
+}
+
+model WorkflowEdge {
+  id        String @id @default(cuid())
+  sourceHandle String?
+  targetHandle String?
+  label      String?
+  condition  Json?  // For conditional edges
+
+  sourceNodeId String
+  sourceNode   WorkflowNode @relation("EdgeSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNodeId String
+  targetNode   WorkflowNode @relation("EdgeTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════════════════════════
+// Execution
+// ═══════════════════════════════════════════
+
+model WorkflowExecution {
+  id         String          @id @default(cuid())
+  status     ExecutionStatus @default(PENDING)
+  trigger    String          // webhook, manual, cron, api
+  input      Json?
+  output     Json?
+  error      String?
+  startedAt  DateTime        @default(now())
+  finishedAt DateTime?
+  duration   Int?            // ms
+
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  orgId      String
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?   @relation("ExecutionUser", fields: [userId], references: [id])
+
+  nodes       NodeExecution[]
+  approvals   Approval[]
+}
+
+model NodeExecution {
+  id         String          @id @default(cuid())
+  status     ExecutionStatus @default(PENDING)
+  input      Json?
+  output     Json?
+  error      String?
+  logs       String?
+  startedAt  DateTime        @default(now())
+  finishedAt DateTime?
+  duration   Int?
+
+  nodeId     String
+  node       WorkflowNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  executionId String
+  execution  WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  retryCount Int @default(0)
+  idempotencyKey String? @unique
+}
+
+// ═══════════════════════════════════════════
+// Credentials & Integrations
+// ═══════════════════════════════════════════
+
+model Credential {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   // api_key, oauth2, basic, token
+  provider  String   // stripe, telegram, discord, gmail, etc.
+  data      String   // Encrypted JSON
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model Integration {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   // webhook, cron, http, email, discord, telegram, sheets, ai_agent
+  config    Json     @default("{}")
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════════════════════════
+// Webhooks
+// ═══════════════════════════════════════════
+
+model Webhook {
+  id        String   @id @default(cuid())
+  path      String   @unique // The URL path segment
+  secret    String?
+  method    String   @default("POST")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  workflowId String?
+  workflow   Workflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  orgId      String
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════════════════════════
+// Approvals
+// ═══════════════════════════════════════════
+
+model Approval {
+  id        String         @id @default(cuid())
+  status    ApprovalStatus @default(PENDING)
+  message   String?
+  context   Json?
+  createdAt DateTime       @default(now())
+  decidedAt DateTime?
+
+  executionId String
+  execution   WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  userId String @unique
+  user   User @relation(fields: [userId], references: [id])
+  approverId  String?
+}
+
+// ═══════════════════════════════════════════
+// Billing & Usage
+// ═══════════════════════════════════════════
+
+model UsageRecord {
+  id        String   @id @default(cuid())
+  type      String   // execution, ai_call, integration_call
+  quantity  Int      @default(1)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+}
+
+model Subscription {
+  id                 String   @id @default(cuid())
+  stripeCustomerId   String?  @unique
+  stripeSubscriptionId String? @unique
+  stripePriceId      String?
+  status             String   @default("active") // active, canceled, past_due, trialing
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId String @unique
+  user   User @relation(fields: [userId], references: [id])
+}
+
+// ═══════════════════════════════════════════
+// Audit
+// ═══════════════════════════════════════════
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String   // workflow.create, workflow.execute, credential.create, etc.
+  resource  String   // workflow, credential, org, etc.
+  resourceId String?
+  metadata  Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+  orgId  String
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  name      String
+  key       String   @unique
+  lastUsed  DateTime?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════════════════════════
+// Enums
+// ═══════════════════════════════════════════
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum ExecutionStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+  WAITING_APPROVAL
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}

@@ -1,0 +1,29 @@
+"use client";
+
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { Activity, ArrowUpRight, CheckCircle2, Clock3, Play, Workflow } from "lucide-react";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Card } from "@/components/ui/Card";
+import { Progress } from "@/components/ui/Progress";
+import { formatRelativeTime } from "@/lib/utils";
+import { dashboardStats, mockExecutions } from "@/lib/mock-data";
+
+const statIcons = { Activity, CheckCircle2, Workflow, Clock3 };
+const statTones = { indigo: "bg-indigo-500/10 text-indigo-300", green: "bg-green-500/10 text-green-300", violet: "bg-violet-500/10 text-violet-300", amber: "bg-amber-500/10 text-amber-300" };
+
+function statusFor(status: string): BadgeStatus {
+  if (status === "SUCCESS") return "success";
+  if (status === "FAILED") return "error";
+  if (status === "RUNNING" || status === "WAITING_APPROVAL") return "warning";
+  return "neutral";
+}
+
+function statusLabel(status: string) {
+  return status === "WAITING_APPROVAL" ? "Waiting approval" : status.charAt(0) + status.slice(1).toLowerCase();
+}
+
+export default function DashboardPage() {
+  return <AppLayout><div className="animate-in fade-in duration-300"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs font-medium uppercase tracking-wider text-violet-400">Monday, August 10, 2026</p><h1 className="mt-2 text-4xl font-bold tracking-tight text-zinc-50">Good afternoon, Victor.</h1><p className="mt-2 text-sm text-zinc-500">Here’s what your workspace has been moving while you’ve been away.</p></div><Link href="/workflows/order-risk-routing/editor" className="inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"><Play className="h-4 w-4" /> Run a workflow</Link></div><div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{dashboardStats.map((stat, index) => { const Icon = statIcons[stat.icon as keyof typeof statIcons]; return <motion.div key={stat.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}><Card className="transition-all duration-200 hover:scale-[1.02] hover:border-white/20"><div className="flex items-start justify-between"><div className={`flex h-9 w-9 items-center justify-center rounded-lg ${statTones[stat.tone]}`}><Icon className="h-4 w-4" /></div><span className="text-xs font-medium text-green-400">{stat.delta}</span></div><p className="mt-5 text-2xl font-semibold tracking-tight text-zinc-50">{stat.value}</p><p className="mt-1 text-xs text-zinc-500">{stat.label}</p></Card></motion.div>; })}</div><div className="mt-6 grid gap-6 xl:grid-cols-[1.55fr_1fr]"><Card className="overflow-hidden p-0"><div className="flex items-center justify-between border-b border-white/10 p-6"><div><h2 className="text-lg font-medium text-zinc-100">Recent executions</h2><p className="mt-1 text-xs text-zinc-600">The last few moments in your automation layer.</p></div><Link href="/executions" className="flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200">View all <ArrowUpRight className="h-3.5 w-3.5" /></Link></div><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left"><thead className="border-b border-white/10 text-[10px] font-medium uppercase tracking-wider text-zinc-600"><tr><th className="px-6 py-3">Workflow</th><th className="px-6 py-3">Status</th><th className="px-6 py-3">Trigger</th><th className="px-6 py-3">Duration</th><th className="px-6 py-3">Started</th></tr></thead><tbody className="divide-y divide-white/5">{mockExecutions.slice(0, 5).map((execution) => <tr key={execution.id} className="transition-colors hover:bg-white/[0.02]"><td className="px-6 py-4"><Link href={`/executions/${execution.id}`} className="text-sm font-medium text-zinc-300 hover:text-white">{execution.workflow}</Link><p className="mt-0.5 font-mono text-[10px] text-zinc-700">{execution.id}</p></td><td className="px-6 py-4"><Badge status={statusFor(execution.status)}>{statusLabel(execution.status)}</Badge></td><td className="px-6 py-4 text-xs text-zinc-500">{execution.trigger}</td><td className="px-6 py-4 font-mono text-xs text-zinc-500">{execution.duration}</td><td className="px-6 py-4 text-xs text-zinc-600">{formatRelativeTime(execution.startedAt)}</td></tr>)}</tbody></table></div></Card><Card><div className="flex items-start justify-between"><div><h2 className="text-lg font-medium text-zinc-100">Usage this month</h2><p className="mt-1 text-xs text-zinc-600">Your Pro workspace allowance.</p></div><span className="rounded-lg bg-violet-500/10 px-2 py-1 text-xs font-medium text-violet-300">Pro</span></div><div className="mt-8"><Progress value={71} label="Executions" helper="7,120 / 10,000" /></div><div className="mt-8 space-y-4 border-t border-white/10 pt-5"><div className="flex items-center justify-between text-sm"><span className="text-zinc-500">Active workflows</span><span className="text-zinc-200">12 / unlimited</span></div><div className="flex items-center justify-between text-sm"><span className="text-zinc-500">Team members</span><span className="text-zinc-200">8 / 15</span></div><div className="flex items-center justify-between text-sm"><span className="text-zinc-500">Next invoice</span><span className="text-zinc-200">Sep 01, 2026</span></div></div><Link href="/settings" className="mt-7 flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700">Manage usage <ArrowUpRight className="h-3.5 w-3.5" /></Link></Card></div></div></AppLayout>;
+}

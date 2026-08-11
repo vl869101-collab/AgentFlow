@@ -1,0 +1,30 @@
+{
+  "name": "agentflow",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:api": "pnpm --filter @agentflow/api dev",
+    "dev:web": "pnpm --filter @agentflow/web dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "db:migrate": "pnpm --filter @agentflow/database db:migrate",
+    "db:push": "pnpm --filter @agentflow/database db:push",
+    "db:seed": "pnpm --filter @agentflow/database db:seed",
+    "db:studio": "pnpm --filter @agentflow/database db:studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.4.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

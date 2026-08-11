@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "incremental": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@agentflow/database": ["./packages/database/src"],
+      "@agentflow/shared": ["./packages/shared/src"],
+      "@agentflow/workflow-engine": ["./packages/workflow-engine/src"],
+      "@agentflow/integrations": ["./packages/integrations/src"],
+      "@agentflow/ai": ["./packages/ai/src"]
+    }
+  },
+  "exclude": ["node_modules", "dist", ".next"]
+}

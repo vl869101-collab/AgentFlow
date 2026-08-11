@@ -1,0 +1,52 @@
+import type { FastifyInstance } from "fastify";
+import { prisma } from "../lib/prisma.js";
+import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
+
+export async function executionRoutes(app: FastifyInstance) {
+  app.addHook("onRequest", requireAuth);
+
+  app.get("/", async (request) => {
+    const userId = userIdFromRequest(request);
+    return prisma.workflowExecution.findMany({
+      where: { userId },
+      include: { workflow: { select: { id: true, name: true } } },
+      orderBy: { startedAt: "desc" },
+      take: 100,
+    });
+  });
+
+  app.get("/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const execution = await prisma.workflowExecution.findFirst({
+      where: { id, userId },
+      include: { nodes: true, approvals: true, workflow: { select: { id: true, name: true } } },
+    });
+    if (!execution) return reply.code(404).send({ error: "Execution not found", code: "NOT_FOUND" });
+    return execution;
+  });
+
+  app.post("/:id/cancel", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const result = await prisma.workflowExecution.updateMany({
+      where: { id, userId, status: { in: ["PENDING", "RUNNING"] } },
+      data: { status: "CANCELLED", finishedAt: new Date() },
+    });
+    if (result.count === 0) return reply.code(404).send({ error: "Execution not found or not cancellable", code: "NOT_CANCELLABLE" });
+    return { ok: true };
+  });
+
+  // node-level execution logs
+  app.get("/:id/nodes", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const execution = await prisma.workflowExecution.findFirst({ where: { id, userId } });
+    if (!execution) return reply.code(404).send({ error: "Execution not found", code: "NOT_FOUND" });
+
+    return prisma.nodeExecution.findMany({
+      where: { executionId: id },
+      orderBy: { startedAt: "asc" },
+    });
+  });
+}
