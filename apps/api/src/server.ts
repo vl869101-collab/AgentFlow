@@ -20,6 +20,7 @@ import { orgRoutes } from "./routes/orgs.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { apiKeyRoutes } from "./routes/apikeys.js";
 import { oauthRoutes } from "./routes/oauth.js";
+import { docsRoutes } from "./docs/openapi.js";
 
 function parseTrustProxy(value: string): boolean | string[] {
   if (value === "true") return true;
@@ -96,6 +97,7 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
   await app.register(apiKeyRoutes, { prefix: "/api/api-keys" });
   await app.register(webhookRoutes, { prefix: "/api/webhooks" });
   await app.register(oauthRoutes, { prefix: "/api/auth" });
+  await app.register(docsRoutes);
 
   return app;
 }
