@@ -24,16 +24,20 @@ export interface NodeStyleTokens {
 const nodeStyles: Record<NodeTypeKey, NodeStyleTokens> = {
   webhook: { iconBg: "bg-indigo-500/10", iconColor: "text-indigo-400", borderColor: "border-l-indigo-500", badgeColor: "bg-indigo-500/10" },
   cron: { iconBg: "bg-violet-500/10", iconColor: "text-violet-400", borderColor: "border-l-violet-500", badgeColor: "bg-violet-500/10" },
-  http: { iconBg: "bg-cyan-500/10", iconColor: "text-cyan-400", borderColor: "border-l-cyan-500", badgeColor: "bg-cyan-500/10" },
-  email: { iconBg: "bg-emerald-500/10", iconColor: "text-emerald-400", borderColor: "border-l-emerald-500", badgeColor: "bg-emerald-500/10" },
+  http: { iconBg: "bg-cyan-500/10", iconColor: "text-cyan-400", borderColor: "border-l-cyan-400", badgeColor: "bg-cyan-500/10" },
+  email: { iconBg: "bg-emerald-500/10", iconColor: "text-emerald-400", borderColor: "border-l-emerald-400", badgeColor: "bg-emerald-500/10" },
   discord: { iconBg: "bg-[#5865f2]/10", iconColor: "text-[#5865f2]", borderColor: "border-l-[#5865f2]", badgeColor: "bg-[#5865f2]/10" },
   telegram: { iconBg: "bg-[#229ed9]/10", iconColor: "text-[#229ed9]", borderColor: "border-l-[#229ed9]", badgeColor: "bg-[#229ed9]/10" },
   sheets: { iconBg: "bg-[#34a853]/10", iconColor: "text-[#34a853]", borderColor: "border-l-[#34a853]", badgeColor: "bg-[#34a853]/10" },
-  condition: { iconBg: "bg-amber-500/10", iconColor: "text-amber-400", borderColor: "border-l-amber-500", badgeColor: "bg-amber-500/10" },
-  transform: { iconBg: "bg-pink-500/10", iconColor: "text-pink-400", borderColor: "border-l-pink-500", badgeColor: "bg-pink-500/10" },
-  delay: { iconBg: "bg-slate-500/10", iconColor: "text-slate-400", borderColor: "border-l-slate-500", badgeColor: "bg-slate-500/10" },
-  ai_agent: { iconBg: "bg-purple-500/10", iconColor: "text-purple-400", borderColor: "border-l-purple-500", badgeColor: "bg-purple-500/10" },
-  approval: { iconBg: "bg-red-500/10", iconColor: "text-red-400", borderColor: "border-l-red-500", badgeColor: "bg-red-500/10" },
+  condition: { iconBg: "bg-amber-500/10", iconColor: "text-amber-400", borderColor: "border-l-amber-400", badgeColor: "bg-amber-500/10" },
+  transform: { iconBg: "bg-pink-500/10", iconColor: "text-pink-400", borderColor: "border-l-pink-400", badgeColor: "bg-pink-500/10" },
+  delay: { iconBg: "bg-slate-500/10", iconColor: "text-slate-400", borderColor: "border-l-slate-400", badgeColor: "bg-slate-500/10" },
+  ai_agent: { iconBg: "bg-purple-500/10", iconColor: "text-purple-400", borderColor: "border-l-purple-400", badgeColor: "bg-purple-500/10" },
+  approval: { iconBg: "bg-red-500/10", iconColor: "text-red-400", borderColor: "border-l-red-400", badgeColor: "bg-red-500/10" },
+  merge: { iconBg: "bg-cyan-500/10", iconColor: "text-cyan-400", borderColor: "border-l-cyan-400", badgeColor: "bg-cyan-500/10" },
+  filter: { iconBg: "bg-amber-500/10", iconColor: "text-amber-400", borderColor: "border-l-amber-400", badgeColor: "bg-amber-500/10" },
+  set_fields: { iconBg: "bg-pink-500/10", iconColor: "text-pink-400", borderColor: "border-l-pink-400", badgeColor: "bg-pink-500/10" },
+  respond_webhook: { iconBg: "bg-indigo-500/10", iconColor: "text-indigo-400", borderColor: "border-l-indigo-400", badgeColor: "bg-indigo-500/10" },
 };
 
 export function getNodeMeta(type: NodeTypeKey) {
@@ -73,6 +77,10 @@ function defaultDescription(type: NodeTypeKey) {
     delay: "Pause before continuing",
     ai_agent: "Reason over context with an AI model",
     approval: "Wait for a human decision",
+    merge: "Combine data from multiple parallel branches",
+    filter: "Pass or block items based on a condition",
+    set_fields: "Add or override fields in the data",
+    respond_webhook: "Send a custom response back to the webhook source",
   };
   return descriptions[type];
 }
@@ -91,6 +99,10 @@ function defaultConfig(type: NodeTypeKey): Record<string, string | number | bool
     delay: { duration: 15, unit: "minutes" },
     ai_agent: { model: "nvidia/llama-3.1-70b-instruct", prompt: "Classify the order risk" },
     approval: { reviewers: "ops@northstar.dev", sla: 60 },
+    merge: { strategy: "combine" },
+    filter: { expression: "true" },
+    set_fields: { fieldName: "value" },
+    respond_webhook: { statusCode: 200, body: "OK" },
   };
   return configs[type];
 }

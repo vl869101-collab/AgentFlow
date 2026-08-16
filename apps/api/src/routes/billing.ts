@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import Stripe from "stripe";
 import { prisma } from "../lib/prisma.js";
+import { parsePagination } from "../lib/pagination.js";
 import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
 
 type StripeObject = Record<string, any>;
@@ -64,17 +65,6 @@ async function upsertSubscription(source: StripeObject) {
 }
 
 export async function billingRoutes(app: FastifyInstance) {
-  // Stripe signs raw JSON, so preserve it while still exposing parsed bodies to routes.
-  app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
-    const rawBody = typeof body === "string" ? body : body.toString("utf8");
-    (request as typeof request & { rawBody?: string }).rawBody = rawBody;
-    try {
-      done(null, JSON.parse(rawBody));
-    } catch (error) {
-      done(error as Error, undefined);
-    }
-  });
-
   app.get("/subscription", { preHandler: requireAuth }, async (request) => {
     const userId = userIdFromRequest(request);
     const sub = await prisma.subscription.findFirst({
@@ -84,28 +74,74 @@ export async function billingRoutes(app: FastifyInstance) {
     return sub ?? { status: "free" };
   });
 
-  app.get("/usage", { preHandler: requireAuth }, async (request) => {
+  app.get("/usage", { preHandler: requireAuth }, async (request, reply) => {
     const userId = userIdFromRequest(request);
     const records = await prisma.usageRecord.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
-      take: 50,
+      ...parsePagination(request, reply, 50),
     });
     return records;
   });
 
-  // ponytail: Stripe checkout stub — wire up real Stripe when key is set
-  app.post("/checkout", { preHandler: requireAuth }, async (request) => {
-    const { priceId } = request.body as { priceId: string };
+  app.post("/checkout", { preHandler: requireAuth, config: { rateLimit: { max: 10, timeWindow: "1 hour" } } }, async (request) => {
+    const { priceId } = request.body as { priceId?: unknown };
+    if (typeof priceId !== "string" || !priceId.trim()) {
+      throw Object.assign(new Error("priceId is required"), { statusCode: 400, code: "PRICE_REQUIRED" });
+    }
     const userId = userIdFromRequest(request);
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
 
     if (!process.env.STRIPE_SECRET_KEY) {
-      return { url: "#stripe-not-configured" };
+      throw Object.assign(new Error("Stripe checkout is not configured. Set STRIPE_SECRET_KEY."), {
+        statusCode: 503,
+        code: "STRIPE_NOT_CONFIGURED",
+      });
     }
 
-    // TODO: real Stripe checkout session
-    return { url: `https://checkout.stripe.com/pay/cs_stub_${user.id}_${priceId}` };
+    const configuredPrices = [
+      process.env.STRIPE_PRICE_ID_MONTHLY,
+      process.env.STRIPE_PRICE_ID_YEARLY,
+      process.env.STRIPE_PRICE_ID_PRO,
+      process.env.STRIPE_PRICE_ID_TEAM,
+    ].filter((value): value is string => Boolean(value));
+    if (configuredPrices.length > 0 && !configuredPrices.includes(priceId)) {
+      throw Object.assign(new Error("Unknown Stripe price"), { statusCode: 400, code: "INVALID_PRICE" });
+    }
+
+    const membership = await prisma.organizationMember.findFirst({ where: { userId } });
+    if (!membership) {
+      throw Object.assign(new Error("No organization found for user"), { statusCode: 400, code: "NO_ORG" });
+    }
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    let customerId = user.stripeCustomerId as string | null | undefined;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        name: user.name ?? undefined,
+        metadata: { userId, orgId: membership.orgId },
+      });
+      customerId = customer.id;
+      await prisma.user.update({ where: { id: userId }, data: { stripeCustomerId: customerId } });
+    }
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      client_reference_id: userId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${appUrl}/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/billing?checkout=cancelled`,
+      metadata: { userId, orgId: membership.orgId, priceId },
+      subscription_data: { metadata: { userId, orgId: membership.orgId, priceId } },
+    });
+
+    if (!session.url) {
+      throw Object.assign(new Error("Stripe did not return a checkout URL"), { statusCode: 502, code: "STRIPE_NO_URL" });
+    }
+    return { url: session.url, sessionId: session.id };
   });
 
   app.post("/webhook", async (request, reply) => {

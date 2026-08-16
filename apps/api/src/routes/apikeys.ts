@@ -17,14 +17,20 @@ export async function apiKeyRoutes(app: FastifyInstance) {
 
   app.post("/", async (request, reply) => {
     const userId = userIdFromRequest(request);
-    const { name, expiresAt } = request.body as { name: string; expiresAt?: string };
+    const { name, expiresAt } = request.body as { name?: unknown; expiresAt?: string };
+    if (typeof name !== "string" || name.trim().length < 1 || name.length > 100) {
+      return reply.code(400).send({ error: "A valid key name is required", code: "INVALID_NAME" });
+    }
+    if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) {
+      return reply.code(400).send({ error: "expiresAt must be a valid date", code: "INVALID_EXPIRY" });
+    }
 
-    // ponytail: generate a prefixed API key
     const key = `af_${crypto.randomBytes(32).toString("hex")}`;
+    const keyHash = crypto.createHash("sha256").update(key).digest("hex");
     const apiKey = await prisma.apiKey.create({
       data: {
-        name,
-        key,
+        name: name.trim(),
+        key: keyHash,
         expiresAt: expiresAt ? new Date(expiresAt) : null,
         userId,
       },

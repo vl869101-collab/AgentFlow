@@ -1,7 +1,13 @@
 ﻿import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../middleware/auth.js";
+import { generatedWorkflowSchema } from "@agentflow/shared";
+import { z } from "zod";
 
 const NIM_BASE = process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1";
+
+const generateRequestSchema = z.object({
+  prompt: z.string().trim().min(1).max(5000),
+});
 
 const SYSTEM_PROMPT = `You are a workflow generator for AgentFlow. Given a user description, generate a valid workflow JSON.
 
@@ -36,40 +42,72 @@ Layout nodes vertically with 250px spacing. Return ONLY the JSON.`;
 export async function aiRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
-  app.post("/generate", async (request, reply) => {
-    const { prompt } = request.body as { prompt: string };
-    if (!prompt) return reply.badRequest("prompt required");
+  app.post("/generate", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { prompt } = generateRequestSchema.parse(request.body);
 
     const apiKey = process.env.NVIDIA_NIM_API_KEY;
-    if (!apiKey) return reply.internalServerError("NVIDIA NIM API key not configured");
+    if (!apiKey) return reply.code(503).send({ error: "AI service unavailable", code: "AI_NOT_CONFIGURED" });
 
-    const res = await fetch(`${NIM_BASE}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: "meta/llama-3.1-8b-instruct",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: 2048,
-        temperature: 0.7,
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${NIM_BASE}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: "meta/llama-3.1-8b-instruct",
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: prompt },
+          ],
+          max_tokens: 2048,
+          temperature: 0.7,
+        }),
+      });
+    } catch (error) {
+      app.log.warn({ error }, "AI provider request failed");
+      return reply.code(502).send({ error: "AI provider unavailable", code: "AI_PROVIDER_ERROR" });
+    }
 
     if (!res.ok) {
-      const err = await res.text();
-      return reply.badGateway(`NIM error: ${err}`);
+      app.log.warn(
+        { statusCode: res.status, providerRequestId: res.headers.get("x-request-id") ?? undefined },
+        "AI provider returned an error",
+      );
+      return reply.code(502).send({ error: "AI provider unavailable", code: "AI_PROVIDER_ERROR" });
     }
 
-    const data = await res.json() as any;
-    const content: string = data.choices?.[0]?.message?.content ?? "";
-    const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    let data: unknown;
     try {
-      const wf = JSON.parse(jsonStr);
-      return { workflow: { name: wf.name, description: wf.description, nodes: wf.nodes, edges: wf.edges } };
-    } catch {
-      return { workflow: { name: "AI Generated Workflow", description: prompt.slice(0, 100), nodes: [], edges: [], raw: content } };
+      data = await res.json();
+    } catch (error) {
+      app.log.warn({ error }, "AI provider returned invalid JSON");
+      return reply.code(502).send({ error: "AI provider returned an invalid workflow", code: "AI_INVALID_OUTPUT" });
     }
+
+    const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      app.log.warn("AI provider response did not contain workflow content");
+      return reply.code(502).send({ error: "AI provider returned an invalid workflow", code: "AI_INVALID_OUTPUT" });
+    }
+
+    const jsonStr = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (error) {
+      app.log.warn({ error }, "AI provider returned non-JSON workflow content");
+      return reply.code(502).send({ error: "AI provider returned an invalid workflow", code: "AI_INVALID_OUTPUT" });
+    }
+
+    const validation = generatedWorkflowSchema.safeParse(parsed);
+    if (!validation.success) {
+      app.log.warn(
+        { issues: validation.error.issues.map(({ code, path }) => ({ code, path })) },
+        "AI provider returned a workflow that failed validation",
+      );
+      return reply.code(502).send({ error: "AI provider returned an invalid workflow", code: "AI_INVALID_OUTPUT" });
+    }
+
+    return { workflow: validation.data };
   });
 }

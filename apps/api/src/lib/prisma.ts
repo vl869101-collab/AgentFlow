@@ -1,4 +1,5 @@
 import { store } from "./store.js";
+import { PrismaClient } from "@prisma/client";
 
 // ponytail: global singleton, skip Prisma when no DATABASE_URL
 let prismaInstance: any;
@@ -12,8 +13,8 @@ function getPrisma() {
     return prismaInstance;
   }
 
-  // Real Prisma when DATABASE_URL is set
-  const { PrismaClient } = require("@prisma/client");
+  // Real Prisma when DATABASE_URL is set. Keep this import static because the
+  // API is ESM and CommonJS require() is not available at runtime.
   const globalForPrisma = globalThis as unknown as { prisma: any };
   prismaInstance = globalForPrisma.prisma ?? new PrismaClient();
   if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prismaInstance;

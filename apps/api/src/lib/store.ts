@@ -15,6 +15,9 @@ export const users = new Map<string, any>();
 export const orgs = new Map<string, any>();
 export const orgMembers = new Map<string, any>();
 export const workflows = new Map<string, any>();
+export const workflowNodes = new Map<string, any>();
+export const workflowEdges = new Map<string, any>();
+export const workflowVersions = new Map<string, any>();
 export const executions = new Map<string, any>();
 export const nodeExecutions = new Map<string, any>();
 export const credentials = new Map<string, any>();
@@ -23,21 +26,30 @@ export const apiKeys = new Map<string, any>();
 export const webhooks = new Map<string, any>();
 export const subscriptions = new Map<string, any>();
 export const usageRecords = new Map<string, any>();
+export const refreshTokens = new Map<string, any>();
 
 // ── Helpers ─────────────────────────────────
-function find(table: Map<string, any>, where: any): any | null {
-  for (const v of table.values()) {
-    if (where.id !== undefined && v.id !== where.id) continue;
-    if (where.email !== undefined && v.email !== where.email) continue;
-    if (where.stripeCustomerId !== undefined && v.stripeCustomerId !== where.stripeCustomerId) continue;
-    if (where.stripeSubscriptionId !== undefined && v.stripeSubscriptionId !== where.stripeSubscriptionId) continue;
-    if (where.slug !== undefined && v.slug !== where.slug) continue;
-    if (where.path !== undefined && v.path !== where.path) continue;
-    if (where.userId !== undefined && v.userId !== where.userId) continue;
-    if (where.orgId !== undefined && v.orgId !== where.orgId) continue;
-    if (where.workflowId !== undefined && v.workflowId !== where.workflowId) continue;
-    return v;
+function matches(value: any, where: any): boolean {
+  if (!where) return true;
+  for (const [key, expected] of Object.entries(where)) {
+    if (expected === undefined) continue;
+    if (expected && typeof expected === "object") {
+      const condition = expected as any;
+      if (Array.isArray(condition.in) && !condition.in.includes(value[key])) return false;
+      if (condition.gte !== undefined && new Date(value[key]) < new Date(condition.gte)) return false;
+      if (condition.gt !== undefined && !(value[key] > condition.gt)) return false;
+      if (condition.lte !== undefined && new Date(value[key]) > new Date(condition.lte)) return false;
+      if (condition.lt !== undefined && !(value[key] < condition.lt)) return false;
+      if (condition.not !== undefined && value[key] === condition.not) return false;
+      if (condition.in || condition.gte !== undefined || condition.gt !== undefined || condition.lte !== undefined || condition.lt !== undefined || condition.not !== undefined) continue;
+    }
+    if (value[key] !== expected) return false;
   }
+  return true;
+}
+
+function find(table: Map<string, any>, where: any): any | null {
+  for (const value of table.values()) if (matches(value, where)) return value;
   return null;
 }
 
@@ -46,12 +58,28 @@ function findMany<T>(table: Map<string, T>, where?: any): T[] {
   if (!where) return result;
   for (const [key, val] of Object.entries(where)) {
     if (val === undefined) continue;
-    result = result.filter((v: any) => {
-      if (val && typeof val === "object" && "gte" in val) {
-        return new Date(v[key]) >= new Date((val as any).gte);
-      }
-      return v[key] === val;
-    });
+    result = result.filter((v: any) => matches(v, { [key]: val }));
+  }
+  return result;
+}
+
+function project(value: any, select?: Record<string, boolean>): any {
+  if (!select) return value;
+  const result: any = {};
+  for (const [key, enabled] of Object.entries(select)) if (enabled) result[key] = value[key];
+  return result;
+}
+
+function withWorkflowRelations(workflow: any, include?: any): any {
+  if (!workflow || !include) return workflow;
+  const result = { ...workflow };
+  if (include.nodes) result.nodes = Array.from(workflowNodes.values()).filter((node) => node.workflowId === workflow.id);
+  if (include.edges) result.edges = Array.from(workflowEdges.values()).filter((edge) => edge.workflowId === workflow.id);
+  if (include.versions) {
+    result.versions = Array.from(workflowVersions.values())
+      .filter((version) => version.workflowId === workflow.id)
+      .sort((a, b) => b.version - a.version)
+      .slice(0, include.versions.take ?? undefined);
   }
   return result;
 }
@@ -59,13 +87,14 @@ function findMany<T>(table: Map<string, T>, where?: any): T[] {
 // ── Mock Prisma Client ──────────────────────
 export const store = {
   user: {
-    async findUnique({ where }: { where: any }) {
-      return find(users, where);
+    async findUnique({ where, select }: { where: any; select?: Record<string, boolean> }) {
+      const user = find(users, where);
+      return project(user, select);
     },
-    async findUniqueOrThrow({ where }: { where: any }) {
+    async findUniqueOrThrow({ where, select }: { where: any; select?: Record<string, boolean> }) {
       const u = find(users, where);
       if (!u) throw new Error("Record not found");
-      return u;
+      return project(u, select);
     },
     async create({ data }: { data: any }) {
       const user = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };
@@ -81,8 +110,12 @@ export const store = {
   },
 
   organization: {
-    async findUnique({ where }: { where: any }) {
-      return find(orgs, where);
+    async findUnique({ where, include }: { where: any; include?: any }) {
+      const org = find(orgs, where);
+      if (!org || !include) return org;
+      const result = { ...org };
+      if (include.members) result.members = Array.from(orgMembers.values()).filter((member) => member.orgId === org.id);
+      return result;
     },
     async create({ data }: { data: any }) {
       const { members, ...rest } = data;
@@ -109,6 +142,7 @@ export const store = {
       if (m && include?.org) {
         m.org = find(orgs, { id: m.orgId });
       }
+      if (m && include?.user) m.user = project(find(users, { id: m.userId }), include.user.select);
       return m;
     },
     async findUnique({ where }: { where: any }) {
@@ -130,19 +164,26 @@ export const store = {
   },
 
   workflow: {
-    async findMany({ where, orderBy, include }: { where?: any; orderBy?: any; include?: any } = {}) {
+    async count({ where }: { where?: any } = {}) {
+      return findMany(workflows, where).length;
+    },
+    async findMany({ where, orderBy, include, skip = 0, take }: { where?: any; orderBy?: any; include?: any; skip?: number; take?: number } = {}) {
       let result = findMany(workflows, where);
       if (orderBy?.updatedAt === "desc") result.sort((a: any, b: any) => b.updatedAt.localeCompare(a.updatedAt));
+      if (take !== undefined) result = result.slice(skip, skip + take);
+      result = result.map((workflow) => withWorkflowRelations(workflow, include));
       if (include?.owner) {
         result = result.map((w: any) => ({ ...w, owner: find(users, { id: w.ownerId }) }));
       }
       return result;
     },
-    async findFirst({ where }: { where: any }) {
+    async findFirst({ where, include }: { where: any; include?: any }) {
       // ponytail: handle nested where like { id, owner: { id } }
-      let result = findMany(workflows, { id: where.id });
+      const scalarWhere = { ...where };
+      delete scalarWhere.owner;
+      let result = findMany(workflows, scalarWhere);
       if (where.owner?.id) result = result.filter((w: any) => w.ownerId === where.owner.id);
-      return result[0] ?? null;
+      return withWorkflowRelations(result[0], include);
     },
     async create({ data }: { data: any }) {
       const wf = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };
@@ -158,8 +199,7 @@ export const store = {
     async updateMany({ where, data }: { where: any; data: any }) {
       let count = 0;
       for (const w of workflows.values()) {
-        if (where.id && w.id !== where.id) continue;
-        if (where.ownerId && w.ownerId !== where.ownerId) continue;
+        if (!matches(w, where)) continue;
         Object.assign(w, data, { updatedAt: now() });
         count++;
       }
@@ -168,12 +208,81 @@ export const store = {
     async deleteMany({ where }: { where: any }) {
       let count = 0;
       for (const [id, w] of workflows) {
-        if (where.id && w.id !== where.id) continue;
-        if (where.ownerId && w.ownerId !== where.ownerId) continue;
+        if (!matches(w, where)) continue;
         workflows.delete(id);
+        for (const [nodeId, node] of workflowNodes) if (node.workflowId === id) workflowNodes.delete(nodeId);
+        for (const [edgeId, edge] of workflowEdges) if (edge.workflowId === id) workflowEdges.delete(edgeId);
+        for (const [versionId, version] of workflowVersions) if (version.workflowId === id) workflowVersions.delete(versionId);
         count++;
       }
       return { count };
+    },
+  },
+
+  workflowNode: {
+    async findMany({ where }: { where?: any } = {}) {
+      return findMany(workflowNodes, where);
+    },
+    async create({ data }: { data: any }) {
+      const node = { id: data.id ?? cuid(), ...data };
+      workflowNodes.set(node.id, node);
+      return node;
+    },
+    async createMany({ data }: { data: any[] }) {
+      for (const item of data) {
+        const node = { id: item.id ?? cuid(), ...item };
+        workflowNodes.set(node.id, node);
+      }
+      return { count: data.length };
+    },
+    async deleteMany({ where }: { where: any }) {
+      let count = 0;
+      for (const [id, node] of workflowNodes) {
+        if (!matches(node, where)) continue;
+        workflowNodes.delete(id);
+        count++;
+      }
+      return { count };
+    },
+  },
+
+  workflowEdge: {
+    async findMany({ where }: { where?: any } = {}) {
+      return findMany(workflowEdges, where);
+    },
+    async create({ data }: { data: any }) {
+      const edge = { id: data.id ?? cuid(), ...data };
+      workflowEdges.set(edge.id, edge);
+      return edge;
+    },
+    async createMany({ data }: { data: any[] }) {
+      for (const item of data) {
+        const edge = { id: item.id ?? cuid(), ...item };
+        workflowEdges.set(edge.id, edge);
+      }
+      return { count: data.length };
+    },
+    async deleteMany({ where }: { where: any }) {
+      let count = 0;
+      for (const [id, edge] of workflowEdges) {
+        if (!matches(edge, where)) continue;
+        workflowEdges.delete(id);
+        count++;
+      }
+      return { count };
+    },
+  },
+
+  workflowVersion: {
+    async findFirst({ where, orderBy }: { where?: any; orderBy?: any } = {}) {
+      const values = findMany(workflowVersions, where);
+      if (orderBy?.version === "desc") values.sort((a: any, b: any) => b.version - a.version);
+      return values[0] ?? null;
+    },
+    async create({ data }: { data: any }) {
+      const version = { id: cuid(), ...data, createdAt: now() };
+      workflowVersions.set(version.id, version);
+      return version;
     },
   },
 
@@ -183,9 +292,11 @@ export const store = {
       executions.set(ex.id, ex);
       return ex;
     },
-    async findMany({ where, orderBy }: { where?: any; orderBy?: any } = {}) {
+    async findMany({ where, orderBy, include, skip = 0, take }: { where?: any; orderBy?: any; include?: any; skip?: number; take?: number } = {}) {
       let result = findMany(executions, where);
       if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      if (take !== undefined) result = result.slice(skip, skip + take);
+      if (include?.workflow) result = result.map((execution: any) => ({ ...execution, workflow: find(workflows, { id: execution.workflowId }) }));
       return result;
     },
     async findFirst({ where }: { where: any }) {
@@ -194,10 +305,16 @@ export const store = {
     async findUnique({ where }: { where: any }) {
       return find(executions, where);
     },
+    async update({ where, data }: { where: any; data: any }) {
+      const execution = find(executions, where);
+      if (!execution) throw new Error("Record not found");
+      Object.assign(execution, data, { updatedAt: now() });
+      return execution;
+    },
     async updateMany({ where, data }: { where: any; data: any }) {
       let count = 0;
       for (const e of executions.values()) {
-        if (where.id && e.id !== where.id) continue;
+        if (!matches(e, where)) continue;
         Object.assign(e, data, { updatedAt: now() });
         count++;
       }
@@ -209,12 +326,24 @@ export const store = {
     async findMany({ where }: { where?: any }) {
       return findMany(nodeExecutions, where);
     },
+    async create({ data }: { data: any }) {
+      const nodeExecution = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };
+      nodeExecutions.set(nodeExecution.id, nodeExecution);
+      return nodeExecution;
+    },
+    async update({ where, data }: { where: any; data: any }) {
+      const nodeExecution = find(nodeExecutions, where);
+      if (!nodeExecution) throw new Error("Record not found");
+      Object.assign(nodeExecution, data, { updatedAt: now() });
+      return nodeExecution;
+    },
   },
 
   credential: {
-    async findMany({ where, orderBy }: { where?: any; orderBy?: any }) {
+    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
       let result = findMany(credentials, where);
       if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      if (take !== undefined) result = result.slice(skip, skip + take);
       return result;
     },
     async findFirst({ where }: { where: any }) {
@@ -232,9 +361,10 @@ export const store = {
   },
 
   approval: {
-    async findMany({ where, orderBy }: { where?: any; orderBy?: any }) {
+    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
       let result = findMany(approvals, where);
       if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      if (take !== undefined) result = result.slice(skip, skip + take);
       return result;
     },
     async updateMany({ where, data }: { where: any; data: any }) {
@@ -252,6 +382,9 @@ export const store = {
     async findMany({ where }: { where?: any }) {
       return findMany(apiKeys, where);
     },
+    async findUnique({ where }: { where: any }) {
+      return find(apiKeys, where);
+    },
     async create({ data }: { data: any }) {
       const key = { id: cuid(), ...data, createdAt: now() };
       apiKeys.set(key.id, key);
@@ -260,18 +393,27 @@ export const store = {
     async deleteMany({ where }: { where: any }) {
       let count = 0;
       for (const [id, k] of apiKeys) {
-        if (where.id && k.id !== where.id) continue;
-        if (where.userId && k.userId !== where.userId) continue;
+        if (!matches(k, where)) continue;
         apiKeys.delete(id);
         count++;
       }
       return { count };
     },
+    async update({ where, data }: { where: any; data: any }) {
+      const key = find(apiKeys, where);
+      if (!key) throw new Error("Record not found");
+      Object.assign(key, data);
+      return key;
+    },
   },
 
   webhook: {
-    async findMany({ where }: { where?: any }) {
-      return findMany(webhooks, where);
+    async findMany({ where, include, orderBy, skip = 0, take }: { where?: any; include?: any; orderBy?: any; skip?: number; take?: number }) {
+      let result = findMany(webhooks, where);
+      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      if (take !== undefined) result = result.slice(skip, skip + take);
+      if (include?.workflow) result = result.map((webhook: any) => ({ ...webhook, workflow: find(workflows, { id: webhook.workflowId }) }));
+      return result;
     },
     async findFirst({ where }: { where: any }) {
       return find(webhooks, where);
@@ -312,8 +454,10 @@ export const store = {
   },
 
   usageRecord: {
-    async findMany({ where }: { where?: any }) {
-      return findMany(usageRecords, where);
+    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
+      const result = findMany(usageRecords, where);
+      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      return take === undefined ? result : result.slice(skip, skip + take);
     },
     async create({ data }: { data: any }) {
       const record = { id: cuid(), ...data, createdAt: now() };
@@ -322,8 +466,37 @@ export const store = {
     },
   },
 
+  refreshToken: {
+    async findUnique({ where }: { where: any }) {
+      return find(refreshTokens, where);
+    },
+    async create({ data }: { data: any }) {
+      const token = { id: cuid(), ...data, createdAt: now() };
+      refreshTokens.set(token.id, token);
+      return token;
+    },
+    async updateMany({ where, data }: { where: any; data: any }) {
+      let count = 0;
+      for (const token of refreshTokens.values()) {
+        if (!matches(token, where)) continue;
+        Object.assign(token, data);
+        count++;
+      }
+      return { count };
+    },
+  },
+
+  $queryRaw: async () => [{ ok: 1 }],
+  $disconnect: async () => undefined,
+
   $transaction: async (fn: (tx: any) => Promise<any>) => {
     // ponytail: no real transactions, just proxy through
     return fn(store);
   },
 };
+
+export function resetStore() {
+  for (const table of [users, orgs, orgMembers, workflows, workflowNodes, workflowEdges, workflowVersions, executions, nodeExecutions, credentials, approvals, apiKeys, webhooks, subscriptions, usageRecords, refreshTokens]) {
+    table.clear();
+  }
+}

@@ -24,6 +24,7 @@ model User {
   memberships       OrganizationMember[]
   workflows         Workflow[]            @relation("WorkflowOwner")
   apiKeys           ApiKey[]
+  refreshTokens     RefreshToken[]
   executions        WorkflowExecution[]   @relation("ExecutionUser")
   approvals         Approval[]
   auditLogs         AuditLog[]
@@ -50,6 +51,8 @@ model Organization {
   usageRecords      UsageRecord[]
   subscriptions     Subscription[]
   auditLogs         AuditLog[]
+
+  @@index([plan])
 }
 
 model OrganizationMember {
@@ -63,6 +66,7 @@ model OrganizationMember {
   org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([userId, orgId])
+  @@index([orgId])
 }
 
 // ═══════════════════════════════════════════
@@ -87,6 +91,9 @@ model Workflow {
   nodes         WorkflowNode[]
   edges         WorkflowEdge[]
   webhooks      Webhook[]
+
+  @@index([orgId, updatedAt])
+  @@index([ownerId, updatedAt])
 }
 
 model WorkflowVersion {
@@ -99,6 +106,7 @@ model WorkflowVersion {
   workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@unique([workflowId, version])
+  @@index([workflowId, createdAt])
 }
 
 model WorkflowNode {
@@ -116,6 +124,8 @@ model WorkflowNode {
   sourceEdges WorkflowEdge[] @relation("EdgeSource")
   targetEdges WorkflowEdge[] @relation("EdgeTarget")
   executions  NodeExecution[]
+
+  @@index([workflowId])
 }
 
 model WorkflowEdge {
@@ -132,6 +142,10 @@ model WorkflowEdge {
 
   workflowId String
   workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+  @@index([sourceNodeId])
+  @@index([targetNodeId])
 }
 
 // ═══════════════════════════════════════════
@@ -158,6 +172,10 @@ model WorkflowExecution {
 
   nodes       NodeExecution[]
   approvals   Approval[]
+
+  @@index([orgId, startedAt])
+  @@index([workflowId, startedAt])
+  @@index([userId, startedAt])
 }
 
 model NodeExecution {
@@ -178,6 +196,8 @@ model NodeExecution {
 
   retryCount Int @default(0)
   idempotencyKey String? @unique
+
+  @@index([executionId, startedAt])
 }
 
 // ═══════════════════════════════════════════
@@ -195,6 +215,8 @@ model Credential {
 
   orgId String
   org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
 }
 
 model Integration {
@@ -226,6 +248,8 @@ model Webhook {
   workflow   Workflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
   orgId      String
   org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, active])
 }
 
 // ═══════════════════════════════════════════
@@ -242,9 +266,12 @@ model Approval {
 
   executionId String
   execution   WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
-  userId String @unique
+  userId String
   user   User @relation(fields: [userId], references: [id])
   approverId  String?
+
+  @@index([executionId, status])
+  @@index([userId, status])
 }
 
 // ═══════════════════════════════════════════
@@ -262,6 +289,9 @@ model UsageRecord {
   org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   userId String
   user   User @relation(fields: [userId], references: [id])
+
+  @@index([orgId, type, createdAt])
+  @@index([userId, type, createdAt])
 }
 
 model Subscription {
@@ -312,6 +342,24 @@ model ApiKey {
 
   userId String
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model RefreshToken {
+  id           String    @id @default(cuid())
+  jti          String    @unique
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedByJti String?
+  createdAt    DateTime  @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([userId, revokedAt])
 }
 
 // ═══════════════════════════════════════════
@@ -321,8 +369,9 @@ model ApiKey {
 enum Plan {
   FREE
   STARTER
+  BASIC
+  GROWTH
   PRO
-  ENTERPRISE
 }
 
 enum MemberRole {

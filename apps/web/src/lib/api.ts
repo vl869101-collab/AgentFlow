@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 interface ApiOptions {
   method?: string;
@@ -17,15 +17,42 @@ function getToken(): string | null {
   return localStorage.getItem("agentflow_token");
 }
 
-export function setToken(token: string) {
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("agentflow_refresh_token");
+}
+
+export function setToken(token: string, refreshToken?: string) {
   localStorage.setItem("agentflow_token", token);
+  if (refreshToken) localStorage.setItem("agentflow_refresh_token", refreshToken);
 }
 
 export function clearToken() {
   localStorage.removeItem("agentflow_token");
+  localStorage.removeItem("agentflow_refresh_token");
 }
 
-export async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise<T> {
+let isRefreshing = false;
+let refreshPromise: Promise<string> | null = null;
+
+async function tryRefreshToken(): Promise<string> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) throw new Error("No refresh token");
+
+  const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  if (!res.ok) throw new Error("Refresh failed");
+
+  const data = await res.json();
+  setToken(data.token, data.refreshToken);
+  return data.token;
+}
+
+async function requestWithRefresh<T>(path: string, options: ApiOptions = {}, attempt = 0): Promise<T> {
   const { method = "GET", body } = options;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getToken();
@@ -37,6 +64,34 @@ export async function api<T = unknown>(path: string, options: ApiOptions = {}): 
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  if (res.status === 401 && attempt === 0) {
+    try {
+      if (!isRefreshing) {
+        isRefreshing = true;
+        refreshPromise = tryRefreshToken();
+      }
+      const newToken = await refreshPromise;
+      headers.Authorization = `Bearer ${newToken}`;
+      const retryRes = await fetch(`${API_BASE}${path}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (!retryRes.ok) {
+        const text = await retryRes.text().catch(() => retryRes.statusText);
+        throw new ApiError(retryRes.status, text);
+      }
+      return retryRes.json();
+    } catch {
+      clearToken();
+      if (typeof window !== "undefined") window.location.href = "/login";
+      throw new ApiError(401, "Session expired");
+    } finally {
+      isRefreshing = false;
+      refreshPromise = null;
+    }
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new ApiError(res.status, text);
@@ -45,12 +100,18 @@ export async function api<T = unknown>(path: string, options: ApiOptions = {}): 
   return res.json();
 }
 
+export async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise<T> {
+  return requestWithRefresh<T>(path, options);
+}
+
 // Auth
 export const auth = {
   login: (email: string, password: string) =>
-    api<{ token: string }>("/api/auth/login", { method: "POST", body: { email, password } }),
+    api<{ token: string; refreshToken: string }>("/api/auth/login", { method: "POST", body: { email, password } }),
   register: (email: string, password: string, name: string) =>
-    api<{ token: string }>("/api/auth/register", { method: "POST", body: { email, password, name } }),
+    api<{ message: string }>("/api/auth/register", { method: "POST", body: { email, password, name } }),
+  logout: (refreshToken: string) =>
+    api<void>("/api/auth/logout", { method: "POST", body: { refreshToken } }),
 };
 
 // Workflows

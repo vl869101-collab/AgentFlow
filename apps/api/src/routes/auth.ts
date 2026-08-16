@@ -2,17 +2,33 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma.js";
 import { hashPassword, verifyPassword } from "../middleware/auth.js";
 import { signupSchema, loginSchema } from "@agentflow/shared";
+import { z } from "zod";
+import { InvalidRefreshTokenError, issueRefreshToken, revokeRefreshToken, rotateRefreshToken } from "../lib/refresh-tokens.js";
+
+const GENERIC_REGISTER_MESSAGE = "If registration can be completed, you can sign in with your credentials.";
+const refreshRequestSchema = z.object({ refreshToken: z.string().min(1).max(4096) });
+const refreshJwtSchema = z.object({ sub: z.string().min(1), type: z.string(), jti: z.string().min(1) });
 
 export async function authRoutes(app: FastifyInstance) {
-  app.post("/register", async (request, reply) => {
+  app.post("/register", { config: { rateLimit: { max: 10, timeWindow: "1 hour" } } }, async (request, reply) => {
     const body = signupSchema.parse(request.body);
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
-    if (existing) return reply.code(409).send({ error: "Email already registered", code: "EMAIL_EXISTS" });
+    if (existing) return reply.code(201).send({ message: GENERIC_REGISTER_MESSAGE });
 
     const passwordHash = await hashPassword(body.password);
-    const user = await prisma.user.create({
-      data: { email: body.email, name: body.name, passwordHash },
-    });
+    let user;
+    try {
+      user = await prisma.user.create({
+        data: { email: body.email, name: body.name, passwordHash },
+      });
+    } catch (error) {
+      // A concurrent registration can win the unique-email race. Keep the
+      // response indistinguishable from the already-existing-account path.
+      if ((error as { code?: string }).code === "P2002") {
+        return reply.code(201).send({ message: GENERIC_REGISTER_MESSAGE });
+      }
+      throw error;
+    }
 
     // ponytail: create default org for new user
     const slug = body.email.split("@")[0].toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -24,18 +40,10 @@ export async function authRoutes(app: FastifyInstance) {
       },
     });
 
-    const token = app.jwt.sign({ sub: user.id, email: user.email, orgId: org.id }, { expiresIn: "15m" });
-    const refreshToken = app.jwt.sign({ sub: user.id, type: "refresh" }, { expiresIn: "7d" });
-
-    return reply.code(201).send({
-      token,
-      refreshToken,
-      user: { id: user.id, email: user.email, name: user.name },
-      org: { id: org.id, name: org.name, slug: org.slug },
-    });
+    return reply.code(201).send({ message: GENERIC_REGISTER_MESSAGE });
   });
 
-  app.post("/login", async (request, reply) => {
+  app.post("/login", { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } }, async (request, reply) => {
     const body = loginSchema.parse(request.body);
     const user = await prisma.user.findUnique({ where: { email: body.email } });
     if (!user) return reply.code(401).send({ error: "Invalid credentials", code: "INVALID_CREDENTIALS" });
@@ -53,7 +61,7 @@ export async function authRoutes(app: FastifyInstance) {
       { sub: user.id, email: user.email, orgId: membership?.orgId },
       { expiresIn: "15m" },
     );
-    const refreshToken = app.jwt.sign({ sub: user.id, type: "refresh" }, { expiresIn: "7d" });
+    const refreshToken = await issueRefreshToken(app, user.id);
 
     return {
       token,
@@ -63,16 +71,16 @@ export async function authRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post("/refresh", async (request, reply) => {
-    const { refreshToken } = request.body as { refreshToken: string };
-    if (!refreshToken) return reply.code(400).send({ error: "refreshToken required", code: "MISSING_TOKEN" });
+  app.post("/refresh", { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (request, reply) => {
+    const { refreshToken } = refreshRequestSchema.parse(request.body);
 
     try {
-      const payload = app.jwt.verify<{ sub: string; type: string }>(refreshToken);
-      if (payload.type !== "refresh") return reply.code(401).send({ error: "Invalid token type", code: "INVALID_TOKEN" });
+      const payload = refreshJwtSchema.parse(app.jwt.verify(refreshToken));
 
       const user = await prisma.user.findUnique({ where: { id: payload.sub } });
-      if (!user) return reply.code(401).send({ error: "User not found", code: "USER_NOT_FOUND" });
+      if (!user) throw new InvalidRefreshTokenError();
+
+      const { refreshToken: newRefreshToken } = await rotateRefreshToken(app, payload, refreshToken);
 
       const membership = await prisma.organizationMember.findFirst({
         where: { userId: user.id },
@@ -82,7 +90,6 @@ export async function authRoutes(app: FastifyInstance) {
         { sub: user.id, email: user.email, orgId: membership?.orgId },
         { expiresIn: "15m" },
       );
-      const newRefreshToken = app.jwt.sign({ sub: user.id, type: "refresh" }, { expiresIn: "7d" });
 
       return { token, refreshToken: newRefreshToken };
     } catch {
@@ -90,7 +97,13 @@ export async function authRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/forgot-password", async (request) => {
+  app.post("/logout", { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (request, reply) => {
+    const parsed = refreshRequestSchema.safeParse(request.body);
+    if (parsed.success) await revokeRefreshToken(app, parsed.data.refreshToken);
+    return reply.code(204).send();
+  });
+
+  app.post("/forgot-password", { config: { rateLimit: { max: 5, timeWindow: "1 hour" } } }, async (request) => {
     const { email } = request.body as { email: string };
     // ponytail: send email in production, stub for MVP
     return { message: "If an account exists, a reset link was sent" };

@@ -8,8 +8,8 @@ import type { NodeTypeKey } from "@/lib/workflow";
 
 const paletteGroups = [
   { label: "Triggers", types: ["webhook", "cron"] },
-  { label: "Actions", types: ["http", "email", "discord", "telegram", "sheets"] },
-  { label: "Logic", types: ["condition", "transform", "delay"] },
+  { label: "Actions", types: ["http", "email", "discord", "telegram", "sheets", "respond_webhook"] },
+  { label: "Logic", types: ["condition", "transform", "delay", "merge", "filter", "set_fields"] },
   { label: "Advanced", types: ["ai_agent", "approval"] },
 ] as const;
 
@@ -26,6 +26,10 @@ const iconMap = {
   delay: "◌",
   ai_agent: "✦",
   approval: "✓",
+  merge: "⊕",
+  filter: "▽",
+  set_fields: "✎",
+  respond_webhook: "↩",
 } satisfies Record<NodeTypeKey, string>;
 
 const colorMap: Record<NodeTypeKey, string> = {
@@ -41,6 +45,10 @@ const colorMap: Record<NodeTypeKey, string> = {
   delay: "bg-slate-500/10 text-slate-400",
   ai_agent: "bg-purple-500/10 text-purple-400",
   approval: "bg-red-500/10 text-red-400",
+  merge: "bg-cyan-500/10 text-cyan-400",
+  filter: "bg-amber-500/10 text-amber-400",
+  set_fields: "bg-pink-500/10 text-pink-400",
+  respond_webhook: "bg-indigo-500/10 text-indigo-400",
 };
 
 export function NodePalette({ onAddNode }: { onAddNode?: (type: NodeTypeKey) => void }) {

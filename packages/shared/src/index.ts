@@ -33,22 +33,70 @@ export const inviteMemberSchema = z.object({
 // Workflow Schemas
 // ═══════════════════════════════════════════
 
+const workflowNodeTypeValues = [
+  // React Flow canvas categories used by the web app.
+  "trigger",
+  "action",
+  "logic",
+  "advanced",
+  // Persisted/executable node types.
+  "webhook",
+  "cron",
+  "manual",
+  "http",
+  "email",
+  "discord",
+  "telegram",
+  "sheets",
+  "ai",
+  "ai_agent",
+  "condition",
+  "transform",
+  "delay",
+  "code",
+  "output",
+  "approval",
+  "merge",
+  "filter",
+  "set_fields",
+  "respond_webhook",
+] as const;
+
+export const workflowNodeTypeSchema = z.enum(workflowNodeTypeValues);
+
 export const nodeConfigSchema = z.object({
-  type: z.string(),
+  id: z.string().min(1).max(200).optional(),
+  type: workflowNodeTypeSchema,
   label: z.string().optional(),
   config: z.record(z.unknown()).default({}),
+  data: z.record(z.unknown()).optional(),
   position: z.object({ x: z.number(), y: z.number() }).default({ x: 0, y: 0 }),
   width: z.number().optional(),
   height: z.number().optional(),
+}).passthrough().superRefine((node, ctx) => {
+  const nestedType = node.data?.type;
+  if (nestedType !== undefined && !workflowNodeTypeSchema.safeParse(nestedType).success) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Unsupported workflow node type",
+      path: ["data", "type"],
+    });
+  }
 });
 
 export const edgeConfigSchema = z.object({
-  sourceNodeId: z.string(),
-  targetNodeId: z.string(),
+  id: z.string().min(1).max(200).optional(),
+  sourceNodeId: z.string().optional(),
+  targetNodeId: z.string().optional(),
+  source: z.string().optional(),
+  target: z.string().optional(),
   sourceHandle: z.string().optional(),
   targetHandle: z.string().optional(),
   label: z.string().optional(),
-  condition: z.record(z.unknown()).optional(),
+  condition: z.unknown().optional(),
+}).passthrough().superRefine((edge, ctx) => {
+  if (!edge.sourceNodeId && !edge.source) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Edge source is required", path: ["source"] });
+  if (!edge.targetNodeId && !edge.target) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Edge target is required", path: ["target"] });
 });
 
 export const createWorkflowSchema = z.object({
@@ -65,6 +113,68 @@ export const updateWorkflowSchema = z.object({
 export const saveWorkflowCanvasSchema = z.object({
   nodes: z.array(nodeConfigSchema),
   edges: z.array(edgeConfigSchema),
+});
+
+const generatedNodeSchema = z.object({
+  id: z.string().min(1).max(200),
+  type: workflowNodeTypeSchema,
+  label: z.string().optional(),
+  config: z.record(z.unknown()).default({}),
+  data: z.record(z.unknown()).optional(),
+  position: z.object({ x: z.number(), y: z.number() }),
+  width: z.number().optional(),
+  height: z.number().optional(),
+}).superRefine((node, ctx) => {
+  const nestedType = node.data?.type;
+  if (nestedType !== undefined && !workflowNodeTypeSchema.safeParse(nestedType).success) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Unsupported workflow node type", path: ["data", "type"] });
+  }
+});
+
+const generatedEdgeSchema = z.object({
+  id: z.string().min(1).max(200),
+  sourceNodeId: z.string().optional(),
+  targetNodeId: z.string().optional(),
+  source: z.string().optional(),
+  target: z.string().optional(),
+  sourceHandle: z.string().optional(),
+  targetHandle: z.string().optional(),
+  label: z.string().optional(),
+  condition: z.unknown().optional(),
+}).superRefine((edge, ctx) => {
+  if (!edge.sourceNodeId && !edge.source) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Edge source is required", path: ["source"] });
+  if (!edge.targetNodeId && !edge.target) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Edge target is required", path: ["target"] });
+});
+
+export const generatedWorkflowSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().min(1).max(2000),
+  nodes: z.array(generatedNodeSchema).min(1).max(100),
+  edges: z.array(generatedEdgeSchema).max(200),
+}).superRefine((workflow, ctx) => {
+  const nodeIds = new Set<string>();
+
+  workflow.nodes.forEach((node, index) => {
+    if (!node.id) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Generated nodes must have ids", path: ["nodes", index, "id"] });
+      return;
+    }
+    if (nodeIds.has(node.id)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Generated node ids must be unique", path: ["nodes", index, "id"] });
+    }
+    nodeIds.add(node.id);
+  });
+
+  workflow.edges.forEach((edge, index) => {
+    const source = edge.sourceNodeId ?? edge.source;
+    const target = edge.targetNodeId ?? edge.target;
+    if (source && !nodeIds.has(source)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Edge references an unknown source node", path: ["edges", index, "source"] });
+    }
+    if (target && !nodeIds.has(target)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Edge references an unknown target node", path: ["edges", index, "target"] });
+    }
+  });
 });
 
 // ═══════════════════════════════════════════
@@ -92,7 +202,7 @@ export const createCredentialSchema = z.object({
 // ═══════════════════════════════════════════
 
 export const createWebhookSchema = z.object({
-  path: z.string().min(1).max(200).regex(/^[a-z0-9-/]+$/),
+  path: z.string().min(1).max(200).regex(/^[a-z0-9][a-z0-9-/]*$/),
   method: z.enum(["GET", "POST", "PUT", "DELETE"]).default("POST"),
   workflowId: z.string().optional(),
   secret: z.string().optional(),
@@ -167,4 +277,8 @@ export const NODE_TYPES = [
   { type: "delay", label: "Delay", icon: "Timer", color: "#64748b" },
   { type: "ai_agent", label: "AI Agent", icon: "Brain", color: "#a855f7" },
   { type: "approval", label: "Approval", icon: "CheckCircle", color: "#ef4444" },
+  { type: "merge", label: "Merge", icon: "Merge", color: "#06b6d4" },
+  { type: "filter", label: "Filter", icon: "Filter", color: "#f97316" },
+  { type: "set_fields", label: "Set Fields", icon: "Pencil", color: "#14b8a6" },
+  { type: "respond_webhook", label: "Respond Webhook", icon: "Reply", color: "#8b5cf6" },
 ] as const;

@@ -19,8 +19,8 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const { token } = await auth.login(form.email, form.password);
-      setToken(token);
+      const { token, refreshToken } = await auth.login(form.email, form.password);
+      setToken(token, refreshToken);
       window.location.href = "/dashboard";
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Login failed");

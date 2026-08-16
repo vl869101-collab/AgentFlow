@@ -5,9 +5,10 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 const plans = [
-  { name: "Starter", price: "$0", detail: "For curious builders", description: "Everything you need to automate your first process.", features: ["3 active workflows", "500 executions / month", "Core integrations", "Community support"], featured: false },
-  { name: "Pro", price: "$39", detail: "Per user / month", description: "For teams building a reliable automation layer.", features: ["Unlimited workflows", "10,000 executions / month", "AI agents + approvals", "Execution replay", "Priority support"], featured: true },
-  { name: "Scale", price: "Let’s talk", detail: "For growing operations", description: "Governance and capacity for your most important work.", features: ["Unlimited executions", "SSO and audit logs", "Custom integrations", "Dedicated support"], featured: false },
+  { name: "Starter", price: "$0", detail: "For curious builders", description: "Everything you need to automate your first process.", features: ["1 workflow", "100 executions / month", "Webhook, HTTP and email integrations", "Workflow templates", "Community support"], featured: false },
+  { name: "Basic", price: "$9", detail: "Per month", description: "A practical step up for dependable personal automation.", features: ["3 workflows", "500 executions / month", "Core integrations", "Workflow templates", "Email support"], featured: false },
+  { name: "Growth", price: "$19", detail: "Per month", description: "More capacity for growing automation workloads.", features: ["10 workflows", "2,000 executions / month", "Advanced integrations", "Execution history", "Priority support"], featured: false },
+  { name: "Pro", price: "$39", detail: "Per user / month", description: "For teams building a reliable automation layer.", features: ["Unlimited executions / month", "Unlimited workflows", "All integrations", "AI agents + approvals", "Execution replay", "Advanced analytics", "Priority support"], featured: true },
 ];
 
 export function Pricing() {

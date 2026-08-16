@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { prisma } from "../lib/prisma.js";
+import { parsePagination } from "../lib/pagination.js";
 import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
 
 export async function approvalRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
-  app.get("/", async (request) => {
+  app.get("/", async (request, reply) => {
     const userId = userIdFromRequest(request);
     const memberships = await prisma.organizationMember.findMany({
       where: { userId },
@@ -18,6 +19,7 @@ export async function approvalRoutes(app: FastifyInstance) {
       where: { status: "PENDING", execution: { orgId: { in: orgIds } } },
       include: { execution: { include: { workflow: { select: { id: true, name: true } } } } },
       orderBy: { createdAt: "desc" },
+      ...parsePagination(request, reply),
     });
   });
 

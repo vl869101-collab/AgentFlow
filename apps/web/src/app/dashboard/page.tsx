@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Activity, ArrowUpRight, CheckCircle2, Clock3, Play, Workflow as WorkflowIcon, Sparkles } from "lucide-react";
@@ -25,18 +26,27 @@ function statusLabel(status: string) {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [aiOpen, setAiOpen] = useState(false);
   const [wfList, setWfList] = useState<Workflow[]>([]);
   const [exList, setExList] = useState<Execution[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && !localStorage.getItem("agentflow_token")) {
+      router.replace("/login");
+      return;
+    }
+    setAuthed(true);
     Promise.all([workflowsApi.list(), executionsApi.list()]).then(([wfs, exs]) => {
       setWfList(wfs);
       setExList(exs);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
+
+  if (!authed) return null;
 
   const activeWorkflows = wfList.filter((w) => w.status === "ACTIVE").length;
   const totalExecutions = exList.length;

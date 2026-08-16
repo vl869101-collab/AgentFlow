@@ -87,17 +87,22 @@ export async function orgRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: "Insufficient permissions", code: "FORBIDDEN" });
     }
 
-    // find or create user by email
-    let invitee = await prisma.user.findUnique({ where: { email: body.email } });
-    if (!invitee) {
-      // ponytail: create placeholder account, send invite email in production
-      invitee = await prisma.user.create({
-        data: {
-          email: body.email,
-          name: body.email.split("@")[0],
-          passwordHash: "pending", // will be set when they sign up
-        },
-      });
+    // H-05: only OWNER may grant ADMIN. ADMIN inviters are capped at MEMBER/VIEWER.
+    let role = body.role as "ADMIN" | "MEMBER" | "VIEWER";
+    if (role === "ADMIN" && membership.role !== "OWNER") {
+      // Downgrade instead of rejecting so admins can still invite members
+      // without gaining the ability to mint peers with equal or higher privilege.
+      role = "MEMBER";
+    }
+
+    // find existing user by email — do NOT create placeholder accounts (H-05/H-04).
+    // Invites target registered users only; a real invite-email flow is a future
+    // enhancement (Invite entity). Creating disabled User rows here used to lock
+    // invitees out of registration (register → 409 EMAIL_EXISTS, login → 401).
+    const invitee = await prisma.user.findUnique({ where: { email: body.email } });
+    if (!invitee) return reply.code(404).send({ error: "User not found; ask them to register first", code: "USER_NOT_FOUND" });
+    if (invitee.passwordHash === "pending") {
+      return reply.code(409).send({ error: "User has a pending invite and cannot be invited again", code: "PENDING_INVITE" });
     }
 
     const existing = await prisma.organizationMember.findUnique({
@@ -106,9 +111,9 @@ export async function orgRoutes(app: FastifyInstance) {
     if (existing) return reply.code(409).send({ error: "Already a member", code: "ALREADY_MEMBER" });
 
     await prisma.organizationMember.create({
-      data: { userId: invitee.id, orgId: id, role: body.role as any },
+      data: { userId: invitee.id, orgId: id, role },
     });
 
-    return { ok: true };
+    return { ok: true, role };
   });
 }

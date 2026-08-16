@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUpRight, Clock3, MoreHorizontal, Plus, Search, Workflow as WorkflowIcon } from "lucide-react";
@@ -21,14 +22,21 @@ function workflowStatusLabel(status: string) {
 }
 
 export default function WorkflowsPage() {
+  const router = useRouter();
   const [data, setData] = useState<Workflow[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [newWorkflow, setNewWorkflow] = useState({ name: "", description: "" });
   const [loading, setLoading] = useState(true);
+  const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && !localStorage.getItem("agentflow_token")) {
+      router.replace("/login");
+      return;
+    }
+    setAuthed(true);
     workflows.list().then(setData).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -39,6 +47,8 @@ export default function WorkflowsPage() {
     ),
     [filter, query, data]
   );
+
+  if (!authed) return null;
 
   async function createWorkflow(event: React.FormEvent) {
     event.preventDefault();
