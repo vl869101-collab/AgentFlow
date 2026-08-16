@@ -127,7 +127,7 @@ export default function RegisterPage() {
         {message && <p role="status" className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-300">{message} <Link href="/login" className="font-medium underline">Sign in</Link></p>}
         {error && <p role="status" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">{error}</p>}
         <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? "Creating account..." : <>"Create account <ArrowRight className="h-4 w-4" /></>}
+          {loading ? "Creating account..." : <>&quot;Create account <ArrowRight className="h-4 w-4" /></>}
         </Button>
       </form>
     </AuthShell>

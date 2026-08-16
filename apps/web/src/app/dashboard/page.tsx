@@ -69,7 +69,7 @@ export default function DashboardPage() {
           <div>
             <p className="text-xs font-medium uppercase tracking-wider text-violet-400">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
             <h1 className="mt-2 text-4xl font-bold tracking-tight text-zinc-50">Dashboard</h1>
-            <p className="mt-2 text-sm text-zinc-500">Here's what your workspace has been moving.</p>
+            <p className="mt-2 text-sm text-zinc-500">Here&#39;s what your workspace has been moving.</p>
           </div>
           <div className="flex gap-3">
             <button onClick={() => setAiOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/10 hover:text-white">

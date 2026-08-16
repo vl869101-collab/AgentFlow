@@ -73,7 +73,7 @@ export default function LoginPage() {
         </div>
         {error && <p role="status" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">{error}</p>}
         <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? "Signing in..." : <>"Sign in <ArrowRight className="h-4 w-4" /></>}
+          {loading ? "Signing in..." : <>&quot;Sign in <ArrowRight className="h-4 w-4" /></>}
         </Button>
       </form>
     </AuthShell>

@@ -7,7 +7,7 @@
     "dev:api": "pnpm --filter @agentflow/api dev",
     "dev:web": "pnpm --filter @agentflow/web dev",
     "build": "turbo build",
-    "lint": "turbo lint",
+    "lint": "eslint apps packages",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "db:migrate": "pnpm --filter @agentflow/database db:migrate",
