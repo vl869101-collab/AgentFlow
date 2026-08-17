@@ -1,6 +1,6 @@
 {
-  "framework": "nextjs",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
   "buildCommand": "cd ../.. && pnpm --filter @agentflow/shared build && pnpm --filter @agentflow/web build",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "framework": "nextjs"
 }

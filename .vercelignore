@@ -1,0 +1,12 @@
+node_modules
+.git
+.vercel
+.next
+dist
+build
+*.md
+.env*
+.DS_Store
+apps/api
+packages/database
+packages/database/prisma/migrations
