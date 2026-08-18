@@ -18,7 +18,7 @@ const securityHeaders = [
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self'",
-      "script-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
       "style-src 'self' https://fonts.cdnfonts.com",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data: https://fonts.cdnfonts.com",
