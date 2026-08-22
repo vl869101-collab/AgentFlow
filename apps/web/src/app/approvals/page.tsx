@@ -53,9 +53,8 @@ export default function ApprovalsPage() {
       <div className="animate-in fade-in duration-300">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-red-400">Human decisions</p>
-            <h1 className="mt-2 text-4xl font-bold tracking-tight text-zinc-50">Approvals</h1>
-            <p className="mt-2 text-sm text-zinc-500">Review pending workflow decisions for your workspace.</p>
+            <h1 className="text-2xl font-semibold text-zinc-50">Approvals</h1>
+            <p className="mt-1 text-sm text-zinc-500">Review pending workflow approval requests</p>
           </div>
           <Badge status="warning">{data.length} pending</Badge>
         </div>
@@ -68,29 +67,30 @@ export default function ApprovalsPage() {
             const workflow = approval.execution?.workflow;
             const action = acting?.startsWith(`${approval.id}:`) ? acting.split(":")[1] : null;
             return (
-              <Card key={approval.id}>
+              <div key={approval.id} className="bg-n8n-panel border border-white/10 rounded-lg px-4 py-3">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base font-medium text-zinc-100">{approval.message || "Approval request"}</h2>
-                      <Badge status={badgeStatus(approval.status)}>{statusLabel(approval.status)}</Badge>
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-5 w-5 items-center justify-center rounded text-n8n-accent mt-0.5 flex-shrink-0">
+                      <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                     </div>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {workflow?.name || "Workflow execution"} · {new Date(approval.createdAt).toLocaleString()}
-                    </p>
+                    <div>
+                      <h2 className="text-sm font-medium text-zinc-50">{approval.message || "Approval request"}</h2>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {workflow?.name || "Workflow execution"} · {new Date(approval.createdAt).toLocaleString()}
+                      </p>
+                    </div>
                   </div>
-                  <span className="font-mono text-xs text-zinc-600">{approval.executionId}</span>
                 </div>
-                <pre className="mt-5 overflow-x-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-zinc-950/70 p-4 text-sm leading-6 text-zinc-400">{contextLabel(approval.context)}</pre>
-                <div className="mt-5 flex gap-2 sm:justify-end">
-                  <Button variant="danger" size="sm" onClick={() => decide(approval.id, "reject")} loading={action === "reject"} disabled={Boolean(acting)}>
+                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-zinc-950/70 p-4 text-sm leading-6 text-zinc-400">{contextLabel(approval.context)}</pre>
+                <div className="mt-3 flex gap-2 sm:justify-end">
+                  <Button size="sm" onClick={() => decide(approval.id, "reject")} loading={action === "reject"} disabled={Boolean(acting)} className="bg-white/5 text-zinc-400 hover:bg-white/10 rounded-md px-3 py-1.5 text-xs font-medium">
                     Reject
                   </Button>
-                  <Button size="sm" onClick={() => decide(approval.id, "approve")} loading={action === "approve"} disabled={Boolean(acting)}>
+                  <Button size="sm" onClick={() => decide(approval.id, "approve")} loading={action === "approve"} disabled={Boolean(acting)} className="bg-n8n-green/15 text-[#2ecc71] hover:bg-n8n-green/25 rounded-md px-3 py-1.5 text-xs font-medium">
                     Approve
                   </Button>
                 </div>
-              </Card>
+              </div>
             );
           }) : null}
         </div>
