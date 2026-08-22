@@ -2,34 +2,36 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpRight, Clock3, MoreHorizontal, Plus, Search, Workflow as WorkflowIcon } from "lucide-react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { ChevronDown, ListFilter, MoreVertical, Search, UserRound, Workflow as WorkflowIcon } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
-import { Select } from "@/components/ui/Select";
 import { workflows, type Workflow } from "@/lib/api";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatDate, formatRelativeTime } from "@/lib/utils";
 
-function workflowStatus(status: string): BadgeStatus {
-  return status === "ACTIVE" ? "success" : status === "PAUSED" ? "warning" : status === "DRAFT" ? "info" : "neutral";
+function statusDot(status: string) {
+  if (status === "ACTIVE") return "bg-n8n-green";
+  if (status === "PAUSED") return "bg-amber-500";
+  return "bg-zinc-500";
 }
-function workflowStatusLabel(status: string) {
-  return status.charAt(0) + status.slice(1).toLowerCase();
+
+function statusBadgeClass(status: string) {
+  if (status === "ACTIVE") return "bg-n8n-green/15 text-[#2ecc71] border border-n8n-green/20";
+  if (status === "PAUSED") return "bg-amber-500/15 text-amber-400 border border-amber-500/20";
+  if (status === "DRAFT") return "bg-white/10 text-zinc-400 border border-white/10";
+  return "bg-white/10 text-zinc-500 border border-white/10";
 }
 
 export default function WorkflowsPage() {
   const router = useRouter();
   const [data, setData] = useState<Workflow[]>([]);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [newWorkflow, setNewWorkflow] = useState({ name: "", description: "" });
   const [loading, setLoading] = useState(true);
   const [authed, setAuthed] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined" && !localStorage.getItem("agentflow_token")) {
@@ -38,14 +40,19 @@ export default function WorkflowsPage() {
     }
     setAuthed(true);
     workflows.list().then(setData).catch(() => {}).finally(() => setLoading(false));
+  }, [router]);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(null);
+    }
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
   }, []);
 
   const filtered = useMemo(
-    () => data.filter((wf) =>
-      (filter === "all" || wf.status === filter) &&
-      `${wf.name} ${wf.description}`.toLowerCase().includes(query.toLowerCase())
-    ),
-    [filter, query, data]
+    () => data.filter((wf) => `${wf.name} ${wf.description}`.toLowerCase().includes(query.toLowerCase())),
+    [query, data]
   );
 
   if (!authed) return null;
@@ -61,11 +68,28 @@ export default function WorkflowsPage() {
     } catch {}
   }
 
+  async function handleToggle(id: string, current: string) {
+    const next = current === "ACTIVE" ? "PAUSED" : "ACTIVE";
+    try {
+      const updated = await workflows.update(id, { status: next });
+      setData((items) => items.map((w) => (w.id === id ? updated : w)));
+    } catch {}
+    setMenuOpen(null);
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await workflows.delete(id);
+      setData((items) => items.filter((w) => w.id !== id));
+    } catch {}
+    setMenuOpen(null);
+  }
+
   if (loading) {
     return (
       <AppLayout>
         <div className="flex items-center justify-center h-64">
-          <p className="text-zinc-500">Loading workflows...</p>
+          <p className="text-sm text-zinc-500">Loading workflows...</p>
         </div>
       </AppLayout>
     );
@@ -74,110 +98,159 @@ export default function WorkflowsPage() {
   return (
     <AppLayout>
       <div className="animate-in fade-in duration-300">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-violet-400">Automation library</p>
-            <h1 className="mt-2 text-4xl font-bold tracking-tight text-zinc-50">Workflows</h1>
-            <p className="mt-2 text-sm text-zinc-500">Design repeatable systems for the work your team does every day.</p>
+            <h1 className="text-2xl font-semibold text-zinc-50">Workflows</h1>
+            <p className="mt-1 text-sm text-zinc-500">Manage your automation workflows</p>
           </div>
-          <Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New workflow</Button>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="inline-flex items-center gap-2 rounded-md bg-n8n-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-n8n-accent-dark"
+          >
+            Create workflow <ChevronDown className="h-4 w-4" />
+          </button>
         </div>
 
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
+        <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
+          <label className="relative sm:w-64">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search workflows"
-              className="w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2.5 pl-10 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-transparent focus:ring-2 focus:ring-violet-500"
+              placeholder="Search"
+              className="w-full rounded-md border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-n8n-accent"
             />
-          </div>
-          <Select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            options={[
-              { value: "all", label: "All statuses" },
-              { value: "ACTIVE", label: "Active" },
-              { value: "DRAFT", label: "Draft" },
-              { value: "PAUSED", label: "Paused" },
-              { value: "ARCHIVED", label: "Archived" },
-            ]}
-            className="sm:w-44"
-          />
+          </label>
+          <select
+            defaultValue="updated"
+            className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-400 outline-none focus:border-n8n-accent"
+          >
+            <option value="updated">Sort by last updated</option>
+          </select>
+          <button
+            type="button"
+            aria-label="Filter workflows"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200"
+          >
+            <ListFilter className="h-4 w-4" />
+          </button>
         </div>
 
-        <div className="mt-6 grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          <AnimatePresence mode="popLayout">
-            {filtered.map((wf, index) => (
-              <motion.div
-                key={wf.id}
-                layout
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                transition={{ delay: index * 0.03 }}
+        <div className="mt-5 space-y-3">
+          {filtered.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-white/10 bg-n8n-panel px-6 py-12 text-center">
+              <p className="text-sm text-zinc-500">No workflows found.</p>
+              <button
+                onClick={() => setCreateOpen(true)}
+                className="mt-4 inline-flex items-center rounded-md bg-n8n-accent px-4 py-2 text-sm font-medium text-white hover:bg-n8n-accent-dark"
               >
-                <Card className="group flex h-full flex-col transition-all duration-200 hover:scale-[1.02] hover:border-white/20">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">
-                      <WorkflowIcon className="h-4 w-4" />
-                    </div>
-                    <Badge status={workflowStatus(wf.status)}>{workflowStatusLabel(wf.status)}</Badge>
-                  </div>
-                  <Link href={`/workflows/${wf.id}/editor`} className="mt-5 text-base font-medium text-zinc-100 hover:text-violet-300">
-                    {wf.name}
-                  </Link>
-                  <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-zinc-500">{wf.description}</p>
-                  <div className="mt-auto flex items-center justify-between pt-5 text-xs text-zinc-600">
-                    <span className="flex items-center gap-1.5">
-                      <Clock3 className="h-3.5 w-3.5" />{formatRelativeTime(wf.updatedAt)}
-                    </span>
-                  </div>
-                  <Link
-                    href={`/workflows/${wf.id}/editor`}
-                    className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 opacity-0 transition-all duration-200 group-hover:opacity-100 hover:bg-zinc-700"
+                Create workflow
+              </button>
+            </div>
+          ) : (
+            filtered.map((wf) => (
+              <div
+                key={wf.id}
+                className="group flex items-center gap-3 rounded-lg border border-white/10 bg-n8n-panel px-4 py-3 transition-colors hover:border-white/20"
+              >
+                <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-n8n-accent/10 text-n8n-accent">
+                  <WorkflowIcon className="h-4 w-4" />
+                  <span className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-n8n-panel ${statusDot(wf.status)}`} />
+                </span>
+                <Link href={`/workflows/${wf.id}/editor`} className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-zinc-50">{wf.name}</span>
+                  <span className="block truncate text-xs text-zinc-500">
+                    Last updated {formatRelativeTime(wf.updatedAt)} · Created {formatDate(wf.createdAt)}
+                  </span>
+                </Link>
+                <span className={`hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide sm:inline-block ${statusBadgeClass(wf.status)}`}>
+                  {wf.status}
+                </span>
+                <span className="hidden items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-xs text-zinc-300 sm:inline-flex">
+                  <UserRound className="h-3 w-3" /> Personal
+                </span>
+                <div className="relative" ref={menuOpen === wf.id ? menuRef : undefined}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen((v) => (v === wf.id ? null : wf.id));
+                    }}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
+                    aria-label="Workflow actions"
                   >
-                    Open editor <ArrowUpRight className="h-3.5 w-3.5" />
-                  </Link>
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                  {menuOpen === wf.id && (
+                    <div className="absolute right-0 top-9 z-10 w-44 rounded-md border border-white/10 bg-zinc-900 py-1 shadow-lg">
+                      <Link
+                        href={`/workflows/${wf.id}/editor`}
+                        className="block px-3 py-1.5 text-sm text-zinc-300 hover:bg-white/5"
+                        onClick={() => setMenuOpen(null)}
+                      >
+                        Open editor
+                      </Link>
+                      <button
+                        onClick={() => handleToggle(wf.id, wf.status)}
+                        className="block w-full px-3 py-1.5 text-left text-sm text-zinc-300 hover:bg-white/5"
+                      >
+                        {wf.status === "ACTIVE" ? "Pause" : "Activate"}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(wf.id)}
+                        className="block w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-white/5"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
         </div>
 
-        {filtered.length === 0 && (
-          <div className="mt-6 rounded-xl border border-dashed border-white/10 p-12 text-center text-sm text-zinc-600">
-            No workflows match those filters.
-          </div>
-        )}
+        <p className="mt-4 text-xs text-zinc-600">Total {filtered.length} workflows</p>
 
-        <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create workflow" description="Start with a clear name. You can shape the flow in the editor.">
+        <Modal
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          title="Create workflow"
+          description="Start with a clear name. You can shape the flow in the editor."
+        >
           <form onSubmit={createWorkflow} className="space-y-5">
             <div className="space-y-2">
-              <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Workflow name</label>
+              <label className="text-xs font-medium uppercase tracking-wider text-zinc-500">Workflow name</label>
               <input
                 value={newWorkflow.name}
                 onChange={(e) => setNewWorkflow({ ...newWorkflow, name: e.target.value })}
                 placeholder="e.g. Qualify inbound leads"
-                className="w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:ring-2 focus:ring-violet-500"
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-n8n-accent"
                 autoFocus
                 required
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Description</label>
+              <label className="text-xs font-medium uppercase tracking-wider text-zinc-500">Description</label>
               <textarea
                 value={newWorkflow.description}
                 onChange={(e) => setNewWorkflow({ ...newWorkflow, description: e.target.value })}
                 rows={4}
                 placeholder="What should this workflow accomplish?"
-                className="w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:ring-2 focus:ring-violet-500"
+                className="w-full resize-none rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-n8n-accent"
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
-              <Button type="submit">Create workflow</Button>
+              <button
+                type="button"
+                onClick={() => setCreateOpen(false)}
+                className="rounded-md px-4 py-2 text-sm text-zinc-400 hover:bg-white/5"
+              >
+                Cancel
+              </button>
+              <button type="submit" className="rounded-md bg-n8n-accent px-4 py-2 text-sm font-medium text-white hover:bg-n8n-accent-dark">
+                Create workflow
+              </button>
             </div>
           </form>
         </Modal>

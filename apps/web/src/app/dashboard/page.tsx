@@ -2,27 +2,16 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
-import { Activity, ArrowUpRight, CheckCircle2, Clock3, Play, Workflow as WorkflowIcon, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ListFilter, MoreVertical, Search, UserRound, Workflow as WorkflowIcon, Zap } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
-import { Card } from "@/components/ui/Card";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatDate, formatRelativeTime } from "@/lib/utils";
 import { workflows as workflowsApi, executions as executionsApi, type Workflow, type Execution } from "@/lib/api";
 import { AIGeneratorModal } from "@/components/ai/AIGeneratorModal";
 
-const statTones = { indigo: "bg-indigo-500/10 text-indigo-300", green: "bg-green-500/10 text-green-300", violet: "bg-violet-500/10 text-violet-300", amber: "bg-amber-500/10 text-amber-300" } as const;
-
-function statusFor(status: string): BadgeStatus {
-  if (status === "SUCCESS") return "success";
-  if (status === "FAILED") return "error";
-  if (status === "RUNNING" || status === "WAITING_APPROVAL") return "warning";
-  return "neutral";
-}
-
-function statusLabel(status: string) {
-  return status === "WAITING_APPROVAL" ? "Waiting approval" : status.charAt(0) + status.slice(1).toLowerCase();
+function formatDuration(milliseconds: number) {
+  if (milliseconds < 1000) return `${milliseconds}ms`;
+  return `${Math.round(milliseconds / 100) / 10}s`;
 }
 
 export default function DashboardPage() {
@@ -30,6 +19,7 @@ export default function DashboardPage() {
   const [aiOpen, setAiOpen] = useState(false);
   const [wfList, setWfList] = useState<Workflow[]>([]);
   const [exList, setExList] = useState<Execution[]>([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [authed, setAuthed] = useState(false);
 
@@ -46,125 +36,104 @@ export default function DashboardPage() {
     }).catch(() => setLoading(false));
   }, []);
 
+  const filteredWorkflows = useMemo(
+    () => wfList.filter((workflow) => `${workflow.name} ${workflow.description}`.toLowerCase().includes(query.toLowerCase())),
+    [query, wfList]
+  );
+
   if (!authed) return null;
 
-  const activeWorkflows = wfList.filter((w) => w.status === "ACTIVE").length;
-  const totalExecutions = exList.length;
-  const successExecs = exList.filter((e) => e.status === "SUCCESS").length;
-  const successRate = totalExecutions > 0 ? Math.round((successExecs / totalExecutions) * 100) : 0;
-
+  const prodExecutions = exList.length;
+  const failedExecutions = exList.filter((execution) => execution.status === "FAILED").length;
+  const failureRate = prodExecutions > 0 ? Math.round((failedExecutions / prodExecutions) * 100) : 0;
+  const durations = exList.flatMap((execution) => execution.duration == null ? [] : [execution.duration]);
+  const averageDuration = durations.length > 0 ? durations.reduce((total, duration) => total + duration, 0) / durations.length : 0;
   const stats = [
-    { label: "Total workflows", value: String(wfList.length), delta: `+${activeWorkflows} active`, tone: "indigo" as const, icon: WorkflowIcon },
-    { label: "Total executions", value: String(totalExecutions), delta: `${successRate}% success`, tone: "green" as const, icon: CheckCircle2 },
-    { label: "Active workflows", value: String(activeWorkflows), delta: "", tone: "violet" as const, icon: Activity },
-    { label: "Success rate", value: `${successRate}%`, delta: "", tone: "amber" as const, icon: Clock3 },
+    { label: "Prod. executions", value: String(prodExecutions) },
+    { label: "Failed prod. executions", value: String(failedExecutions) },
+    { label: "Failure rate", value: `${failureRate}%` },
+    { label: "Time saved", value: "—" },
+    { label: "Run time avg.", value: averageDuration > 0 ? formatDuration(averageDuration) : "0s" },
   ];
-
-  const recentEx = exList.slice(0, 5);
 
   return (
     <AppLayout>
       <div className="animate-in fade-in duration-300">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-violet-400">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
-            <h1 className="mt-2 text-4xl font-bold tracking-tight text-zinc-50">Dashboard</h1>
-            <p className="mt-2 text-sm text-zinc-500">Here&#39;s what your workspace has been moving.</p>
+            <h1 className="text-2xl font-semibold text-zinc-50">Overview</h1>
+            <p className="mt-1 text-sm text-zinc-500">All the workflows, credentials and data tables you have access to</p>
           </div>
-          <div className="flex gap-3">
-            <button onClick={() => setAiOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/10 hover:text-white">
-              <Sparkles className="h-4 w-4" /> Generate with AI
-            </button>
-            <Link href="/workflows" className="inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90">
-              <Play className="h-4 w-4" /> Run a workflow
+          <div className="flex flex-wrap gap-3">
+            <Link href="/billing" className="inline-flex items-center gap-2 rounded-full bg-n8n-green px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90">
+              <Zap className="h-4 w-4" /> Upgrade Now
             </Link>
+            <button onClick={() => setAiOpen(true)} className="inline-flex items-center gap-2 rounded-md bg-n8n-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-n8n-accent-dark">
+              Create workflow <ChevronDown className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {stats.map((stat, index) => {
-            const Icon = stat.icon;
-            return (
-              <motion.div key={stat.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
-                <Card className="transition-all duration-200 hover:scale-[1.02] hover:border-white/20">
-                  <div className="flex items-start justify-between">
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${statTones[stat.tone]}`}><Icon className="h-4 w-4" /></div>
-                    {stat.delta && <span className="text-xs font-medium text-green-400">{stat.delta}</span>}
-                  </div>
-                  <p className="mt-5 text-2xl font-semibold tracking-tight text-zinc-50">{loading ? "—" : stat.value}</p>
-                  <p className="mt-1 text-xs text-zinc-500">{stat.label}</p>
-                </Card>
-              </motion.div>
-            );
-          })}
+        <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+          {stats.map((stat) => (
+            <div key={stat.label} className="rounded-lg border border-white/10 bg-n8n-panel p-4">
+              <p className="text-xs text-zinc-500">{stat.label}</p>
+              <p className="mt-2 text-xl font-semibold text-white">{loading ? "—" : stat.value}</p>
+            </div>
+          ))}
         </div>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1.55fr_1fr]">
-          <Card className="overflow-hidden p-0">
-            <div className="flex items-center justify-between border-b border-white/10 p-6">
-              <div>
-                <h2 className="text-lg font-medium text-zinc-100">Recent executions</h2>
-                <p className="mt-1 text-xs text-zinc-600">The last few moments in your automation layer.</p>
-              </div>
-              <Link href="/executions" className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors">
-                View all <ArrowUpRight className="h-3 w-3" />
-              </Link>
-            </div>
-            <div className="divide-y divide-white/5">
-              {loading ? (
-                <div className="py-12 text-center text-sm text-zinc-500">Loading...</div>
-              ) : recentEx.length === 0 ? (
-                <div className="py-12 text-center text-sm text-zinc-500">No executions yet.</div>
-              ) : (
-                recentEx.map((ex) => (
-                  <Link key={ex.id} href={`/executions/${ex.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-white/5 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <Badge status={statusFor(ex.status)}>{statusLabel(ex.status)}</Badge>
-                      <div>
-                        <p className="text-sm text-zinc-200">{ex.workflow?.name || "Workflow"}</p>
-                        <p className="text-xs text-zinc-600">{formatRelativeTime(ex.startedAt)}</p>
-                      </div>
-                    </div>
-                    {ex.duration != null && <span className="text-xs text-zinc-600">{ex.duration}ms</span>}
-                  </Link>
-                ))
-              )}
-            </div>
-          </Card>
-
-          <Card>
-            <div className="flex items-center justify-between border-b border-white/10 p-6">
-              <div>
-                <h2 className="text-lg font-medium text-zinc-100">Quick start</h2>
-                <p className="mt-1 text-xs text-zinc-600">Jump into your next automation.</p>
-              </div>
-            </div>
-            <div className="space-y-2 p-4">
-              <button onClick={() => setAiOpen(true)} className="w-full rounded-lg border border-dashed border-white/10 bg-white/5 p-4 text-left transition-colors hover:border-violet-500/30 hover:bg-violet-500/5 group">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-500/10">
-                    <Sparkles className="h-5 w-5 text-violet-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-zinc-200 group-hover:text-violet-300 transition-colors">Generate with AI</p>
-                    <p className="text-xs text-zinc-600">Describe your workflow and let AI build it</p>
-                  </div>
-                </div>
-              </button>
-              <Link href="/workflows" className="block w-full rounded-lg border border-dashed border-white/10 bg-white/5 p-4 text-left transition-colors hover:border-indigo-500/30 hover:bg-indigo-500/5 group">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/10">
-                    <WorkflowIcon className="h-5 w-5 text-indigo-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-zinc-200 group-hover:text-indigo-300 transition-colors">Start from scratch</p>
-                    <p className="text-xs text-zinc-600">Build a workflow step by step</p>
-                  </div>
-                </div>
-              </Link>
-            </div>
-          </Card>
+        <div className="mt-8 flex gap-6 overflow-x-auto border-b border-white/10 text-sm">
+          <span className="shrink-0 border-b-2 border-n8n-accent pb-3 font-medium text-n8n-accent">Workflows</span>
+          <Link href="/credentials" className="shrink-0 pb-3 text-zinc-400 transition-colors hover:text-zinc-200">Credentials</Link>
+          <Link href="/executions" className="shrink-0 pb-3 text-zinc-400 transition-colors hover:text-zinc-200">Executions</Link>
+          <span className="shrink-0 pb-3 text-zinc-400">Variables</span>
+          <span className="shrink-0 pb-3 text-zinc-400">Data tables</span>
         </div>
+
+        <div className="mt-5 flex flex-col justify-end gap-3 sm:flex-row">
+          <label className="relative sm:w-64">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search"
+              className="w-full rounded-md border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-n8n-accent"
+            />
+          </label>
+          <select defaultValue="updated" className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300 outline-none focus:border-n8n-accent">
+            <option value="updated">Sort by last updated</option>
+          </select>
+          <button type="button" aria-label="Filter workflows" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200">
+            <ListFilter className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {loading ? (
+            <div className="rounded-lg border border-white/10 bg-n8n-panel px-4 py-8 text-center text-sm text-zinc-500">Loading workflows...</div>
+          ) : filteredWorkflows.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-500">No workflows found.</div>
+          ) : (
+            filteredWorkflows.map((workflow) => (
+              <Link key={workflow.id} href={`/workflows/${workflow.id}/editor`} className="flex items-center gap-3 rounded-lg border border-white/10 bg-n8n-panel px-4 py-3 transition-colors hover:border-white/20">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-n8n-accent/10 text-n8n-accent">
+                  <WorkflowIcon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-zinc-50">{workflow.name}</span>
+                  <span className="block truncate text-xs text-zinc-500">Last updated {formatRelativeTime(workflow.updatedAt)} · Created {formatDate(workflow.createdAt)}</span>
+                </span>
+                <span className="hidden items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-xs text-zinc-300 sm:inline-flex">
+                  <UserRound className="h-3 w-3" /> Personal
+                </span>
+                <MoreVertical className="h-4 w-4 shrink-0 text-zinc-500" />
+              </Link>
+            ))
+          )}
+        </div>
+
+        <p className="mt-4 text-xs text-zinc-600">Total {filteredWorkflows.length} workflows</p>
       </div>
       <AIGeneratorModal open={aiOpen} onClose={() => setAiOpen(false)} onCreated={() => {}} />
     </AppLayout>
