@@ -3,19 +3,27 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Activity, ArrowUpRight, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Circle, Clock3, Loader2, RefreshCw, Search, XCircle } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
-import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Select";
 import { executions, type Execution } from "@/lib/api";
+import { formatRelativeTime } from "@/lib/utils";
 
-function statusFor(status: string): BadgeStatus { return status === "SUCCESS" ? "success" : status === "FAILED" ? "error" : status === "RUNNING" || status === "WAITING_APPROVAL" ? "warning" : status === "PENDING" ? "info" : "neutral"; }
 function labelFor(status: string) { return status === "WAITING_APPROVAL" ? "Waiting approval" : status.charAt(0) + status.slice(1).toLowerCase(); }
+
+function StatusIcon({ status }: { status: string }) {
+  if (status === "SUCCESS") return <CheckCircle2 className="h-5 w-5 shrink-0 text-n8n-green" />;
+  if (status === "FAILED") return <XCircle className="h-5 w-5 shrink-0 text-red-400" />;
+  if (status === "RUNNING") return <Loader2 className="h-5 w-5 shrink-0 animate-spin text-amber-400" />;
+  if (status === "WAITING_APPROVAL") return <Clock3 className="h-5 w-5 shrink-0 animate-pulse text-amber-400" />;
+  if (status === "PENDING") return <Clock3 className="h-5 w-5 shrink-0 text-blue-400" />;
+  return <Circle className="h-5 w-5 shrink-0 text-zinc-500" />;
+}
 
 export default function ExecutionsPage() {
   const [data, setData] = useState<Execution[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
@@ -24,6 +32,11 @@ export default function ExecutionsPage() {
   useEffect(() => {
     executions.list().then(setData).catch(() => {}).finally(() => setLoading(false));
   }, []);
+
+  function refresh() {
+    setRefreshing(true);
+    executions.list().then(setData).catch(() => {}).finally(() => setRefreshing(false));
+  }
 
   const filtered = useMemo(() =>
     data.filter((e) => (status === "all" || e.status === status) && `${e.workflowId} ${e.id}`.toLowerCase().includes(query.toLowerCase())),
@@ -35,31 +48,36 @@ export default function ExecutionsPage() {
   return (
     <AppLayout>
       <div className="animate-in fade-in duration-300">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-cyan-400">Runtime history</p>
-            <h1 className="mt-2 text-4xl font-bold tracking-tight text-zinc-50">Executions</h1>
-            <p className="mt-2 text-sm text-zinc-500">Trace every run from trigger to final output.</p>
+            <h1 className="text-2xl font-semibold text-zinc-50">Executions</h1>
+            <p className="mt-1 text-sm text-zinc-500">Monitor your workflow execution history</p>
           </div>
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-xs text-zinc-500">
-            <Activity className="h-3.5 w-3.5 text-green-400" /> Live activity connected
-          </div>
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={refreshing || loading}
+            className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:border-white/20 hover:text-zinc-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Refresh
+          </button>
         </div>
 
-        <Card className="mt-8 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
-              <input
-                value={query}
-                onChange={(e) => { setQuery(e.target.value); setPage(1); }}
-                placeholder="Search workflow or execution ID"
-                className="w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2.5 pl-10 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-transparent focus:ring-2 focus:ring-violet-500"
-              />
-            </div>
+        <div className="mt-6 flex flex-col gap-3 rounded-lg border border-white/10 bg-n8n-panel p-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+              placeholder="Search workflow or execution ID"
+              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2.5 pl-9 text-sm text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-n8n-accent"
+            />
+          </div>
+          <div className="w-full sm:w-48">
             <Select
               value={status}
               onChange={(e) => { setStatus(e.target.value); setPage(1); }}
+              className="rounded-md border-white/10 bg-white/5 py-2.5 text-zinc-200 focus:border-n8n-accent focus:ring-0"
               options={[
                 { value: "all", label: "All statuses" },
                 { value: "SUCCESS", label: "Success" },
@@ -70,19 +88,22 @@ export default function ExecutionsPage() {
               ]}
             />
           </div>
-        </Card>
+        </div>
 
-        <Card className="mt-6 overflow-hidden p-0">
-          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-            <h2 className="text-sm font-medium text-zinc-200">Recent runs</h2>
-            <span className="text-xs text-zinc-600">{filtered.length} total</span>
-          </div>
+        <div className="mt-4">
           {loading ? (
-            <div className="p-8 text-center text-sm text-zinc-600">Loading...</div>
+            <div className="space-y-2">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-16 animate-pulse rounded-lg border border-white/5 bg-white/5" />
+              ))}
+            </div>
           ) : visible.length === 0 ? (
-            <div className="p-8 text-center text-sm text-zinc-600">No executions found.</div>
+            <div className="rounded-lg border border-white/10 bg-n8n-panel px-4 py-12 text-center">
+              <p className="text-sm text-zinc-400">No executions found</p>
+              <p className="mt-1 text-xs text-zinc-600">Runs from your workflows will appear here.</p>
+            </div>
           ) : (
-            <div className="divide-y divide-white/5">
+            <div className="space-y-2">
               {visible.map((execution, index) => (
                 <motion.div
                   key={execution.id}
@@ -92,31 +113,33 @@ export default function ExecutionsPage() {
                 >
                   <Link
                     href={`/executions/${execution.id}`}
-                    className="flex flex-col gap-3 px-5 py-4 transition-colors hover:bg-white/[0.02] sm:flex-row sm:items-center sm:justify-between"
+                    className="flex items-center gap-3 rounded-lg border border-white/10 bg-n8n-panel px-4 py-3 transition-colors hover:border-white/20"
                   >
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center gap-3">
-                        <span className="font-medium text-zinc-100">{execution.workflowId}</span>
-                        <Badge status={statusFor(execution.status)}>{labelFor(execution.status)}</Badge>
-                      </div>
-                      <span className="font-mono text-xs text-zinc-600">{execution.id}</span>
+                    <StatusIcon status={execution.status} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-zinc-50">{execution.workflow?.name ?? execution.workflowId}</p>
+                      <p className="mt-0.5 truncate text-xs text-zinc-500">
+                        {formatRelativeTime(execution.startedAt)} · {execution.nodes ?? 0} nodes · {labelFor(execution.status)}
+                      </p>
                     </div>
-                    <div className="flex items-center gap-6 text-xs text-zinc-500">
-                      <span>{execution.duration ?? "—"}</span>
-                      <span>{execution.nodes ?? 0} nodes</span>
-                      <ArrowUpRight className="h-3.5 w-3.5 text-zinc-600" />
-                    </div>
+                    <span className="rounded-md bg-white/5 px-2 py-0.5 font-mono text-xs text-zinc-300">
+                      {execution.duration != null ? `${execution.duration}ms` : "—"}
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-zinc-600" />
                   </Link>
                 </motion.div>
               ))}
             </div>
           )}
-          <div className="flex items-center justify-between border-t border-white/10 px-5 py-3">
-            <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs text-zinc-500 hover:bg-white/5 disabled:opacity-40"><ChevronLeft className="h-3.5 w-3.5" /> Previous</button>
-            <span className="text-xs text-zinc-600">Page {page} of {pageCount}</span>
-            <button disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)} className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs text-zinc-500 hover:bg-white/5 disabled:opacity-40">Next <ChevronRight className="h-3.5 w-3.5" /></button>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-zinc-500">Total {filtered.length} executions</p>
+            <div className="flex items-center gap-3">
+              <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="flex items-center gap-1 rounded-md px-3 py-1.5 text-xs text-zinc-400 hover:bg-white/5 disabled:opacity-40"><ChevronLeft className="h-3.5 w-3.5" /> Previous</button>
+              <span className="text-xs text-zinc-600">Page {page} of {pageCount}</span>
+              <button disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)} className="flex items-center gap-1 rounded-md px-3 py-1.5 text-xs text-zinc-400 hover:bg-white/5 disabled:opacity-40">Next <ChevronRight className="h-3.5 w-3.5" /></button>
+            </div>
           </div>
-        </Card>
+        </div>
       </div>
     </AppLayout>
   );
