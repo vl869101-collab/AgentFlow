@@ -10,12 +10,12 @@ const SERVER_DEFAULT = "https://api.agentflow.local/mcp/http";
 const CLIENTS: Client[] = [
   { id: "claude-code", label: "Claude Code", group: "CLI", type: "both", command: 'claude mcp add --transport http agentflow $SERVER_URL --header "Authorization: Bearer $TOKEN"', json: JSON.stringify({ mcpServers: { agentflow: { type: "http", url: "$SERVER_URL", headers: { Authorization: "Bearer $TOKEN" } } } }, null, 2) },
   { id: "codex", label: "Muse", group: "CLI", type: "both", command: "codex mcp add agentflow --url $SERVER_URL\ncodex mcp login agentflow", json: JSON.stringify({ mcpServers: { agentflow: { url: "$SERVER_URL", bearerTokenEnv: "AGENTFLOW_TOKEN" } } }, null, 2) },
-  { id: "gemini-cli", label: "Gemini CLI", group: "CLI", type: "both", command: 'gemini mcp add agentflow $SERVER_URL --header "Authorization: Bearer $TOKEN"', json: JSON.stringify({ mcpServers: { agentflow: { httpUrl: "$SERVER_URL", headers: { Authorization: "Bearer $TOKEN" } } }, null, 2) },
+  { id: "gemini-cli", label: "Gemini CLI", group: "CLI", type: "both", command: 'gemini mcp add agentflow $SERVER_URL --header "Authorization: Bearer $TOKEN"', json: JSON.stringify({ mcpServers: { agentflow: { httpUrl: "$SERVER_URL", headers: { Authorization: "Bearer $TOKEN" } } } }, null, 2) },
   { id: "claude-web", label: "Claude.ai", group: "WEB", type: "oauth", command: "One-click: Add to Claude.ai -> Authorize -> /mcp", json: JSON.stringify({ serverUrl: "$SERVER_URL", auth: "oauth" }, null, 2) },
   { id: "chatgpt", label: "ChatGPT", group: "WEB", type: "oauth", command: "Settings -> Connectors -> Add MCP server -> $SERVER_URL -> OAuth", json: JSON.stringify({ mcpServers: { agentflow: { serverUrl: "$SERVER_URL" } } }, null, 2) },
   { id: "cursor", label: "Cursor", group: "IDE", type: "both", command: "cursor --add-mcp agentflow $SERVER_URL", json: JSON.stringify({ mcpServers: { agentflow: { url: "$SERVER_URL", headers: { Authorization: "Bearer $TOKEN" } } } }, null, 2) },
   { id: "vscode", label: "VS Code", group: "IDE", type: "both", command: "VS Code -> MCP: Add Server -> $SERVER_URL", json: JSON.stringify({ servers: { agentflow: { type: "http", url: "$SERVER_URL", headers: { Authorization: "Bearer $TOKEN" } } } }, null, 2) },
-  { id: "windsurf", label: "Windsurf", group: "IDE", type: "both", command: "Windsurf -> Settings -> MCP -> Add -> $SERVER_URL", json: JSON.stringify({ mcpServers: { agentflow: { serverUrl: "$SERVER_URL", headers: { Authorization: "Bearer $TOKEN" } } }, null, 2) },
+  { id: "windsurf", label: "Windsurf", group: "IDE", type: "both", command: "Windsurf -> Settings -> MCP -> Add -> $SERVER_URL", json: JSON.stringify({ mcpServers: { agentflow: { serverUrl: "$SERVER_URL", headers: { Authorization: "Bearer $TOKEN" } } } }, null, 2) },
 ];
 
 function randomToken() {
