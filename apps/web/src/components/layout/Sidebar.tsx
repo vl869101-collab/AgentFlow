@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 const topNav = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Personal", href: "/workflows", icon: UserRound },
+  { label: "Personal", href: "/personal", icon: UserRound },
 ];
 
 const workspaceNav = [
