@@ -80,11 +80,11 @@ export default function BillingPage() {
         </div>
 
         {sub && sub.status !== "free" && (
-          <Card className="mb-6 bg-n8n-panel border border-n8n-accent/30 rounded-lg p-5">
+          <Card className="mb-6 bg-zinc-900 border border-violet-500/30 rounded-lg p-5">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-zinc-400">Current plan</p>
-                <p className="text-lg font-semibold text-n8n-accent capitalize">{sub.plan}</p>
+                <p className="text-lg font-semibold text-violet-500 capitalize">{sub.plan}</p>
                 <p className="text-xs text-zinc-600">Renews {new Date(sub.currentPeriodEnd).toLocaleDateString()}</p>
               </div>
               <Badge status={sub.status === "active" ? "success" : "warning"}>{sub.status}</Badge>
@@ -94,10 +94,10 @@ export default function BillingPage() {
 
         <div className="grid gap-6 sm:grid-cols-3">
           {plans.map((plan) => (
-            <Card key={plan.name} className={`relative bg-n8n-panel border border-white/10 rounded-lg p-5 ${plan.current ? "ring-2 ring-n8n-accent/50" : ""}`}>
+            <Card key={plan.name} className={`relative bg-zinc-900 border border-white/10 rounded-lg p-5 ${plan.current ? "ring-2 ring-violet-500/50" : ""}`}>
               {plan.current && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="rounded-full bg-n8n-accent px-3 py-1 text-xs font-semibold text-white">Current</span>
+                  <span className="rounded-full bg-violet-500 px-3 py-1 text-xs font-semibold text-white">Current</span>
                 </div>
               )}
               <div className="text-center mb-6">
@@ -121,7 +121,7 @@ export default function BillingPage() {
                 className={`w-full rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
                   plan.current
                     ? "bg-white/5 text-zinc-600 cursor-not-allowed"
-                    : "bg-n8n-accent hover:bg-n8n-accent-dark text-white"
+                    : "bg-violet-500 hover:bg-violet-600 text-white"
                 }`}
               >
                 {checkoutLoading === plan.priceId ? (

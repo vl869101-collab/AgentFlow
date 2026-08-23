@@ -43,22 +43,22 @@ export default function ExecutionDetailPage() {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm"><Download className="h-3.5 w-3.5" /> Export JSON</Button>
-            <Button size="sm" className="bg-none bg-n8n-accent hover:bg-n8n-accent-dark hover:opacity-100 text-white rounded-md"><Play className="h-3.5 w-3.5" /> Re-run</Button>
+            <Button size="sm" className="bg-none bg-violet-500 hover:bg-violet-600 hover:opacity-100 text-white rounded-md"><Play className="h-3.5 w-3.5" /> Re-run</Button>
           </div>
         </div>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          <Card className="bg-n8n-panel">
+          <Card className="bg-zinc-900">
             <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Duration</p>
             <p className="mt-2 text-xl font-semibold text-zinc-100">{exec.duration != null ? `${exec.duration}ms` : "—"}</p>
             <p className="mt-1 flex items-center gap-1 text-xs text-zinc-600"><Clock3 className="h-3.5 w-3.5" /> End to end</p>
           </Card>
-          <Card className="bg-n8n-panel">
+          <Card className="bg-zinc-900">
             <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Nodes completed</p>
             <p className="mt-2 text-xl font-semibold text-zinc-100">{exec.nodes ?? 0}</p>
             <p className="mt-1 flex items-center gap-1 text-xs text-green-400"><CheckCircle2 className="h-3.5 w-3.5" /> Completed</p>
           </Card>
-          <Card className="bg-n8n-panel">
+          <Card className="bg-zinc-900">
             <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Trigger</p>
             <p className="mt-2 text-xl font-semibold text-zinc-100">{exec.trigger ?? "Manual"}</p>
             <p className="mt-1 text-xs text-zinc-600">Manual replay available</p>
@@ -87,7 +87,7 @@ export default function ExecutionDetailPage() {
 
 function JsonPanel({ title, value }: { title: string; value: unknown }) {
   return (
-    <Card className="overflow-hidden bg-n8n-panel p-0">
+    <Card className="overflow-hidden bg-zinc-900 p-0">
       <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
         <h2 className="text-sm font-medium text-zinc-200">{title}</h2>
         <button

@@ -12,7 +12,7 @@ import { formatRelativeTime } from "@/lib/utils";
 function labelFor(status: string) { return status === "WAITING_APPROVAL" ? "Waiting approval" : status.charAt(0) + status.slice(1).toLowerCase(); }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === "SUCCESS") return <CheckCircle2 className="h-5 w-5 shrink-0 text-n8n-green" />;
+  if (status === "SUCCESS") return <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />;
   if (status === "FAILED") return <XCircle className="h-5 w-5 shrink-0 text-red-400" />;
   if (status === "RUNNING") return <Loader2 className="h-5 w-5 shrink-0 animate-spin text-amber-400" />;
   if (status === "WAITING_APPROVAL") return <Clock3 className="h-5 w-5 shrink-0 animate-pulse text-amber-400" />;
@@ -63,21 +63,21 @@ export default function ExecutionsPage() {
           </button>
         </div>
 
-        <div className="mt-6 flex flex-col gap-3 rounded-lg border border-white/10 bg-n8n-panel p-3 sm:flex-row">
+        <div className="mt-6 flex flex-col gap-3 rounded-lg border border-white/10 bg-zinc-900 p-3 sm:flex-row">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
             <input
               value={query}
               onChange={(e) => { setQuery(e.target.value); setPage(1); }}
               placeholder="Search workflow or execution ID"
-              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2.5 pl-9 text-sm text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-n8n-accent"
+              className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2.5 pl-9 text-sm text-zinc-200 outline-none placeholder:text-zinc-500 focus:border-violet-500"
             />
           </div>
           <div className="w-full sm:w-48">
             <Select
               value={status}
               onChange={(e) => { setStatus(e.target.value); setPage(1); }}
-              className="rounded-md border-white/10 bg-white/5 py-2.5 text-zinc-200 focus:border-n8n-accent focus:ring-0"
+              className="rounded-md border-white/10 bg-white/5 py-2.5 text-zinc-200 focus:border-violet-500 focus:ring-0"
               options={[
                 { value: "all", label: "All statuses" },
                 { value: "SUCCESS", label: "Success" },
@@ -98,7 +98,7 @@ export default function ExecutionsPage() {
               ))}
             </div>
           ) : visible.length === 0 ? (
-            <div className="rounded-lg border border-white/10 bg-n8n-panel px-4 py-12 text-center">
+            <div className="rounded-lg border border-white/10 bg-zinc-900 px-4 py-12 text-center">
               <p className="text-sm text-zinc-400">No executions found</p>
               <p className="mt-1 text-xs text-zinc-600">Runs from your workflows will appear here.</p>
             </div>
@@ -113,7 +113,7 @@ export default function ExecutionsPage() {
                 >
                   <Link
                     href={`/executions/${execution.id}`}
-                    className="flex items-center gap-3 rounded-lg border border-white/10 bg-n8n-panel px-4 py-3 transition-colors hover:border-white/20"
+                    className="flex items-center gap-3 rounded-lg border border-white/10 bg-zinc-900 px-4 py-3 transition-colors hover:border-white/20"
                   >
                     <StatusIcon status={execution.status} />
                     <div className="min-w-0 flex-1">

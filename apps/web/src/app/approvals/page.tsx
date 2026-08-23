@@ -67,10 +67,10 @@ export default function ApprovalsPage() {
             const workflow = approval.execution?.workflow;
             const action = acting?.startsWith(`${approval.id}:`) ? acting.split(":")[1] : null;
             return (
-              <div key={approval.id} className="bg-n8n-panel border border-white/10 rounded-lg px-4 py-3">
+              <div key={approval.id} className="bg-zinc-900 border border-white/10 rounded-lg px-4 py-3">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex items-start gap-3">
-                    <div className="flex h-5 w-5 items-center justify-center rounded text-n8n-accent mt-0.5 flex-shrink-0">
+                    <div className="flex h-5 w-5 items-center justify-center rounded text-violet-500 mt-0.5 flex-shrink-0">
                       <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                     </div>
                     <div>
@@ -86,7 +86,7 @@ export default function ApprovalsPage() {
                   <Button size="sm" onClick={() => decide(approval.id, "reject")} loading={action === "reject"} disabled={Boolean(acting)} className="bg-white/5 text-zinc-400 hover:bg-white/10 rounded-md px-3 py-1.5 text-xs font-medium">
                     Reject
                   </Button>
-                  <Button size="sm" onClick={() => decide(approval.id, "approve")} loading={action === "approve"} disabled={Boolean(acting)} className="bg-n8n-green/15 text-[#2ecc71] hover:bg-n8n-green/25 rounded-md px-3 py-1.5 text-xs font-medium">
+                  <Button size="sm" onClick={() => decide(approval.id, "approve")} loading={action === "approve"} disabled={Boolean(acting)} className="bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 rounded-md px-3 py-1.5 text-xs font-medium">
                     Approve
                   </Button>
                 </div>

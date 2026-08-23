@@ -44,7 +44,7 @@ export default function CredentialsPage() {
     } catch {}
   }
 
-  const fieldClass = "rounded-md border-white/10 bg-white/5 focus:border-n8n-accent focus:ring-0";
+  const fieldClass = "rounded-md border-white/10 bg-white/5 focus:border-violet-500 focus:ring-0";
 
   return (
     <AppLayout>
@@ -56,26 +56,26 @@ export default function CredentialsPage() {
           </div>
           <Button
             onClick={() => setOpen(true)}
-            className="bg-none bg-n8n-accent hover:bg-n8n-accent-dark hover:opacity-100 text-white rounded-md px-4 py-2 text-sm font-medium"
+            className="bg-none bg-violet-500 hover:bg-violet-600 hover:opacity-100 text-white rounded-md px-4 py-2 text-sm font-medium"
           >
             <Plus className="h-4 w-4" /> Add credential
           </Button>
         </div>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          <Card className="bg-n8n-panel border border-white/10 rounded-lg p-4">
+          <Card className="bg-zinc-900 border border-white/10 rounded-lg p-4">
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-n8n-green/10 p-2 text-n8n-green"><LockKeyhole className="h-4 w-4" /></div>
+              <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-500"><LockKeyhole className="h-4 w-4" /></div>
               <div><p className="text-sm font-medium text-zinc-200">Encrypted at rest</p><p className="text-xs text-zinc-500">AES-256 vault</p></div>
             </div>
           </Card>
-          <Card className="bg-n8n-panel border border-white/10 rounded-lg p-4">
+          <Card className="bg-zinc-900 border border-white/10 rounded-lg p-4">
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-n8n-accent/10 p-2 text-n8n-accent"><ShieldCheck className="h-4 w-4" /></div>
+              <div className="rounded-lg bg-violet-500/10 p-2 text-violet-500"><ShieldCheck className="h-4 w-4" /></div>
               <div><p className="text-sm font-medium text-zinc-200">Scoped access</p><p className="text-xs text-zinc-500">Per workflow</p></div>
             </div>
           </Card>
-          <Card className="bg-n8n-panel border border-white/10 rounded-lg p-4">
+          <Card className="bg-zinc-900 border border-white/10 rounded-lg p-4">
             <div className="flex items-center gap-3">
               <div className="rounded-lg bg-white/5 p-2 text-zinc-300"><KeyRound className="h-4 w-4" /></div>
               <div><p className="text-sm font-medium text-zinc-200">{creds.length} active keys</p><p className="text-xs text-zinc-500">No expiring tokens</p></div>
@@ -95,8 +95,8 @@ export default function CredentialsPage() {
               <AnimatePresence mode="popLayout">
                 {creds.map((cred, index) => (
                   <motion.div key={cred.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ delay: index * 0.04 }}>
-                    <div className="group flex items-center gap-3 rounded-lg border border-white/10 bg-n8n-panel px-4 py-3 transition-colors hover:border-white/20">
-                      <div className="rounded-lg bg-n8n-accent/10 p-2 text-n8n-accent"><KeyRound className="h-4 w-4" /></div>
+                    <div className="group flex items-center gap-3 rounded-lg border border-white/10 bg-zinc-900 px-4 py-3 transition-colors hover:border-white/20">
+                      <div className="rounded-lg bg-violet-500/10 p-2 text-violet-500"><KeyRound className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-zinc-50">{cred.name}</p>
                         <p className="mt-0.5 truncate text-xs text-zinc-500">{cred.provider} · {cred.type} · {cred.updatedAt}</p>
@@ -115,7 +115,7 @@ export default function CredentialsPage() {
                 ))}
               </AnimatePresence>
               {creds.length === 0 && (
-                <div className="rounded-lg border border-white/10 bg-n8n-panel px-4 py-12 text-center">
+                <div className="rounded-lg border border-white/10 bg-zinc-900 px-4 py-12 text-center">
                   <p className="text-sm text-zinc-400">No credentials yet</p>
                   <p className="mt-1 text-xs text-zinc-600">Add one to get started.</p>
                 </div>
@@ -125,7 +125,7 @@ export default function CredentialsPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Add credential" className="rounded-lg bg-n8n-panel">
+      <Modal open={open} onClose={() => setOpen(false)} title="Add credential" className="rounded-lg bg-zinc-900">
         <form onSubmit={addCredential} className="space-y-4">
           <Input label="Name" name="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Discord Bot Token" required className={fieldClass} />
           <Select label="Provider" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} className={fieldClass} options={[
@@ -138,7 +138,7 @@ export default function CredentialsPage() {
           <Input label="Value" name="value" type="password" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} placeholder="Paste your API key or token" required className={fieldClass} />
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} className="rounded-md">Cancel</Button>
-            <Button type="submit" className="bg-none bg-n8n-accent hover:bg-n8n-accent-dark hover:opacity-100 text-white rounded-md px-4 py-2 text-sm font-medium">Save credential</Button>
+            <Button type="submit" className="bg-none bg-violet-500 hover:bg-violet-600 hover:opacity-100 text-white rounded-md px-4 py-2 text-sm font-medium">Save credential</Button>
           </div>
         </form>
       </Modal>

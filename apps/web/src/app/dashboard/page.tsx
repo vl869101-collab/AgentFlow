@@ -65,10 +65,10 @@ export default function DashboardPage() {
             <p className="mt-1 text-sm text-zinc-500">All the workflows, credentials and data tables you have access to</p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link href="/billing" className="inline-flex items-center gap-2 rounded-full bg-n8n-green px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90">
+            <Link href="/billing" className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90">
               <Zap className="h-4 w-4" /> Upgrade Now
             </Link>
-            <button onClick={() => setAiOpen(true)} className="inline-flex items-center gap-2 rounded-md bg-n8n-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-n8n-accent-dark">
+            <button onClick={() => setAiOpen(true)} className="inline-flex items-center gap-2 rounded-md bg-violet-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-600">
               Create workflow <ChevronDown className="h-4 w-4" />
             </button>
           </div>
@@ -76,7 +76,7 @@ export default function DashboardPage() {
 
         <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
           {stats.map((stat) => (
-            <div key={stat.label} className="rounded-lg border border-white/10 bg-n8n-panel p-4">
+            <div key={stat.label} className="rounded-lg border border-white/10 bg-zinc-900 p-4">
               <p className="text-xs text-zinc-500">{stat.label}</p>
               <p className="mt-2 text-xl font-semibold text-white">{loading ? "—" : stat.value}</p>
             </div>
@@ -84,7 +84,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="mt-8 flex gap-6 overflow-x-auto border-b border-white/10 text-sm">
-          <span className="shrink-0 border-b-2 border-n8n-accent pb-3 font-medium text-n8n-accent">Workflows</span>
+          <span className="shrink-0 border-b-2 border-violet-500 pb-3 font-medium text-violet-500">Workflows</span>
           <Link href="/credentials" className="shrink-0 pb-3 text-zinc-400 transition-colors hover:text-zinc-200">Credentials</Link>
           <Link href="/executions" className="shrink-0 pb-3 text-zinc-400 transition-colors hover:text-zinc-200">Executions</Link>
           <span className="shrink-0 pb-3 text-zinc-400">Variables</span>
@@ -98,10 +98,10 @@ export default function DashboardPage() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search"
-              className="w-full rounded-md border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-n8n-accent"
+              className="w-full rounded-md border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-violet-500"
             />
           </label>
-          <select defaultValue="updated" className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300 outline-none focus:border-n8n-accent">
+          <select defaultValue="updated" className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300 outline-none focus:border-violet-500">
             <option value="updated">Sort by last updated</option>
           </select>
           <button type="button" aria-label="Filter workflows" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200">
@@ -111,13 +111,13 @@ export default function DashboardPage() {
 
         <div className="mt-5 space-y-3">
           {loading ? (
-            <div className="rounded-lg border border-white/10 bg-n8n-panel px-4 py-8 text-center text-sm text-zinc-500">Loading workflows...</div>
+            <div className="rounded-lg border border-white/10 bg-zinc-900 px-4 py-8 text-center text-sm text-zinc-500">Loading workflows...</div>
           ) : filteredWorkflows.length === 0 ? (
             <div className="rounded-lg border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-500">No workflows found.</div>
           ) : (
             filteredWorkflows.map((workflow) => (
-              <Link key={workflow.id} href={`/workflows/${workflow.id}/editor`} className="flex items-center gap-3 rounded-lg border border-white/10 bg-n8n-panel px-4 py-3 transition-colors hover:border-white/20">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-n8n-accent/10 text-n8n-accent">
+              <Link key={workflow.id} href={`/workflows/${workflow.id}/editor`} className="flex items-center gap-3 rounded-lg border border-white/10 bg-zinc-900 px-4 py-3 transition-colors hover:border-white/20">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-500">
                   <WorkflowIcon className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 flex-1">
