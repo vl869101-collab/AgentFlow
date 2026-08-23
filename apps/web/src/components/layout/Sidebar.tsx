@@ -24,7 +24,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 const topNav = [
@@ -59,6 +59,17 @@ function LogoMark({ className }: { className?: string }) {
 export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClose }: { collapsed: boolean; onCollapsedChange: (value: boolean) => void; mobileOpen: boolean; onMobileClose: () => void }) {
   const pathname = usePathname();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [variableHover, setVariableHover] = useState(false);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDocClick(event: MouseEvent) {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) setPlusMenuOpen(false);
+    }
+    if (plusMenuOpen) document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [plusMenuOpen]);
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -85,7 +96,30 @@ export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClos
           </Link>
           {!collapsed ? (
             <div className="flex items-center gap-0.5 text-zinc-500">
-              <button type="button" className="rounded p-1.5 hover:bg-white/5 hover:text-zinc-200" aria-label="New workflow"><Plus className="h-4 w-4" /></button>
+              <div className="relative" ref={plusMenuRef}>
+                <button type="button" onClick={() => setPlusMenuOpen((value) => !value)} className={cn("rounded p-1.5 hover:bg-white/5 hover:text-zinc-200", plusMenuOpen && "bg-white/10 text-zinc-200")} aria-label="New workflow" aria-expanded={plusMenuOpen}><Plus className="h-4 w-4" /></button>
+                {plusMenuOpen ? (
+                  <div className="absolute left-0 top-9 z-20 w-48 rounded-lg border border-white/10 bg-zinc-900 py-1 shadow-2xl shadow-black/40">
+                    <Link href="/workflows" onClick={() => setPlusMenuOpen(false)} className="block px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100">New workflow</Link>
+                    <Link href="/credentials" onClick={() => setPlusMenuOpen(false)} className="block px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100">New credential</Link>
+                    <div className="relative" onMouseEnter={() => setVariableHover(true)} onMouseLeave={() => setVariableHover(false)}>
+                      <button type="button" className={cn("flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/5 hover:text-zinc-100", variableHover ? "bg-white/5 text-zinc-100" : "text-zinc-300")}>
+                        <span>New variable</span><ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
+                      </button>
+                      {variableHover ? (
+                        <div className="absolute left-full top-0 ml-1 w-44 rounded-lg border border-white/10 bg-zinc-900 py-1 shadow-2xl shadow-black/40">
+                          <p className="px-3 py-1.5 text-xs font-medium text-zinc-500">Create in</p>
+                          <button type="button" onClick={() => setPlusMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><LayoutGrid className="h-3.5 w-3.5 text-zinc-500" /> Global</button>
+                          <button type="button" onClick={() => setPlusMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><UserRound className="h-3 w-3 text-zinc-500" /> Personal</button>
+                        </div>
+                      ) : null}
+                    </div>
+                    <button type="button" onClick={() => setPlusMenuOpen(false)} className="block w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100">New data table</button>
+                    <button type="button" onClick={() => setPlusMenuOpen(false)} className="block w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100">New project</button>
+                    <button type="button" onClick={() => setPlusMenuOpen(false)} className="block w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100">New AI chat</button>
+                  </div>
+                ) : null}
+              </div>
               <button type="button" className="rounded p-1.5 hover:bg-white/5 hover:text-zinc-200" aria-label="Search"><Search className="h-4 w-4" /></button>
               <button type="button" className="rounded p-1.5 hover:bg-white/5 hover:text-zinc-200 lg:hidden" onClick={onMobileClose} aria-label="Close navigation"><X className="h-4 w-4" /></button>
             </div>
