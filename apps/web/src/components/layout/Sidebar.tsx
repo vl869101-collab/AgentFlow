@@ -128,7 +128,7 @@ export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClos
 
         {/* AI Assistant */}
         {!collapsed ? (
-          <Link href="/workflows" onClick={onMobileClose} className="mx-2 mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100">
+          <Link href="/assistant" onClick={onMobileClose} className="mx-2 mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100">
             <Sparkles className="h-4 w-4 text-violet-500" />
             <span className="flex-1">AI Assistant</span>
             <span className="rounded-md bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300">Preview</span>
