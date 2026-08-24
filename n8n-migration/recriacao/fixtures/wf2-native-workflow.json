@@ -1,0 +1,35 @@
+{
+  "description": "Workflow 'My workflow' (n8n id SkxlGdS2egKPhibM) recriado no schema nativo AgentFlow. Original n8n: 1 node (n8n-nodes-base.evaluationTrigger v4.7), 0 connections, 0 credentials.",
+  "native": {
+    "workflow": {
+      "name": "My workflow",
+      "description": null,
+      "status": "DRAFT",
+      "n8nId": "SkxlGdS2egKPhibM",
+      "source": "n8n-recreate",
+      "version": 1
+    },
+    "nodes": [
+      {
+        "id": "node-eval-trigger-001",
+        "type": "evaluationTrigger",
+        "label": "When fetching a dataset row",
+        "config": {
+          "typeVersion": 4.7,
+          "originalN8nType": "n8n-nodes-base.evaluationTrigger",
+          "originalN8nId": "SkxlGdS2egKPhibM",
+          "parameters": {
+            "dataTableId": null,
+            "runEvaluation": false
+          }
+        },
+        "position": { "x": 250, "y": 300 },
+        "width": 180,
+        "height": 60,
+        "isTrigger": true
+      }
+    ],
+    "edges": [],
+    "triggers": ["node-eval-trigger-001"]
+  }
+}

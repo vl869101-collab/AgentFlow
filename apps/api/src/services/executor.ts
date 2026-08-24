@@ -1,6 +1,12 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { lookup, resolve4, resolve6 } from "node:dns/promises";
+import ipaddr from "ipaddr.js";
 import { prisma } from "../lib/prisma.js";
+import { getEnv } from "../lib/env.js";
+import { decryptCredential } from "../lib/crypto.js";
+
+// Native handler (registered via the registry-pending process — Part 2)
+import { executeEvaluationTrigger } from "./nodes/evaluationTrigger.js";
+import { CodeNodeHandler } from "./nodes/code.js";
 
 export type ExecutionResult = {
   id: string;
@@ -153,24 +159,6 @@ function followsConditionEdge(edge: WorkflowEdge, output: unknown): boolean {
   return true;
 }
 
-function isPrivateIpv4(address: string): boolean {
-  const octets = address.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((octet) => Number.isNaN(octet) || octet < 0 || octet > 255)) return false;
-  const [a, b] = octets;
-  return (
-    a === 10 ||
-    a === 127 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    a === 0
-  );
-}
-
-// H-01 fix: full IPv6 handling. WHATWG URL hostnames keep the brackets ([::1]),
-// so strip them before classifying. Rejects loopback, link-local, ULA (fc00::/7),
-// unspecified, IPv4-mapped private ranges, 6to4 (2002::/16), Teredo (2001::/32)
-// and NAT64 (64:ff9b::/96) forms.
 function isBlockedHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
 
@@ -184,99 +172,43 @@ function isBlockedHostname(hostname: string): boolean {
     return true;
   }
 
-  const version = isIP(normalized);
-  if (version === 4) {
-    return isPrivateIpv4(normalized);
+  if (!ipaddr.isValid(normalized)) return false;
+  try {
+    return ipaddr.parse(normalized).range() !== "unicast";
+  } catch {
+    return true;
   }
-  if (version !== 6) return false;
-
-  // Strip any zone identifier (fe80::1%eth0) before classifying.
-  const address = normalized.split("%")[0].toLowerCase();
-  const value = ipv6ToBigInt(address);
-  if (value === null) return false; // Already validated by isIP(); defensive.
-
-  if (value === 0n || value === 1n) return true; // :: (unspecified) and ::1 (loopback)
-  if ((value >> 121n) === 0x7en) return true; // ULA fc00::/7
-  if ((value >> 118n) === 0x3fan) return true; // link-local fe80::/10
-  if ((value >> 96n) === 0x20010000n) return true; // Teredo 2001::/32 — client IPv4 is obfuscated, block whole prefix
-  if ((value >> 112n) === 0x2002n) {
-    // 6to4 2002::/16 — decode the IPv4 embedded in the next 32 bits.
-    const ipv4 = Number((value >> 80n) & 0xffffffffn);
-    if (isPrivateIpv4(ipv4ToDotted(ipv4))) return true;
-  }
-  if ((value >> 32n) === (0x64ff9bn << 64n)) return true; // NAT64 64:ff9b::/96
-  if ((value >> 80n) === 0x64ff9b0001n) return true; // NAT64 well-known 64:ff9b:1::/48 (RFC 6052)
-
-  // IPv4-mapped (::ffff:a.b.c.d), IPv4-compatible (::a.b.c.d) and
-  // IPv4-translated (::ffff:0:0:0/96): validate the embedded IPv4.
-  const upper = value >> 32n;
-  if (upper === 0xffffn || upper === 0n || upper === 0xffff0000n) {
-    if (isPrivateIpv4(ipv4ToDotted(Number(value & 0xffffffffn)))) return true;
-  }
-
-  return false;
-}
-
-function ipv4ToDotted(value: number): string {
-  return `${(value >>> 24) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 8) & 0xff}.${value & 0xff}`;
-}
-
-// Parses a validated IPv6 string (no brackets, no zone id) into a 128-bit
-// integer, accepting both dotted-quad tails (::ffff:127.0.0.1) and hex
-// groups (::ffff:7f00:1). A dotted-quad tail maps to the last 32 bits.
-function ipv6ToBigInt(address: string): bigint | null {
-  // A dotted-quad tail is always the final 32 bits and is separated by a colon:
-  // ::ffff:127.0.0.1, 64:ff9b::10.0.0.1, etc.
-  const quad = address.match(/^(.*?):(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (quad && address.split(".").length === 4) {
-    const hex = quad[2]
-      .split(".")
-      .map((octet) => Number(octet).toString(16).padStart(2, "0"))
-      .join("");
-    // Split the :: (if any) BEFORE converting the quad so the zero-run lands
-    // in the right place: "::ffff" + quad -> 6 zero hextets + ffff + quad.
-    const quadHead = quad[1];
-    const [rawHead, rawTail] = quadHead.includes("::") ? quadHead.split("::") : [quadHead, ""];
-    const head = rawHead.replace(/^:+/, "").replace(/:+$/, "");
-    const tail = rawTail.replace(/^:+/, "").replace(/:+$/, "");
-    const headGroups = head ? head.split(":") : [];
-    const tailGroups = tail ? tail.split(":") : [];
-    const missing = 8 - headGroups.length - tailGroups.length - 2;
-    if (missing < 0) return null;
-    const hextets = [...headGroups, ...Array(missing).fill("0"), ...tailGroups, hex.slice(0, 4), hex.slice(4)];
-    return hextetsToBigIntPlain(hextets);
-  }
-  const [rawHead, rawTail] = address.includes("::") ? address.split("::") : [address, ""];
-  const head = rawHead.replace(/^:+/, "").replace(/:+$/, "");
-  const tail = rawTail.replace(/^:+/, "").replace(/:+$/, "");
-  const headGroups = head ? head.split(":") : [];
-  const tailGroups = tail ? tail.split(":") : [];
-  const missing = 8 - headGroups.length - tailGroups.length;
-  if (missing < 0) return null;
-  const hextets = [...headGroups, ...Array(missing).fill("0"), ...tailGroups];
-  return hextetsToBigIntPlain(hextets);
-}
-
-function hextetsToBigIntPlain(hextets: string[]): bigint | null {
-  let value = 0n;
-  for (const group of hextets) {
-    if (!/^[0-9a-f]{0,4}$/.test(group)) return null;
-    value = (value << 16n) | BigInt(parseInt(group || "0", 16));
-  }
-  return value;
 }
 
 async function resolveDns(hostname: string): Promise<string[]> {
+  const results = await Promise.allSettled([resolve4(hostname), resolve6(hostname)]);
+  const addresses = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+  const errors = results
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as NodeJS.ErrnoException);
+  const hasUnexpectedError = errors.some((error) => !["ENOTFOUND", "ENODATA"].includes(error?.code ?? ""));
+  if (hasUnexpectedError) throw new Error("HTTP node hostname could not be resolved safely");
+  if (addresses.length > 0) return addresses;
+
   try {
     const records = await lookup(hostname, { all: true, verbatim: true });
     return records.map((record) => record.address);
   } catch {
-    // lookup() with { all: true } throws ENOTFOUND for single-result hostnames
-    // that do not resolve through DNS (e.g. hostnames served by hosts-file
-    // entries). Fall back to a plain lookup to cover those.
-    const record = await lookup(hostname);
-    return [record.address];
+    return [];
   }
+}
+
+function isAllowedEgressHostname(hostname: string): boolean {
+  const allowedHosts = getEnv().EGRESS_ALLOWED_HOSTS;
+  if (!allowedHosts || allowedHosts.length === 0) return true;
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  return allowedHosts.some((allowedHost) => {
+    if (allowedHost.startsWith("*.")) {
+      const suffix = allowedHost.slice(1);
+      return normalized.endsWith(suffix) && normalized.length > suffix.length;
+    }
+    return normalized === allowedHost;
+  });
 }
 
 function assertSafeUrl(value: unknown): URL {
@@ -288,6 +220,9 @@ function assertSafeUrl(value: unknown): URL {
   }
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
     throw new Error("HTTP node only supports public HTTP(S) URLs");
+  }
+  if (!isAllowedEgressHostname(url.hostname)) {
+    throw new Error("HTTP node host is not in the egress allowlist");
   }
   if (isBlockedHostname(url.hostname)) {
     throw new Error("HTTP node cannot call private or local network addresses");
@@ -326,6 +261,9 @@ async function fetchWithTimeout(input: string | URL, init: RequestInit, timeoutM
     if (!["http:", "https:"].includes(next.protocol)) {
       throw new Error("HTTP redirect to non-HTTP(S) URL is not allowed");
     }
+    if (!isAllowedEgressHostname(next.hostname)) {
+      throw new Error("HTTP redirect host is not in the egress allowlist");
+    }
     if (isBlockedHostname(next.hostname)) {
       throw new Error("HTTP redirect to private or local network address is not allowed");
     }
@@ -341,9 +279,9 @@ async function assertSafeResolved(url: URL): Promise<void> {
   if (isBlockedHostname(url.hostname)) {
     throw new Error("HTTP node cannot call private or local network addresses");
   }
-  if (isIP(url.hostname) !== 0) return; // Literal IPs are already validated.
+  if (ipaddr.isValid(url.hostname)) return; // Literal IPs are already validated.
   const addresses = await resolveDns(url.hostname);
-  if (addresses.length === 0 || addresses.some((address) => isBlockedHostname(address))) {
+  if (addresses.length === 0 || addresses.some((address) => !ipaddr.isValid(address) || isBlockedHostname(address))) {
     throw new Error("HTTP node cannot resolve to private or local network addresses");
   }
 }
@@ -387,7 +325,35 @@ async function executeAi(config: JsonObject, input: unknown): Promise<unknown> {
   return data.choices?.[0]?.message?.content ?? data;
 }
 
-async function executeHttp(config: JsonObject, input: unknown): Promise<unknown> {
+async function credentialHeaders(config: JsonObject, orgId: string): Promise<Record<string, string>> {
+  const credentialId = typeof config.credentialId === "string" ? config.credentialId : undefined;
+  if (!credentialId) return {};
+
+  const credential = await prisma.credential.findFirst({ where: { id: credentialId, orgId } });
+  if (!credential) throw new Error("Credential not found");
+
+  let data: unknown;
+  try {
+    data = JSON.parse(decryptCredential(credential.data));
+  } catch {
+    throw new Error("Credential data is invalid or cannot be decrypted");
+  }
+
+  const values = asObject(data);
+  const headers = Object.fromEntries(
+    Object.entries(asObject(values.headers)).map(([key, value]) => [key, String(value)]),
+  );
+  const token = values.apiKey ?? values.api_key ?? values.token ?? values.accessToken ?? values.access_token;
+  if (token !== undefined && !Object.keys(headers).some((key) => key.toLowerCase() === "authorization")) {
+    headers.Authorization = `Bearer ${String(token)}`;
+  }
+  if (values.username !== undefined && values.password !== undefined && !Object.keys(headers).some((key) => key.toLowerCase() === "authorization")) {
+    headers.Authorization = `Basic ${Buffer.from(`${String(values.username)}:${String(values.password)}`).toString("base64")}`;
+  }
+  return headers;
+}
+
+async function executeHttp(config: JsonObject, input: unknown, orgId: string): Promise<unknown> {
   const url = assertSafeUrl(config.url);
   const method = String(config.method ?? "GET").toUpperCase();
   if (!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].includes(method)) {
@@ -397,6 +363,10 @@ async function executeHttp(config: JsonObject, input: unknown): Promise<unknown>
   const headers = Object.fromEntries(
     Object.entries(asObject(config.headers)).map(([key, value]) => [key, String(value)]),
   );
+  const storedHeaders = await credentialHeaders(config, orgId);
+  for (const [key, value] of Object.entries(storedHeaders)) {
+    if (!Object.keys(headers).some((header) => header.toLowerCase() === key.toLowerCase())) headers[key] = value;
+  }
   const configuredBody = config.body;
   const bodyValue = configuredBody === undefined && method !== "GET" && method !== "HEAD" ? input : configuredBody;
   const body = bodyValue === undefined ? undefined : typeof bodyValue === "string" ? bodyValue : JSON.stringify(bodyValue);
@@ -416,10 +386,21 @@ async function executeHttp(config: JsonObject, input: unknown): Promise<unknown>
   return result;
 }
 
-// C-03 fix: vm-based code execution removed — it was trivially escapable (RCE).
-// Code/transform nodes are disabled for security. Use AI nodes or HTTP nodes instead.
+class CodeExecutionDisabledError extends Error {
+  readonly statusCode = 503;
+  readonly code = "EXEC_CODE_DISABLED";
 
-async function executeNode(node: WorkflowNode, input: unknown): Promise<unknown> {
+  constructor() {
+    super("Code execution is disabled");
+    this.name = "CodeExecutionDisabledError";
+  }
+}
+
+function containsCodeNode(workflow: any): boolean {
+  return workflowGraph(workflow).nodes.some((node) => node.type === "code" || node.type === "transform");
+}
+
+async function executeNode(node: WorkflowNode, input: unknown, orgId: string): Promise<unknown> {
   switch (node.type) {
     case "trigger":
     case "webhook":
@@ -432,13 +413,22 @@ async function executeNode(node: WorkflowNode, input: unknown): Promise<unknown>
     case "condition":
       return evaluateCondition(input, node.config);
     case "http":
-      return executeHttp(node.config, input);
-    case "code":
+      return executeHttp(node.config, input, orgId);
+    case "code": {
+      const handler = new CodeNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
     case "transform":
+      if (getEnv().EXEC_CODE_DISABLED) throw new CodeExecutionDisabledError();
       throw new Error(
-        "Code/transform nodes are disabled for security (C-03 fix). " +
-        "User-supplied code execution was removed because the vm sandbox is trivially escapable. " +
-        "Use AI nodes, HTTP nodes, or condition nodes instead."
+        "Code/transform nodes are unsupported because user-supplied code execution is disabled for security."
       );
     case "output":
       return input;
@@ -477,6 +467,43 @@ async function executeNode(node: WorkflowNode, input: unknown): Promise<unknown>
     case "respond_webhook": {
       const config = node.config as { statusCode?: number; body?: string };
       return { statusCode: config.statusCode ?? 200, body: config.body ?? "OK" };
+    }
+    case "gmailTrigger": {
+      const params = node.config.parameters as Record<string, unknown> | undefined;
+      const options = asObject(params?.options);
+      const filters = asObject(params?.filters);
+      return {
+        ...asObject(input),
+        _trigger: "gmailTrigger",
+        _config: { event: params?.event, filters, options },
+      };
+    }
+    case "googleDrive": {
+      const params = node.config.parameters as Record<string, unknown> | undefined;
+      return {
+        ...asObject(input),
+        _action: "googleDrive",
+        _config: { resource: params?.resource, operation: params?.operation, name: params?.name },
+      };
+    }
+    case "evaluationTrigger":
+      return executeEvaluationTrigger(node.config, input);
+    case "emailReadImap": {
+      const params = node.config.parameters as Record<string, unknown> | undefined;
+      const options = asObject(params?.options);
+      return {
+        ...asObject(input),
+        _trigger: "emailReadImap",
+        _config: { options },
+      };
+    }
+    case "gmail": {
+      const params = node.config.parameters as Record<string, unknown> | undefined;
+      return {
+        ...asObject(input),
+        _action: "gmail",
+        _config: { operation: params?.operation },
+      };
     }
     default:
       throw new Error(`Unsupported workflow node type: ${node.type}`);
@@ -530,7 +557,9 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
   const outgoing = new Map<string, WorkflowEdge[]>();
   for (const edge of edges) outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
 
-  const trigger = nodes.find((node) => ["trigger", "webhook", "cron", "manual"].includes(node.type));
+  const trigger = nodes.find((node) =>
+    ["trigger", "webhook", "cron", "manual", "evaluationTrigger", "gmailTrigger", "emailReadImap"].includes(node.type),
+  );
   if (!trigger) throw new Error("Workflow has no trigger node");
 
   const reachable = new Set<string>();
@@ -587,7 +616,7 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
     }
 
     try {
-      const output = await withTimeout(executeNode(node, nodeInput), NODE_TIMEOUT_MS, "Node execution timed out");
+      const output = await withTimeout(executeNode(node, nodeInput, execution.orgId), NODE_TIMEOUT_MS, "Node execution timed out");
       await prisma.nodeExecution.update({
         where: { id: nodeExecution.id },
         data: {
@@ -635,8 +664,12 @@ export async function createWorkflowExecution(
   input?: unknown,
   options: { userId?: string; trigger?: string } = {},
 ): Promise<ExecutionResult> {
-  const workflow = await prisma.workflow.findFirst({ where: { id: workflowId } });
+  const workflow = await prisma.workflow.findFirst({
+    where: { id: workflowId },
+    include: { nodes: true, edges: true, versions: { orderBy: { version: "desc" }, take: 1 } },
+  });
   if (!workflow) throw new Error("Workflow not found");
+  if (getEnv().EXEC_CODE_DISABLED && containsCodeNode(workflow)) throw new CodeExecutionDisabledError();
   return (await prisma.workflowExecution.create({
     data: {
       workflowId,

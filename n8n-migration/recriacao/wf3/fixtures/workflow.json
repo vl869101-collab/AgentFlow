@@ -1,0 +1,91 @@
+{
+  "workflow": {
+    "name": "My workflow 2",
+    "description": "Email Trigger (IMAP) → Gmail Add Label — native AgentFlow recreation",
+    "originalN8nId": "2ZImw8KzAbLMT7ca",
+    "versionId": "f8f45b27-05d1-4f3f-9848-2311beba6a02",
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "tags": ["wf3", "email", "gmail"]
+  },
+  "nodes": [
+    {
+      "id": "n8n-00b57fc2-a2f3-41c9-aa5b-e833a162659a",
+      "type": "emailReadImap",
+      "label": "Email Trigger (IMAP)",
+      "config": {
+        "typeVersion": 2.2,
+        "originalN8nType": "n8n-nodes-base.emailReadImap",
+        "originalN8nId": "00b57fc2-a2f3-41c9-aa5b-e833a162659a",
+        "parameters": {
+          "options": {
+            "postProcessAction": "read",
+            "mailBox": "INBOX",
+            "format": "resolved"
+          }
+        },
+        "credentials": {
+          "imapEmail": "cred-imap-001"
+        }
+      },
+      "position": { "x": 0, "y": 0 }
+    },
+    {
+      "id": "n8n-82fca877-6b61-4f40-902a-fccd7cf5beea",
+      "type": "gmail",
+      "label": "Add label to message",
+      "config": {
+        "typeVersion": 2.2,
+        "originalN8nType": "n8n-nodes-base.gmail",
+        "originalN8nId": "82fca877-6b61-4f40-902a-fccd7cf5beea",
+        "parameters": {
+          "operation": "addLabels",
+          "labelIds": ["INBOX"]
+        },
+        "credentials": {
+          "gmailOAuth2Api": "cred-gmail-001"
+        },
+        "webhookId": "09fc1dd4-a6dd-4e14-a817-de6d6c6503fd"
+      },
+      "position": { "x": 224, "y": 0 }
+    }
+  ],
+  "edges": [
+    {
+      "id": "n8n-edge-imap-to-gmail",
+      "sourceNodeId": "n8n-00b57fc2-a2f3-41c9-aa5b-e833a162659a",
+      "targetNodeId": "n8n-82fca877-6b61-4f40-902a-fccd7cf5beea"
+    }
+  ],
+  "webhook": {
+    "path": "09fc1dd4-a6dd-4e14-a817-de6d6c6503fd",
+    "method": "POST",
+    "description": "Webhook trigger for My workflow 2 — triggers when POSTed with valid HMAC signature"
+  },
+  "credentials": {
+    "imapEmail": {
+      "name": "IMAP Email",
+      "type": "basic",
+      "provider": "imap",
+      "data": {
+        "host": "imap.gmail.com",
+        "port": 993,
+        "user": "trigger@lab.local",
+        "password": "test-imap-password",
+        "secure": true
+      }
+    },
+    "gmailOAuth2Api": {
+      "name": "Gmail OAuth2 API",
+      "type": "oauth2",
+      "provider": "gmail",
+      "data": {
+        "clientId": "test-client-id.apps.googleusercontent.com",
+        "clientSecret": "test-client-secret",
+        "accessToken": "ya29.test-access-token",
+        "refreshToken": "ya29.test-refresh-token"
+      }
+    }
+  }
+}

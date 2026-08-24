@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
-  ChevronDown,
   ChevronRight,
   Clock,
   CreditCard,
@@ -58,7 +57,6 @@ function LogoMark({ className }: { className?: string }) {
 
 export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClose }: { collapsed: boolean; onCollapsedChange: (value: boolean) => void; mobileOpen: boolean; onMobileClose: () => void }) {
   const pathname = usePathname();
-  const [profileOpen, setProfileOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [variableHover, setVariableHover] = useState(false);
   const plusMenuRef = useRef<HTMLDivElement>(null);
@@ -201,42 +199,12 @@ export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClos
           })}
         </nav>
 
-        {/* Profile + collapse */}
+        {/* Collapse only - profile removed per n8n original, Settings via footerNav */}
         <div className="border-t border-white/10 p-2">
           {collapsed ? (
             <button type="button" onClick={() => onCollapsedChange(false)} className="flex w-full items-center justify-center rounded-md px-3 py-2 text-zinc-400 hover:bg-white/5 hover:text-zinc-200" title="Expand sidebar"><PanelLeftOpen className="h-4 w-4" /></button>
           ) : (
-            <>
-              <div className="relative">
-                <button type="button" onClick={() => setProfileOpen((value) => !value)} className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left hover:bg-white/5" aria-expanded={profileOpen}>
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-500 text-xs font-semibold text-white">VS</span>
-                  <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-zinc-200">Victor Silva</span><span className="block text-[10px] text-zinc-600">Admin</span></span>
-                  <ChevronDown className={cn("h-3.5 w-3.5 text-zinc-600 transition-transform", profileOpen && "rotate-180")} />
-                </button>
-                {profileOpen ? (
-                  <div className="absolute bottom-full left-0 mb-1 max-h-80 w-56 overflow-y-auto rounded-lg border border-white/10 bg-zinc-900 p-1 shadow-2xl shadow-black/40">
-                    <Link href="/personal" onClick={() => setProfileOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><UserRound className="h-4 w-4 text-zinc-500" /> Personal</Link>
-                    <Link href="/settings" onClick={() => setProfileOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><UserRound className="h-4 w-4 text-zinc-500" /> Users</Link>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><Sparkles className="h-4 w-4 text-zinc-500" /> AI Usage</button>
-                    <Link href="/settings" onClick={() => setProfileOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><UserRound className="h-4 w-4 text-zinc-500" /> Roles <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-400">New</span></Link>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><X className="h-4 w-4 text-zinc-500" /> External Secrets</button>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><LayoutGrid className="h-4 w-4 text-zinc-500" /> Environments</button>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><UserRound className="h-4 w-4 text-zinc-500" /> SSO</button>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><ShieldCheck className="h-4 w-4 text-zinc-500" /> Security &amp; policies</button>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><LayoutGrid className="h-4 w-4 text-zinc-500" /> LDAP</button>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><PanelLeftOpen className="h-4 w-4 text-zinc-500" /> Log Streaming</button>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><BarChart3 className="h-4 w-4 text-zinc-500" /> OpenTelemetry</button>
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><LayoutGrid className="h-4 w-4 text-zinc-500" /> Community nodes</button>
-                    <Link href="/mcp" onClick={() => setProfileOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><Settings className="h-4 w-4 text-zinc-500" /> Instance-level MCP</Link>
-                    <Link href="/assistant" onClick={() => setProfileOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><HelpCircle className="h-4 w-4 text-zinc-500" /> Chat <span className="rounded-md bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300">Preview</span></Link>
-                    <Link href="/assistant" onClick={() => setProfileOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><Sparkles className="h-4 w-4 text-violet-500" /> AI Assistant <span className="rounded-md bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300">Preview</span></Link>
-                    <div className="my-1 border-t border-white/10" />
-                    <button type="button" onClick={() => setProfileOpen(false)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-zinc-300 hover:bg-white/5 hover:text-zinc-100"><PanelLeftClose className="h-4 w-4 text-zinc-500" /> Sign out</button>
-                  </div>
-                ) : null}
-              </div>
-              <button type="button" onClick={() => onCollapsedChange(true)} className="hidden w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-zinc-500 hover:bg-white/5 hover:text-zinc-200 lg:flex" title="Collapse sidebar"><PanelLeftClose className="h-4 w-4" /><span>Collapse sidebar</span></button>
-            </>
+            <button type="button" onClick={() => onCollapsedChange(true)} className="hidden w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-zinc-500 hover:bg-white/5 hover:text-zinc-200 lg:flex" title="Collapse sidebar"><PanelLeftClose className="h-4 w-4" /><span>Collapse sidebar</span></button>
           )}
         </div>
       </aside>

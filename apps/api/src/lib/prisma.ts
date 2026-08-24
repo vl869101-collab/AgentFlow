@@ -1,16 +1,27 @@
 import { store } from "./store.js";
 import { PrismaClient } from "@prisma/client";
 
-// ponytail: global singleton, skip Prisma when no DATABASE_URL
 let prismaInstance: any;
 
 function getPrisma() {
+  // Memory mode takes precedence even if DATABASE_URL was polluted by a
+  // global @prisma/client that does dotenv.config() on import (e.g. sibling
+  // project deploypulse/.env). Tests set ALLOW_MEMORY_DB=1 + delete
+  // DATABASE_URL before importing server, but the global client's import
+  // side-effect restores DATABASE_URL before getPrisma() runs.
+  if (process.env.ALLOW_MEMORY_DB === "1") {
+    if (prismaInstance !== store) {
+      console.warn("[api] ALLOW_MEMORY_DB=1 — using the in-memory database");
+      prismaInstance = store;
+      (globalThis as unknown as { prisma: any }).prisma = undefined;
+    }
+    return prismaInstance;
+  }
+
   if (prismaInstance) return prismaInstance;
 
   if (!process.env.DATABASE_URL) {
-    console.log("[api] No DATABASE_URL — using in-memory store");
-    prismaInstance = store;
-    return prismaInstance;
+    throw new Error("[api] DATABASE_URL is required. Set ALLOW_MEMORY_DB=1 only to explicitly enable the in-memory database.");
   }
 
   // Real Prisma when DATABASE_URL is set. Keep this import static because the

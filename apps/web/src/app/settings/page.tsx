@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CreditCard, Gauge, Mail, Save, Settings2, UsersRound } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/Select";
 import { TabItem, Tabs } from "@/components/ui/Tabs";
 
 const tabs: TabItem[] = [
+  { id: "personal", label: "Personal", icon: <UsersRound className="h-3.5 w-3.5" /> },
   { id: "general", label: "General", icon: <Settings2 className="h-3.5 w-3.5" /> },
   { id: "team", label: "Team", icon: <UsersRound className="h-3.5 w-3.5" /> },
   { id: "billing", label: "Billing", icon: <CreditCard className="h-3.5 w-3.5" /> },
@@ -18,10 +19,44 @@ const tabs: TabItem[] = [
 ];
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState("general");
+  const [tab, setTab] = useState("personal");
   const [message, setMessage] = useState("");
   function save() { setMessage("Settings saved"); window.setTimeout(() => setMessage(""), 2200); }
-  return <AppLayout><div className="animate-in fade-in duration-300"><div><h1 className="text-2xl font-semibold text-zinc-50">Settings</h1><p className="mt-1 text-sm text-zinc-500">Manage your workspace and account preferences</p></div><div className="mt-8"><Tabs items={tabs} value={tab} onChange={setTab} /></div><div className="mt-8 max-w-3xl">{tab === "general" ? <GeneralSettings onSave={save} /> : tab === "team" ? <TeamSettings onSave={save} /> : tab === "billing" ? <BillingSettings /> : <UsageSettings />}</div>{message ? <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-green-500/20 bg-zinc-900 px-4 py-2.5 text-xs text-green-300 shadow-2xl shadow-black/40"><Save className="h-3.5 w-3.5" />{message}</div> : null}</div></AppLayout>;
+  return <AppLayout><div className="animate-in fade-in duration-300"><div className="flex justify-between"><div><h1 className="text-2xl font-semibold text-zinc-50">Settings</h1><p className="mt-1 text-sm text-zinc-500">Manage your workspace and account preferences</p></div></div><div className="mt-8"><Tabs items={tabs} value={tab} onChange={setTab} /></div><div className="mt-8 max-w-3xl">{tab === "personal" ? <PersonalSettings onSave={save} /> : tab === "general" ? <GeneralSettings onSave={save} /> : tab === "team" ? <TeamSettings onSave={save} /> : tab === "billing" ? <BillingSettings /> : <UsageSettings />}</div>{message ? <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-green-500/20 bg-zinc-900 px-4 py-2.5 text-xs text-green-300 shadow-2xl shadow-black/40"><Save className="h-3.5 w-3.5" />{message}</div> : null}</div></AppLayout>;
+}
+
+function PersonalSettings({ onSave }: { onSave: () => void }) {
+  const [firstName, setFirstName] = useState("Victor");
+  const [lastName, setLastName] = useState("Lima");
+  const [email, setEmail] = useState("vl6675116@gmail.com");
+  const [theme, setTheme] = useState("dark");
+  const [twoFA, setTwoFA] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem("agentflow_user") : null;
+      if (raw) {
+        const u = JSON.parse(raw);
+        const full = (u.name || "Victor Lima").split(" ");
+        setFirstName(full[0] || "Victor");
+        setLastName(full.slice(1).join(" ") || "Lima");
+        if (u.email) setEmail(u.email);
+      }
+    } catch {}
+  }, []);
+  const initials = `${firstName[0] || "V"}${lastName[0] || "L"}`.toUpperCase();
+  return <div className="space-y-8">
+    <div className="flex items-center justify-between border-b border-white/10 pb-6">
+      <div><h2 className="text-2xl font-semibold text-white tracking-tight">Personal Settings</h2><p className="mt-1 text-sm text-zinc-500">Profile varies per logged-in user</p></div>
+      <div className="flex items-center gap-3">
+        <div className="text-right"><p className="text-sm font-semibold text-white">{firstName} {lastName}</p><p className="text-xs text-zinc-400">Owner</p></div>
+        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-amber-600 to-blue-500 text-xs font-bold text-white">{initials}</span>
+      </div>
+    </div>
+    <div><h3 className="text-base font-semibold text-white">Basic Information</h3><div className="mt-4 grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2"><label className="block"><span className="text-xs font-medium text-zinc-300">First Name <span className="text-violet-500">*</span></span><input value={firstName} onChange={(e) => setFirstName(e.target.value)} className="mt-1.5 h-10 w-full rounded-md border border-white/10 bg-[#1c1c1f] px-3 text-sm text-zinc-100 outline-none focus:border-violet-500" /></label><label className="block"><span className="text-xs font-medium text-zinc-300">Last Name <span className="text-violet-500">*</span></span><input value={lastName} onChange={(e) => setLastName(e.target.value)} className="mt-1.5 h-10 w-full rounded-md border border-white/10 bg-[#1c1c1f] px-3 text-sm text-zinc-100 outline-none focus:border-violet-500" /></label></div><label className="mt-4 block max-w-md"><span className="text-xs font-medium text-zinc-300">Email <span className="text-violet-500">*</span></span><input value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1.5 h-10 w-full rounded-md border border-white/10 bg-[#1c1c1f] px-3 text-sm text-zinc-100 outline-none focus:border-violet-500" /></label></div>
+    <div><h3 className="text-base font-semibold text-white">Security</h3><div className="mt-4 space-y-5"><div><p className="text-sm font-medium text-zinc-200">Password</p><button type="button" className="mt-1 text-sm font-medium text-violet-500 hover:text-violet-400">Change password</button></div><div><p className="text-sm font-medium text-zinc-200">Two-factor authentication (2FA)</p><p className="mt-1 text-xs text-zinc-400">Two-factor authentication is currently {twoFA ? "enabled." : "disabled."} <a className="font-medium text-violet-500 hover:underline">Learn more</a></p><button type="button" onClick={() => setTwoFA((v) => !v)} className="mt-3 inline-flex items-center rounded-md border border-white/10 bg-zinc-800 px-3.5 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700">{twoFA ? "Disable 2FA" : "Enable 2FA"}</button></div></div></div>
+    <div><h3 className="text-base font-semibold text-white">Personalisation</h3><label className="mt-4 block max-w-md"><span className="text-xs font-medium text-zinc-300">Theme</span><select value={theme} onChange={(e) => setTheme(e.target.value)} className="mt-1.5 h-10 w-full rounded-md border border-white/10 bg-[#1c1c1f] px-3 text-sm text-zinc-200 outline-none focus:border-violet-500"><option value="dark">Dark theme</option><option value="light">Light theme</option><option value="system">System</option></select></label></div>
+    <div className="flex items-center gap-3 pt-2"><Button onClick={() => { try { localStorage.setItem("agentflow_user", JSON.stringify({ name: `${firstName} ${lastName}`.trim(), email })); } catch {} onSave(); }} className="bg-violet-500 hover:bg-violet-600 text-white rounded-md px-5 py-2 text-sm font-semibold">Save</Button><span className="text-xs text-zinc-600">Version 2.36.5</span></div>
+  </div>;
 }
 
 function GeneralSettings({ onSave }: { onSave: () => void }) {
