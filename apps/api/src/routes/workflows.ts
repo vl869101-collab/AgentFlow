@@ -8,6 +8,7 @@ import { createWorkflowExecution, runExecution } from "../services/executor.js";
 import { enqueueExecution } from "../services/queue.js";
 import { createWorkflowSchema, saveWorkflowCanvasSchema, updateWorkflowSchema, importN8nWorkflow } from "@agentflow/shared";
 import { limitsForPlan } from "../lib/plans.js";
+import { computeWorkflowDiff, type WorkflowSnapshot } from "../services/workflow-diff.js";
 
 type CanvasValue = Record<string, any>;
 
@@ -303,5 +304,107 @@ export async function workflowRoutes(app: FastifyInstance) {
       include: { nodes: true, edges: true },
     });
     return reply.status(201).send({ workflow: serializeWorkflow(created), warnings: result.warnings });
+  });
+
+  // ── Versioning & Semantic Diff (TASK-15) ─────────────────────
+
+  // List all versions of a workflow
+  app.get("/:id/versions", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const orgId = await activeOrgId(request);
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
+    if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const versions = await prisma.workflowVersion.findMany({
+      where: { workflowId: id },
+      orderBy: { version: "desc" },
+    });
+
+    return versions.map((v: any) => ({
+      id: v.id,
+      version: v.version,
+      createdAt: v.createdAt,
+      snapshot: typeof v.snapshot === "string" ? JSON.parse(v.snapshot) : v.snapshot,
+    }));
+  });
+
+  // Calculate semantic diff between two versions
+  app.get("/:id/diff", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const orgId = await activeOrgId(request);
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
+    if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const query = (request.query as Record<string, string>) ?? {};
+    const fromVersionNum = parseInt(query.fromVersion ?? query.v1 ?? "1", 10);
+    const toVersionNum = parseInt(query.toVersion ?? query.v2 ?? "2", 10);
+
+    const [v1Record, v2Record] = await Promise.all([
+      prisma.workflowVersion.findFirst({ where: { workflowId: id, version: fromVersionNum } }),
+      prisma.workflowVersion.findFirst({ where: { workflowId: id, version: toVersionNum } }),
+    ]);
+
+    if (!v1Record && !v2Record) {
+      return reply.code(404).send({ error: "Specified workflow versions not found", code: "NOT_FOUND" });
+    }
+
+    const v1Snapshot: WorkflowSnapshot = v1Record
+      ? (typeof v1Record.snapshot === "string" ? JSON.parse(v1Record.snapshot) : v1Record.snapshot)
+      : {};
+    const v2Snapshot: WorkflowSnapshot = v2Record
+      ? (typeof v2Record.snapshot === "string" ? JSON.parse(v2Record.snapshot) : v2Record.snapshot)
+      : {};
+
+    const diff = computeWorkflowDiff(v1Snapshot, v2Snapshot);
+    return {
+      workflowId: id,
+      fromVersion: fromVersionNum,
+      toVersion: toVersionNum,
+      ...diff,
+    };
+  });
+
+  // Rollback workflow to a specific version
+  app.post("/:id/rollback", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const orgId = await activeOrgId(request);
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
+    if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const body = (request.body as { targetVersion?: number; version?: number }) ?? {};
+    const targetVersionNum = body.targetVersion ?? body.version;
+
+    if (!targetVersionNum || typeof targetVersionNum !== "number") {
+      return reply.code(400).send({ error: "targetVersion (number) is required", code: "INVALID_INPUT" });
+    }
+
+    const targetVersion = await prisma.workflowVersion.findFirst({
+      where: { workflowId: id, version: targetVersionNum },
+    });
+
+    if (!targetVersion) {
+      return reply.code(404).send({ error: `Version ${targetVersionNum} not found for this workflow`, code: "NOT_FOUND" });
+    }
+
+    const snapshot = typeof targetVersion.snapshot === "string" ? JSON.parse(targetVersion.snapshot) : targetVersion.snapshot;
+    await saveCanvas(id, snapshot);
+
+    const updated = await prisma.workflow.findFirst({
+      where: { id, orgId },
+      include: { nodes: true, edges: true, versions: { orderBy: { version: "desc" }, take: 1 } },
+    });
+
+    return {
+      ok: true,
+      rolledBackToVersion: targetVersionNum,
+      newVersion: updated?.versions?.[0]?.version,
+      workflow: serializeWorkflow(updated),
+    };
   });
 }

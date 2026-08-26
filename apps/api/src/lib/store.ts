@@ -371,6 +371,12 @@ export const store = {
       if (orderBy?.version === "desc") values.sort((a: any, b: any) => b.version - a.version);
       return values[0] ?? null;
     },
+    async findMany({ where, orderBy, take }: { where?: any; orderBy?: any; take?: number } = {}) {
+      let values = findMany(workflowVersions, where);
+      if (orderBy?.version === "desc") values.sort((a: any, b: any) => b.version - a.version);
+      if (take !== undefined) values = values.slice(0, take);
+      return values;
+    },
     async create({ data }: { data: any }) {
       const version = { id: cuid(), ...data, createdAt: now() };
       workflowVersions.set(version.id, version);

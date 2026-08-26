@@ -4,6 +4,20 @@ import { getEnv } from "../lib/env.js";
 let workflowQueue: Queue | undefined;
 let dlqQueue: Queue | undefined;
 
+// In-memory DLQ store for test & offline environments
+export interface DLQRecord {
+  id: string;
+  executionId: string;
+  error: string;
+  metadata?: Record<string, unknown>;
+  timestamp: string;
+  attemptsMade?: number;
+  workflowId?: string;
+  orgId?: string;
+}
+
+const inMemoryDLQ = new Map<string, DLQRecord>();
+
 function getRedisConnection() {
   const redis = new URL(getEnv().REDIS_URL);
   return {
@@ -20,8 +34,12 @@ export function getWorkflowQueue(): Queue | undefined {
   if (!enabled) return undefined;
   if (workflowQueue) return workflowQueue;
 
-  workflowQueue = new Queue("workflows", { connection: getRedisConnection() });
-  return workflowQueue;
+  try {
+    workflowQueue = new Queue("workflows", { connection: getRedisConnection() });
+    return workflowQueue;
+  } catch {
+    return undefined;
+  }
 }
 
 export function getDLQQueue(): Queue | undefined {
@@ -29,14 +47,192 @@ export function getDLQQueue(): Queue | undefined {
   if (!enabled) return undefined;
   if (dlqQueue) return dlqQueue;
 
-  dlqQueue = new Queue("workflows-dlq", { connection: getRedisConnection() });
-  return dlqQueue;
+  try {
+    dlqQueue = new Queue("workflows-dlq", { connection: getRedisConnection() });
+    return dlqQueue;
+  } catch {
+    return undefined;
+  }
 }
 
 export function getQueueByName(name: "workflows" | "workflows-dlq" | string): Queue | undefined {
   if (name === "workflows") return getWorkflowQueue();
   if (name === "workflows-dlq" || name === "dlq") return getDLQQueue();
   return undefined;
+}
+
+export const DEFAULT_JOB_OPTIONS = {
+  attempts: 3,
+  backoff: {
+    type: "exponential" as const,
+    delay: 1000,
+  },
+  removeOnComplete: 1000,
+  removeOnFail: 5000,
+};
+
+export const DEFAULT_DLQ_OPTIONS = {
+  attempts: 1,
+  removeOnComplete: 5000,
+  removeOnFail: 10000,
+};
+
+export async function sendToDLQ(executionId: string, error: string, metadata?: Record<string, unknown>): Promise<boolean> {
+  const jobId = `dlq-${executionId}-${Date.now()}`;
+  const record: DLQRecord = {
+    id: jobId,
+    executionId,
+    error,
+    metadata,
+    timestamp: new Date().toISOString(),
+    attemptsMade: (metadata?.attemptsMade as number) ?? 3,
+    workflowId: metadata?.workflowId as string | undefined,
+    orgId: metadata?.orgId as string | undefined,
+  };
+
+  inMemoryDLQ.set(jobId, record);
+
+  const dlq = getDLQQueue();
+  if (dlq) {
+    try {
+      await dlq.add("dead-letter", record, { jobId, ...DEFAULT_DLQ_OPTIONS });
+    } catch (err) {
+      console.error("Unable to enqueue into BullMQ DLQ", err);
+    }
+  }
+
+  return true;
+}
+
+export async function enqueueExecution(executionId: string, metadata: Record<string, unknown> = {}): Promise<boolean> {
+  const queue = getWorkflowQueue();
+  if (!queue) return false;
+  try {
+    await queue.add("execute", { executionId, ...metadata }, { jobId: executionId, ...DEFAULT_JOB_OPTIONS });
+    return true;
+  } catch (error) {
+    console.error("Unable to enqueue workflow execution", error);
+    return false;
+  }
+}
+
+export async function getDLQJobsList(options: {
+  workflowId?: string;
+  orgId?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<{ jobs: DLQRecord[]; total: number }> {
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+
+  const dlq = getDLQQueue();
+  if (dlq) {
+    try {
+      const bullJobs = await dlq.getJobs(["waiting", "completed", "failed", "delayed", "active"], offset, offset + limit - 1);
+      const jobs: DLQRecord[] = bullJobs.map((j) => ({
+        id: j.id ?? "",
+        executionId: j.data?.executionId ?? "",
+        error: j.data?.error ?? j.failedReason ?? "Unknown failure",
+        metadata: j.data?.metadata,
+        timestamp: j.data?.timestamp ?? new Date(j.timestamp).toISOString(),
+        attemptsMade: j.attemptsMade,
+        workflowId: j.data?.workflowId,
+        orgId: j.data?.orgId,
+      }));
+      const total = await dlq.count();
+      return { jobs, total };
+    } catch {}
+  }
+
+  let records = Array.from(inMemoryDLQ.values());
+  if (options.workflowId) {
+    records = records.filter((r) => r.workflowId === options.workflowId);
+  }
+  if (options.orgId) {
+    records = records.filter((r) => r.orgId === options.orgId);
+  }
+
+  const total = records.length;
+  const jobs = records.slice(offset, offset + limit);
+  return { jobs, total };
+}
+
+export async function getDLQJobById(jobId: string): Promise<DLQRecord | null> {
+  const dlq = getDLQQueue();
+  if (dlq) {
+    try {
+      const job = await dlq.getJob(jobId);
+      if (job) {
+        return {
+          id: job.id ?? "",
+          executionId: job.data?.executionId ?? "",
+          error: job.data?.error ?? job.failedReason ?? "Unknown failure",
+          metadata: job.data?.metadata,
+          timestamp: job.data?.timestamp ?? new Date(job.timestamp).toISOString(),
+          attemptsMade: job.attemptsMade,
+          workflowId: job.data?.workflowId,
+          orgId: job.data?.orgId,
+        };
+      }
+    } catch {}
+  }
+
+  return inMemoryDLQ.get(jobId) ?? null;
+}
+
+export async function replayDLQJob(jobId: string): Promise<boolean> {
+  const record = await getDLQJobById(jobId);
+  if (!record) return false;
+
+  // Re-enqueue execution
+  await enqueueExecution(record.executionId, { replayedFromDLQ: true, dlqJobId: jobId });
+
+  // Remove from DLQ
+  inMemoryDLQ.delete(jobId);
+  const dlq = getDLQQueue();
+  if (dlq) {
+    try {
+      const job = await dlq.getJob(jobId);
+      if (job) await job.remove();
+    } catch {}
+  }
+
+  return true;
+}
+
+export async function replayBatchDLQ(jobIds: string[]): Promise<{ replayed: number; failed: number }> {
+  let replayed = 0;
+  let failed = 0;
+
+  for (const id of jobIds) {
+    const success = await replayDLQJob(id);
+    if (success) replayed++;
+    else failed++;
+  }
+
+  return { replayed, failed };
+}
+
+export async function replayAllDLQ(): Promise<{ replayed: number; failed: number }> {
+  const { jobs } = await getDLQJobsList({ limit: 1000 });
+  const ids = jobs.map((j) => j.id);
+  return replayBatchDLQ(ids);
+}
+
+export async function purgeDLQ(): Promise<number> {
+  const count = inMemoryDLQ.size;
+  inMemoryDLQ.clear();
+
+  const dlq = getDLQQueue();
+  if (dlq) {
+    try {
+      await dlq.drain();
+      await dlq.clean(0, 10000, "failed");
+      await dlq.clean(0, 10000, "completed");
+    } catch {}
+  }
+
+  return count;
 }
 
 export async function getQueueMetrics() {
@@ -61,54 +257,17 @@ export async function getQueueMetrics() {
     }
   };
 
+  const dlqCount = inMemoryDLQ.size;
+  const isAnomaly = dlqCount > 100;
+
   return {
     workflows: await getCounts(q),
-    dlq: await getCounts(dlq),
+    dlq: {
+      ...(await getCounts(dlq)),
+      inMemoryCount: dlqCount,
+      anomalyAlert: isAnomaly,
+    },
   };
-}
-
-export const DEFAULT_JOB_OPTIONS = {
-  attempts: 3,
-  backoff: {
-    type: "exponential" as const,
-    delay: 1000,
-  },
-  removeOnComplete: 1000,
-  removeOnFail: 5000,
-};
-
-export const DEFAULT_DLQ_OPTIONS = {
-  attempts: 1,
-  removeOnComplete: 5000,
-  removeOnFail: 10000,
-};
-
-export async function sendToDLQ(executionId: string, error: string, metadata?: Record<string, unknown>): Promise<boolean> {
-  const dlq = getDLQQueue();
-  if (!dlq) return false;
-  try {
-    await dlq.add(
-      "dead-letter",
-      { executionId, error, metadata, timestamp: new Date().toISOString() },
-      { jobId: `dlq-${executionId}-${Date.now()}`, ...DEFAULT_DLQ_OPTIONS }
-    );
-    return true;
-  } catch (err) {
-    console.error("Unable to enqueue into DLQ", err);
-    return false;
-  }
-}
-
-export async function enqueueExecution(executionId: string): Promise<boolean> {
-  const queue = getWorkflowQueue();
-  if (!queue) return false;
-  try {
-    await queue.add("execute", { executionId }, { jobId: executionId, ...DEFAULT_JOB_OPTIONS });
-    return true;
-  } catch (error) {
-    console.error("Unable to enqueue workflow execution", error);
-    return false;
-  }
 }
 
 export async function retryFailedJobs(queueName: "workflows" | "workflows-dlq" | string = "workflows"): Promise<number> {

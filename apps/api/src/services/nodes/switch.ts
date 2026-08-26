@@ -1,10 +1,12 @@
-import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem } from "./types.js";
+import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem, wrapItems } from "./types.js";
+import { getByPath, evaluateExpression, buildExpressionContext } from "../expressions.js";
 
 export interface SwitchRule {
   field?: string;
   operator?: string;
   value?: unknown;
   outputIndex?: number;
+  outputName?: string;
 }
 
 export class SwitchNodeHandler implements NodeHandler {
@@ -17,55 +19,102 @@ export class SwitchNodeHandler implements NodeHandler {
     const fallbackOutput = (config.fallbackOutput as number) ?? 0;
     const items: NodeItem[] = [];
 
-    const rawInput = ctx.input;
-    const inputItems = Array.isArray(rawInput)
-      ? rawInput
-      : rawInput && typeof rawInput === "object" && "items" in rawInput && Array.isArray((rawInput as any).items)
-      ? (rawInput as any).items
-      : [rawInput];
+    const inputItems = wrapItems(ctx.input);
 
-    for (const item of inputItems) {
-      const json = item && typeof item === "object" && "json" in item ? item.json : (item as Record<string, unknown>) ?? {};
-      const binary = item && typeof item === "object" && "binary" in item ? item.binary : undefined;
+    for (let itemIndex = 0; itemIndex < inputItems.length; itemIndex++) {
+      const item = inputItems[itemIndex];
+      const json = item.json;
+      const binary = item.binary;
+
+      const exprContext = buildExpressionContext({
+        item,
+        items: inputItems,
+        nodeConfig: config,
+        executionId: ctx.executionId,
+        workflowId: ctx.workflowId,
+      });
 
       let matchedOutput = fallbackOutput;
+      let matchedOutputName: string | undefined = config.fallbackOutputName as string | undefined;
       let matched = false;
 
       for (let i = 0; i < rules.length; i++) {
         const rule = rules[i];
-        const fieldVal = rule.field ? (json as any)[rule.field] : undefined;
-        const op = (rule.operator ?? "equals").toLowerCase();
-        const expected = rule.value;
+        const rawFieldVal = rule.field ? getByPath(json, rule.field) : undefined;
+        const op = String(rule.operator ?? "equals").toLowerCase().replace(/[-_]/g, "");
+        
+        let expected = rule.value;
+        if (typeof expected === "string" && expected.includes("{{")) {
+          expected = evaluateExpression(expected, exprContext);
+        }
 
         let pass = false;
         switch (op) {
           case "eq":
           case "equals":
-            pass = String(fieldVal) === String(expected);
+            pass = typeof rawFieldVal === "number" && typeof expected === "number"
+              ? rawFieldVal === expected
+              : String(rawFieldVal ?? "") === String(expected ?? "");
             break;
           case "notequals":
           case "neq":
-            pass = String(fieldVal) !== String(expected);
+          case "ne":
+            pass = typeof rawFieldVal === "number" && typeof expected === "number"
+              ? rawFieldVal !== expected
+              : String(rawFieldVal ?? "") !== String(expected ?? "");
             break;
           case "contains":
-            pass = String(fieldVal ?? "").includes(String(expected ?? ""));
+            pass = Array.isArray(rawFieldVal)
+              ? rawFieldVal.includes(expected)
+              : String(rawFieldVal ?? "").toLowerCase().includes(String(expected ?? "").toLowerCase());
+            break;
+          case "notcontains":
+            pass = Array.isArray(rawFieldVal)
+              ? !rawFieldVal.includes(expected)
+              : !String(rawFieldVal ?? "").toLowerCase().includes(String(expected ?? "").toLowerCase());
             break;
           case "regex":
-            pass = new RegExp(String(expected)).test(String(fieldVal ?? ""));
+          case "matchesregex":
+            try {
+              pass = new RegExp(String(expected ?? "")).test(String(rawFieldVal ?? ""));
+            } catch {
+              pass = false;
+            }
             break;
           case "greaterthan":
           case "gt":
-            pass = Number(fieldVal) > Number(expected);
+            pass = Number(rawFieldVal) > Number(expected);
+            break;
+          case "greaterthanorequal":
+          case "gte":
+          case "ge":
+            pass = Number(rawFieldVal) >= Number(expected);
             break;
           case "lessthan":
           case "lt":
-            pass = Number(fieldVal) < Number(expected);
+            pass = Number(rawFieldVal) < Number(expected);
+            break;
+          case "lessthanorequal":
+          case "lte":
+          case "le":
+            pass = Number(rawFieldVal) <= Number(expected);
             break;
           case "isempty":
-            pass = fieldVal === undefined || fieldVal === null || fieldVal === "";
+          case "empty":
+            pass = rawFieldVal === undefined || rawFieldVal === null || rawFieldVal === "" || (Array.isArray(rawFieldVal) && rawFieldVal.length === 0);
             break;
           case "isnotempty":
-            pass = fieldVal !== undefined && fieldVal !== null && fieldVal !== "";
+          case "notempty":
+            pass = rawFieldVal !== undefined && rawFieldVal !== null && rawFieldVal !== "" && (!Array.isArray(rawFieldVal) || rawFieldVal.length > 0);
+            break;
+          case "startswith":
+            pass = String(rawFieldVal ?? "").toLowerCase().startsWith(String(expected ?? "").toLowerCase());
+            break;
+          case "endswith":
+            pass = String(rawFieldVal ?? "").toLowerCase().endsWith(String(expected ?? "").toLowerCase());
+            break;
+          case "default":
+            pass = true;
             break;
           default:
             pass = false;
@@ -73,6 +122,7 @@ export class SwitchNodeHandler implements NodeHandler {
 
         if (pass) {
           matchedOutput = rule.outputIndex ?? i;
+          matchedOutputName = rule.outputName;
           matched = true;
           break;
         }
@@ -82,6 +132,7 @@ export class SwitchNodeHandler implements NodeHandler {
         json: {
           ...json,
           _matchedOutput: matchedOutput,
+          _matchedOutputName: matchedOutputName,
           _matched: matched,
         },
         binary,
