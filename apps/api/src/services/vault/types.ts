@@ -45,4 +45,5 @@ export interface EncryptedFieldEnvelope {
   ct: string;
   tag: string;
   enc: "aes-256-gcm-field";
+  kv?: number;
 }

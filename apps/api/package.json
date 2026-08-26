@@ -7,7 +7,7 @@
     "dev": "tsx watch --env-file=../../.env src/server.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/backend.test.ts test/mcp.test.ts test/vault.test.ts test/trio10-12.test.ts test/trio13-15.test.ts test/trio16-18.test.ts test/batch-a-22-26.test.ts test/e2e-flow.test.ts test/trio28-29.test.ts test/security.test.ts test/nodes-mission37.test.ts test/mcp-nodes-sdk.test.ts",
+    "test": "tsx --test test/backend.test.ts test/mcp.test.ts test/vault.test.ts test/trio10-12.test.ts test/trio13-15.test.ts test/trio16-18.test.ts test/batch-a-22-26.test.ts test/e2e-flow.test.ts test/trio28-29.test.ts test/security.test.ts test/nodes-mission37.test.ts test/mcp-nodes-sdk.test.ts test/executor-queue-group.test.ts",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@agentflow/shared": "workspace:*",
+    "@agentflow/sdk": "workspace:*",
     "@asteasolutions/zod-to-openapi": "^7.3.4",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^10.0.2",

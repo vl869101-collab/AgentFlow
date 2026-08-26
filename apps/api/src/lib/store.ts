@@ -32,6 +32,7 @@ export const webhooks = new Map<string, any>();
 export const subscriptions = new Map<string, any>();
 export const usageRecords = new Map<string, any>();
 export const refreshTokens = new Map<string, any>();
+export const auditLogs = new Map<string, any>();
 
 // ── Helpers ─────────────────────────────────
 function matches(value: any, where: any): boolean {
@@ -469,6 +470,21 @@ export const store = {
       credentials.set(cred.id, cred);
       return cred;
     },
+    async update({ where, data }: { where: any; data: any }) {
+      const cred = find(credentials, where);
+      if (!cred) throw new Error("Record not found");
+      Object.assign(cred, data, { updatedAt: now() });
+      return cred;
+    },
+    async updateMany({ where, data }: { where: any; data: any }) {
+      let count = 0;
+      for (const cred of credentials.values()) {
+        if (!matches(cred, where)) continue;
+        Object.assign(cred, data, { updatedAt: now() });
+        count++;
+      }
+      return { count };
+    },
     async delete({ where }: { where: any }) {
       credentials.delete(where.id);
       return { count: 1 };
@@ -604,6 +620,39 @@ export const store = {
     },
   },
 
+  auditLog: {
+    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
+      let result = findMany(auditLogs, where);
+      if (orderBy?.createdAt === "desc") {
+        result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
+      } else if (orderBy?.createdAt === "asc") {
+        result.sort((a: any, b: any) => toIsoString(a.createdAt).localeCompare(toIsoString(b.createdAt)));
+      }
+      if (take !== undefined) result = result.slice(skip, skip + take);
+      return result;
+    },
+    async findFirst({ where, orderBy }: { where?: any; orderBy?: any }) {
+      let result = findMany(auditLogs, where);
+      if (orderBy?.createdAt === "desc") {
+        result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
+      } else if (orderBy?.createdAt === "asc") {
+        result.sort((a: any, b: any) => toIsoString(a.createdAt).localeCompare(toIsoString(b.createdAt)));
+      }
+      return result[0] ?? null;
+    },
+    async findUnique({ where }: { where: any }) {
+      return find(auditLogs, where);
+    },
+    async count({ where }: { where?: any } = {}) {
+      return findMany(auditLogs, where).length;
+    },
+    async create({ data }: { data: any }) {
+      const entry = { id: cuid(), ...data, createdAt: data.createdAt ?? now() };
+      auditLogs.set(entry.id, entry);
+      return entry;
+    },
+  },
+
   $queryRaw: async () => [{ ok: 1 }],
   $disconnect: async () => undefined,
 
@@ -614,7 +663,7 @@ export const store = {
 };
 
 export function resetStore() {
-  for (const table of [users, orgs, orgMembers, workflows, workflowNodes, workflowEdges, workflowVersions, executions, nodeExecutions, credentials, approvals, apiKeys, webhooks, subscriptions, usageRecords, refreshTokens]) {
+  for (const table of [users, orgs, orgMembers, workflows, workflowNodes, workflowEdges, workflowVersions, executions, nodeExecutions, credentials, approvals, apiKeys, webhooks, subscriptions, usageRecords, refreshTokens, auditLogs]) {
     table.clear();
   }
 }

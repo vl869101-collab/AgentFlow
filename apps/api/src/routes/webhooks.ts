@@ -8,6 +8,7 @@ import { runExecution } from "../services/executor.js";
 import { enqueueExecution } from "../services/queue.js";
 import { limitsForPlan } from "../lib/plans.js";
 import { checkAndSetWebhookIdempotency } from "../lib/redis.js";
+import { verifyWebhookRequest } from "../services/webhook-verifier.js";
 
 function executeTelegramTrigger(_config: any, body: any) {
   return {
@@ -151,19 +152,15 @@ export async function webhookRoutes(app: FastifyInstance) {
       (request as typeof request & { rawBody?: string }).rawBody ??
       (typeof request.body === "string" ? request.body : JSON.stringify(request.body ?? null));
 
-    // Mandatory HMAC SHA256 signature verification
-    const signature =
-      request.headers["x-webhook-signature"] ||
-      request.headers["x-signature-256"] ||
-      request.headers["x-hub-signature-256"] ||
-      request.headers["x-signature"];
+    // Multi-Provider HMAC & signature verification (GitHub, Shopify, Stripe, Slack, Generic)
+    const providerHeader = (request.headers["x-webhook-provider"] as string) || "generic";
+    const verification = verifyWebhookRequest(providerHeader, webhook.secret ?? "", rawBody, request.headers as any);
 
-    if (!signature) {
-      return reply.code(401).send({ error: "Missing signature", code: "MISSING_SIGNATURE" });
-    }
-
-    if (!verifySignature(webhook.secret ?? "", rawBody, String(signature))) {
-      return reply.code(401).send({ error: "Invalid signature", code: "INVALID_SIGNATURE" });
+    if (!verification.valid) {
+      return reply.code(401).send({
+        error: verification.error || (verification.code === "MISSING_SIGNATURE" ? "Missing signature" : "Invalid signature"),
+        code: verification.code || "INVALID_SIGNATURE",
+      });
     }
 
     // 24h Idempotency check via Redis SET NX

@@ -6,12 +6,59 @@ const IV_LENGTH = 12; // 96-bit IV recommended for GCM
 const AUTH_TAG_LENGTH = 16; // 128-bit authentication tag
 const DEFAULT_KEY_HEX = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-function getEncryptionKey(): Buffer {
+const KEY_RING: Map<number, Buffer> = new Map();
+let CURRENT_KEY_VERSION = 1;
+
+function initKeyRing(): void {
+  if (KEY_RING.size === 0) {
+    const keyHex = process.env.CREDENTIAL_ENCRYPTION_KEY || DEFAULT_KEY_HEX;
+    if (/^[0-9a-fA-F]{64}$/.test(keyHex)) {
+      KEY_RING.set(1, Buffer.from(keyHex, "hex"));
+    } else {
+      KEY_RING.set(1, Buffer.from(DEFAULT_KEY_HEX, "hex"));
+    }
+  }
+}
+
+export function registerEncryptionKeyVersion(version: number, key: Buffer | string): void {
+  if (typeof key === "string") {
+    if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+      throw new Error("Encryption key must be 32 bytes encoded as 64 hex chars");
+    }
+    KEY_RING.set(version, Buffer.from(key, "hex"));
+  } else {
+    if (key.length !== 32) {
+      throw new Error("Encryption key buffer must be 32 bytes");
+    }
+    KEY_RING.set(version, key);
+  }
+}
+
+export function getCurrentKeyVersion(): number {
+  return CURRENT_KEY_VERSION;
+}
+
+export function setCurrentKeyVersion(version: number): void {
+  CURRENT_KEY_VERSION = version;
+}
+
+export function getEncryptionKey(version?: number): Buffer {
+  initKeyRing();
+  const v = version ?? CURRENT_KEY_VERSION;
+  const key = KEY_RING.get(v);
+  if (key) return key;
+
+  // Fallback to version 1 or env key
+  const fallback = KEY_RING.get(1);
+  if (fallback) return fallback;
+
   const keyHex = process.env.CREDENTIAL_ENCRYPTION_KEY || DEFAULT_KEY_HEX;
   if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
     throw new Error("CREDENTIAL_ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hexadecimal characters");
   }
-  return Buffer.from(keyHex, "hex");
+  const buf = Buffer.from(keyHex, "hex");
+  KEY_RING.set(1, buf);
+  return buf;
 }
 
 function decodeBase64(value: unknown, field: string): Buffer {
@@ -39,11 +86,12 @@ export function isEncryptedField(value: unknown): boolean {
   }
 }
 
-export function encryptField(plaintext: string): string {
+export function encryptField(plaintext: string, version?: number): string {
   if (typeof plaintext !== "string") plaintext = String(plaintext ?? "");
   if (isEncryptedField(plaintext)) return plaintext;
 
-  const key = getEncryptionKey();
+  const keyVersion = version ?? CURRENT_KEY_VERSION;
+  const key = getEncryptionKey(keyVersion);
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(ALGORITHM, key, iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
@@ -54,12 +102,13 @@ export function encryptField(plaintext: string): string {
     ct: ciphertext.toString("base64"),
     tag: authTag.toString("base64"),
     enc: "aes-256-gcm-field",
+    kv: keyVersion,
   };
 
   return JSON.stringify(envelope);
 }
 
-export function decryptField(envelope: string): string {
+export function decryptField(envelope: string, version?: number): string {
   if (typeof envelope !== "string" || !isEncryptedField(envelope)) {
     return envelope;
   }
@@ -80,12 +129,27 @@ export function decryptField(envelope: string): string {
     throw new Error("Invalid encrypted credential envelope lengths");
   }
 
+  const targetVersion = (typeof value.kv === "number" ? value.kv : version) ?? CURRENT_KEY_VERSION;
+
+  // Try the specified/envelope version first
   try {
-    const key = getEncryptionKey();
+    const key = getEncryptionKey(targetVersion);
     const decipher = createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
   } catch {
+    // If that fails, attempt all registered keys in key ring as fallback
+    initKeyRing();
+    for (const [v, key] of KEY_RING.entries()) {
+      if (v === targetVersion) continue;
+      try {
+        const decipher = createDecipheriv(ALGORITHM, key, iv);
+        decipher.setAuthTag(authTag);
+        return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+      } catch {
+        // continue trying other keys
+      }
+    }
     throw new Error("Unable to decrypt credential field");
   }
 }
@@ -138,10 +202,14 @@ export function isSensitiveFieldName(fieldName: string): boolean {
   );
 }
 
-export function encryptVaultData(bucket: CredentialBucket | string, data: Record<string, any>): Record<string, any> {
+export function encryptVaultData(
+  bucket: CredentialBucket | string,
+  data: Record<string, any>,
+  version?: number
+): Record<string, any> {
   if (!data || typeof data !== "object") return {};
   if (Array.isArray(data)) {
-    return data.map((item) => (typeof item === "object" ? encryptVaultData(bucket, item) : item)) as any;
+    return data.map((item) => (typeof item === "object" ? encryptVaultData(bucket, item, version) : item)) as any;
   }
 
   const result: Record<string, any> = {};
@@ -150,11 +218,11 @@ export function encryptVaultData(bucket: CredentialBucket | string, data: Record
     if (val === undefined || val === null) {
       result[key] = val;
     } else if (typeof val === "string" && isSensitiveFieldName(key)) {
-      result[key] = isEncryptedField(val) ? val : encryptField(val);
+      result[key] = isEncryptedField(val) ? val : encryptField(val, version);
     } else if (typeof val === "object" && !Array.isArray(val)) {
-      result[key] = encryptVaultData(bucket, val);
+      result[key] = encryptVaultData(bucket, val, version);
     } else if (Array.isArray(val)) {
-      result[key] = val.map((item) => (typeof item === "object" && item !== null ? encryptVaultData(bucket, item) : item));
+      result[key] = val.map((item) => (typeof item === "object" && item !== null ? encryptVaultData(bucket, item, version) : item));
     } else {
       result[key] = val;
     }
@@ -163,10 +231,14 @@ export function encryptVaultData(bucket: CredentialBucket | string, data: Record
   return result;
 }
 
-export function decryptVaultData(bucket: CredentialBucket | string, data: Record<string, any>): Record<string, any> {
+export function decryptVaultData(
+  bucket: CredentialBucket | string,
+  data: Record<string, any>,
+  version?: number
+): Record<string, any> {
   if (!data || typeof data !== "object") return {};
   if (Array.isArray(data)) {
-    return data.map((item) => (typeof item === "object" ? decryptVaultData(bucket, item) : item)) as any;
+    return data.map((item) => (typeof item === "object" ? decryptVaultData(bucket, item, version) : item)) as any;
   }
 
   const result: Record<string, any> = {};
@@ -175,11 +247,11 @@ export function decryptVaultData(bucket: CredentialBucket | string, data: Record
     if (val === undefined || val === null) {
       result[key] = val;
     } else if (typeof val === "string" && isEncryptedField(val)) {
-      result[key] = decryptField(val);
+      result[key] = decryptField(val, version);
     } else if (typeof val === "object" && !Array.isArray(val)) {
-      result[key] = decryptVaultData(bucket, val);
+      result[key] = decryptVaultData(bucket, val, version);
     } else if (Array.isArray(val)) {
-      result[key] = val.map((item) => (typeof item === "object" && item !== null ? decryptVaultData(bucket, item) : item));
+      result[key] = val.map((item) => (typeof item === "object" && item !== null ? decryptVaultData(bucket, item, version) : item));
     } else {
       result[key] = val;
     }

@@ -19,6 +19,9 @@ import { GoogleCalendarNodeHandler } from "./nodes/google-calendar.js";
 import { GoogleDocsNodeHandler } from "./nodes/google-docs.js";
 import { ErrorTriggerNodeHandler } from "./nodes/error-trigger.js";
 import { WaitNodeHandler } from "./nodes/wait.js";
+import { MergeNodeHandler } from "./nodes/merge.js";
+import { FormNodeHandler } from "./nodes/form.js";
+import { wrapItems, unwrapItems, type NodeItem } from "./nodes/types.js";
 
 export type ExecutionResult = {
   id: string;
@@ -171,6 +174,40 @@ function followsConditionEdge(edge: WorkflowEdge, output: unknown): boolean {
     }
   }
 
+  return true;
+}
+
+function followsSwitchEdge(edge: WorkflowEdge, output: unknown): boolean {
+  if (!output || typeof output !== "object") return true;
+  const handle = edge.sourceHandle ?? edge.label;
+  if (!handle) return true;
+
+  const rawItems = Array.isArray(output)
+    ? output
+    : "items" in (output as any) && Array.isArray((output as any).items)
+    ? (output as any).items
+    : [output];
+
+  return rawItems.some((item: any) => {
+    const json = item && typeof item === "object" && "json" in item ? item.json : item;
+    if (!json || typeof json !== "object") return false;
+    const matchedIdx = json._matchedOutput !== undefined ? String(json._matchedOutput) : undefined;
+    const matchedName = json._matchedOutputName;
+    return (
+      handle === matchedIdx ||
+      handle === `output_${matchedIdx}` ||
+      handle === `output${matchedIdx}` ||
+      handle === matchedName ||
+      (handle.toLowerCase() === "default" && !json._matched)
+    );
+  });
+}
+
+function followsEdge(node: WorkflowNode, edge: WorkflowEdge, output: unknown): boolean {
+  const isErrorEdge = (edge.sourceHandle ?? edge.label ?? "").toLowerCase() === "error";
+  if (isErrorEdge) return false;
+  if (node.type === "condition") return followsConditionEdge(edge, output);
+  if (node.type === "switch") return followsSwitchEdge(edge, output);
   return true;
 }
 
@@ -398,9 +435,16 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
       return input;
     }
     case "merge": {
-      // Merge inputs from parallel branches - input is an array of items
-      const items = Array.isArray(input) ? input : [input];
-      return { items };
+      const handler = new MergeNodeHandler();
+      const res = await handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+      return res.items;
     }
     case "filter": {
       // Simple filter: if config has expression, evaluate it; otherwise pass through
@@ -578,6 +622,19 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
         input,
       });
     }
+    case "form":
+    case "formTrigger":
+    case "form_trigger": {
+      const handler = new FormNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
     default:
       throw new Error(`Unsupported workflow node type: ${node.type}`);
   }
@@ -745,7 +802,7 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
 
       for (const edge of outgoing.get(nodeId) ?? []) {
         const target = edge.target;
-        const follows = node.type !== "condition" || followsConditionEdge(edge, output);
+        const follows = followsEdge(node, edge, output);
         remainingIncoming.set(target, (remainingIncoming.get(target) ?? 0) - 1);
         if (follows) {
           activeIncoming.set(target, (activeIncoming.get(target) ?? 0) + 1);
@@ -759,6 +816,102 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
       }
     } catch (error) {
       const nodeDuration = Date.now() - nodeStartedAt;
+      const onError = String(node.config?.onError ?? node.config?.errorPolicy ?? "stop").toLowerCase();
+
+      if (onError === "continueregularoutput" || onError === "continue" || onError === "ignore") {
+        const fallbackOutput = { error: errorMessage(error), _failed: true };
+        await prisma.nodeExecution.update({
+          where: { id: nodeExecution.id },
+          data: { status: "SUCCESS", output: fallbackOutput, finishedAt: new Date(), duration: nodeDuration },
+        });
+        nodeSpan.setAttribute("node.status", "HANDLED_ERROR");
+        nodeSpan.setStatus("OK");
+        nodeSpan.end();
+
+        finalOutput = fallbackOutput;
+        for (const edge of outgoing.get(nodeId) ?? []) {
+          const target = edge.target;
+          const isErrorEdge = (edge.sourceHandle ?? edge.label ?? "").toLowerCase() === "error";
+          if (!isErrorEdge) {
+            remainingIncoming.set(target, (remainingIncoming.get(target) ?? 0) - 1);
+            activeIncoming.set(target, (activeIncoming.get(target) ?? 0) + 1);
+            incomingInputs.set(target, [...(incomingInputs.get(target) ?? []), fallbackOutput]);
+            if (remainingIncoming.get(target) === 0 && !queued.has(target)) {
+              queued.add(target);
+              if ((activeIncoming.get(target) ?? 0) > 0) active.add(target);
+              queue.push(target);
+            }
+          }
+        }
+        continue;
+      }
+
+      if (onError === "routetoerrorbranch" || onError === "errorbranch") {
+        const errorOutput = {
+          errorMessage: errorMessage(error),
+          errorCode: "NODE_ERROR",
+          failedNodeId: node.id,
+          failedNodeType: node.type,
+          inputData: nodeInput,
+          timestamp: new Date().toISOString(),
+        };
+        await prisma.nodeExecution.update({
+          where: { id: nodeExecution.id },
+          data: { status: "SUCCESS", output: errorOutput, finishedAt: new Date(), duration: nodeDuration },
+        });
+        nodeSpan.setAttribute("node.status", "HANDLED_ERROR");
+        nodeSpan.setStatus("OK");
+        nodeSpan.end();
+
+        finalOutput = errorOutput;
+        for (const edge of outgoing.get(nodeId) ?? []) {
+          const target = edge.target;
+          const isErrorEdge = (edge.sourceHandle ?? edge.label ?? "").toLowerCase() === "error";
+          remainingIncoming.set(target, (remainingIncoming.get(target) ?? 0) - 1);
+          if (isErrorEdge) {
+            activeIncoming.set(target, (activeIncoming.get(target) ?? 0) + 1);
+            incomingInputs.set(target, [...(incomingInputs.get(target) ?? []), errorOutput]);
+          }
+          if (remainingIncoming.get(target) === 0 && !queued.has(target)) {
+            queued.add(target);
+            if ((activeIncoming.get(target) ?? 0) > 0) active.add(target);
+            queue.push(target);
+          }
+        }
+        continue;
+      }
+
+      // Check if workflow has an errorTrigger node
+      const errorTriggerNode = nodes.find((n) => ["errorTrigger", "error_trigger"].includes(n.type) && n.id !== node.id);
+      if (errorTriggerNode && !processed.has(errorTriggerNode.id)) {
+        await prisma.nodeExecution.update({
+          where: { id: nodeExecution.id },
+          data: { status: "FAILED", error: errorMessage(error), finishedAt: new Date(), duration: nodeDuration },
+        });
+        nodeSpan.setAttribute("node.status", "FAILED");
+        nodeSpan.recordException(error);
+        nodeSpan.setStatus("ERROR", errorMessage(error));
+        nodeSpan.end();
+
+        const errorPayload = {
+          errorMessage: errorMessage(error),
+          errorCode: "NODE_EXECUTION_FAILED",
+          failedNodeId: node.id,
+          failedNodeType: node.type,
+          executionId: execution.id,
+          workflowId: workflow.id,
+          timestamp: new Date().toISOString(),
+          inputData: nodeInput,
+        };
+
+        queued.add(errorTriggerNode.id);
+        active.add(errorTriggerNode.id);
+        queue.length = 0;
+        queue.push(errorTriggerNode.id);
+        incomingInputs.set(errorTriggerNode.id, [errorPayload]);
+        continue;
+      }
+
       await prisma.nodeExecution.update({
         where: { id: nodeExecution.id },
         data: { status: "FAILED", error: errorMessage(error), finishedAt: new Date(), duration: nodeDuration },
