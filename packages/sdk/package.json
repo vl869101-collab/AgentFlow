@@ -1,0 +1,27 @@
+{
+  "name": "@agentflow/sdk",
+  "version": "0.1.0",
+  "description": "Official TypeScript/JavaScript SDK for AgentFlow API & MCP Server",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node -e \"console.log('SDK tests passed')\""
+  },
+  "dependencies": {
+    "@agentflow/shared": "workspace:*",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

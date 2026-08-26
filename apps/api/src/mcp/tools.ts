@@ -18,11 +18,16 @@ import { decryptCredential, encryptCredential } from "../lib/crypto.js";
 import { executeGoogleSheets } from "../services/nodes/google-sheets.js";
 import { executeGoogleDrive } from "../services/nodes/google-drive.js";
 import { executeGoogleGmail } from "../services/nodes/google-gmail.js";
+import { executeGoogleCalendar } from "../services/nodes/google-calendar.js";
+import { executeGoogleDocs } from "../services/nodes/google-docs.js";
 
-// Comms Node Handlers
+// Comms & Agents Node Handlers
 import { executeTelegram } from "../services/nodes/telegram.js";
 import { executeDiscord } from "../services/nodes/discord.js";
 import { executeSlack } from "../services/nodes/slack.js";
+import { executeTeams } from "../services/nodes/teams.js";
+import { executeWhatsApp } from "../services/nodes/whatsapp.js";
+import { executeMcpClient } from "../services/nodes/mcp-client.js";
 
 export type ToolContext = {
   orgId?: string;
@@ -1171,13 +1176,44 @@ async function googleDriveDeleteFile(args: Record<string, unknown>, ctx: ToolCon
   return jsonResult(result);
 }
 
-async function googleCalendarCreateEvent(args: Record<string, unknown>): Promise<McpToolResult> {
-  const summary = asString(args.summary) ?? "Team Sync";
-  return jsonResult({ id: "event_" + Date.now(), summary, status: "confirmed", htmlLink: "https://calendar.google.com" });
+async function googleCalendarCreateEvent(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeGoogleCalendar({ ...args, operation: "createEvent" }, {}, ctx.orgId || "");
+  return jsonResult(result);
 }
 
-async function googleCalendarListEvents(): Promise<McpToolResult> {
-  return jsonResult({ events: [{ id: "evt_1", summary: "Sprint Planning", start: { dateTime: new Date().toISOString() } }] });
+async function googleCalendarListEvents(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeGoogleCalendar({ ...args, operation: "listEvents" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function googleCalendarGetEvent(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeGoogleCalendar({ ...args, operation: "getEvent" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function googleCalendarUpdateEvent(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeGoogleCalendar({ ...args, operation: "updateEvent" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function googleCalendarDeleteEvent(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeGoogleCalendar({ ...args, operation: "deleteEvent" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function googleDocsCreateDocument(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeGoogleDocs({ ...args, operation: "createDocument" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function googleDocsGetDocument(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeGoogleDocs({ ...args, operation: "getDocument" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function googleDocsReplaceText(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeGoogleDocs({ ...args, operation: "replaceText" }, {}, ctx.orgId || "");
+  return jsonResult(result);
 }
 
 async function gmailSendMessage(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
@@ -1211,7 +1247,7 @@ async function gmailDeleteMessage(args: Record<string, unknown>, ctx: ToolContex
 }
 
 // ─────────────────────────────────────────────────────────────
-// 7. COMMS TOOLS (Task 18: Telegram, Discord, Slack)
+// 7. COMMS TOOLS (Task 18: Telegram, Discord, Slack, Teams, WhatsApp)
 // ─────────────────────────────────────────────────────────────
 
 async function telegramSendMessage(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
@@ -1277,12 +1313,29 @@ async function emailReadImap(args: Record<string, unknown>): Promise<McpToolResu
   return jsonResult({ messages: [{ id: "1", from: "test@example.com", subject: "Test Email", body: "Hello" }] });
 }
 
-async function teamsSendMessage(args: Record<string, unknown>): Promise<McpToolResult> {
-  return jsonResult({ sent: true, text: args.text });
+async function teamsSendMessage(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeTeams({ ...args, operation: "sendMessage" }, {}, ctx.orgId || "");
+  return jsonResult(result);
 }
 
-async function whatsappSendMessage(args: Record<string, unknown>): Promise<McpToolResult> {
-  return jsonResult({ sent: true, to: args.to, message: args.message });
+async function teamsSendAdaptiveCard(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeTeams({ ...args, operation: "sendAdaptiveCard" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function whatsappSendMessage(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeWhatsApp({ ...args, operation: "sendMessage" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function whatsappSendTemplate(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeWhatsApp({ ...args, operation: "sendTemplate" }, {}, ctx.orgId || "");
+  return jsonResult(result);
+}
+
+async function mcpClientCallTool(args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
+  const result = await executeMcpClient({ ...args, operation: "callTool" }, {}, ctx.orgId || "");
+  return jsonResult(result);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1624,9 +1677,14 @@ export const MCP_TOOLS: McpTool[] = [
   { name: "google_drive_download_file", description: "Download file from Google Drive by fileId.", scopes: ["drive:read"], inputSchema: { type: "object", properties: { fileId: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } }, required: ["fileId"] } },
   { name: "google_drive_list_files", description: "List and search files in Google Drive.", scopes: ["drive:read"], inputSchema: { type: "object", properties: { query: { type: "string" }, folderId: { type: "string" }, pageSize: { type: "number" }, credentialId: { type: "string" }, mock: { type: "boolean" } } } },
   { name: "google_drive_create_folder", description: "Create a directory folder in Google Drive.", scopes: ["drive:write"], inputSchema: { type: "object", properties: { folderName: { type: "string" }, name: { type: "string" }, folderId: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } } } },
-  { name: "google_drive_delete_file", description: "Delete file from Google Drive.", scopes: ["drive:write"], inputSchema: { type: "object", properties: { fileId: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } }, required: ["fileId"] } },
   { name: "google_calendar_create_event", description: "Create event on Google Calendar.", scopes: ["calendar:write"], inputSchema: { type: "object", properties: { summary: { type: "string" }, startTime: { type: "string" } }, required: ["summary"] } },
   { name: "google_calendar_list_events", description: "List upcoming Google Calendar events.", scopes: ["calendar:read"], inputSchema: { type: "object", properties: {} } },
+  { name: "google_calendar_get_event", description: "Get single Google Calendar event by ID.", scopes: ["calendar:read"], inputSchema: { type: "object", properties: { eventId: { type: "string" } }, required: ["eventId"] } },
+  { name: "google_calendar_update_event", description: "Update existing Google Calendar event.", scopes: ["calendar:write"], inputSchema: { type: "object", properties: { eventId: { type: "string" }, summary: { type: "string" } }, required: ["eventId"] } },
+  { name: "google_calendar_delete_event", description: "Delete event from Google Calendar.", scopes: ["calendar:write"], inputSchema: { type: "object", properties: { eventId: { type: "string" } }, required: ["eventId"] } },
+  { name: "google_docs_create_document", description: "Create new Google Doc.", scopes: ["docs:write"], inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+  { name: "google_docs_get_document", description: "Get Google Doc content structure.", scopes: ["docs:read"], inputSchema: { type: "object", properties: { documentId: { type: "string" } }, required: ["documentId"] } },
+  { name: "google_docs_replace_text", description: "Replace text across Google Doc.", scopes: ["docs:write"], inputSchema: { type: "object", properties: { documentId: { type: "string" }, findText: { type: "string" }, replaceWith: { type: "string" } }, required: ["documentId", "findText"] } },
   { name: "gmail_send_message", description: "Send email via Gmail API v1 with OAuth2 token.", scopes: ["gmail:send"], inputSchema: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, cc: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } } } },
   { name: "gmail_get_messages", description: "Search and fetch Gmail messages.", scopes: ["gmail:read"], inputSchema: { type: "object", properties: { query: { type: "string" }, maxResults: { type: "number" }, credentialId: { type: "string" }, mock: { type: "boolean" } } } },
   { name: "gmail_get_message", description: "Fetch single Gmail message content.", scopes: ["gmail:read"], inputSchema: { type: "object", properties: { messageId: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } }, required: ["messageId"] } },
@@ -1634,7 +1692,7 @@ export const MCP_TOOLS: McpTool[] = [
   { name: "gmail_add_label", description: "Add label or modify labels on Gmail message.", scopes: ["gmail:write"], inputSchema: { type: "object", properties: { messageId: { type: "string" }, label: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } }, required: ["messageId"] } },
   { name: "gmail_delete_message", description: "Trash/delete Gmail message.", scopes: ["gmail:write"], inputSchema: { type: "object", properties: { messageId: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } }, required: ["messageId"] } },
 
-  // 7. Communication (Task 18: Telegram, Discord, Slack)
+  // 7. Communication (Task 18: Telegram, Discord, Slack, Teams, WhatsApp)
   { name: "telegram_send_message", description: "Send message via Telegram Bot API.", scopes: ["telegram:send"], inputSchema: { type: "object", properties: { chatId: { type: "string" }, text: { type: "string" }, parseMode: { type: "string" }, botToken: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } } } },
   { name: "telegram_send_photo", description: "Send photo via Telegram bot.", scopes: ["telegram:send"], inputSchema: { type: "object", properties: { chatId: { type: "string" }, photoUrl: { type: "string" }, caption: { type: "string" }, botToken: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } } } },
   { name: "telegram_send_document", description: "Send document/file via Telegram bot.", scopes: ["telegram:send"], inputSchema: { type: "object", properties: { chatId: { type: "string" }, documentUrl: { type: "string" }, caption: { type: "string" }, botToken: { type: "string" }, credentialId: { type: "string" }, mock: { type: "boolean" } } } },
@@ -1649,7 +1707,10 @@ export const MCP_TOOLS: McpTool[] = [
   { name: "email_send_smtp", description: "Send email via standard SMTP.", scopes: ["email:send"], inputSchema: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } } } },
   { name: "email_read_imap", description: "Read emails via IMAP server.", scopes: ["email:read"], inputSchema: { type: "object", properties: { mailbox: { type: "string" } } } },
   { name: "teams_send_message", description: "Send message to Microsoft Teams.", scopes: ["teams:send"], inputSchema: { type: "object", properties: { text: { type: "string" } } } },
+  { name: "teams_send_adaptive_card", description: "Send Adaptive Card 1.5 to Microsoft Teams.", scopes: ["teams:send"], inputSchema: { type: "object", properties: { adaptiveCard: { type: "object" } } } },
   { name: "whatsapp_send_message", description: "Send WhatsApp message via Business API.", scopes: ["whatsapp:send"], inputSchema: { type: "object", properties: { to: { type: "string" }, message: { type: "string" } } } },
+  { name: "whatsapp_send_template", description: "Send WhatsApp pre-approved template via Meta Business API.", scopes: ["whatsapp:send"], inputSchema: { type: "object", properties: { to: { type: "string" }, template: { type: "object" } } } },
+  { name: "mcp_client_call_tool", description: "Call remote MCP tool from client node.", scopes: ["tools:call"], inputSchema: { type: "object", properties: { serverUrl: { type: "string" }, toolName: { type: "string" }, arguments: { type: "object" } }, required: ["toolName"] } },
 
   // 8. Databases & Storage
   { name: "postgres_query", description: "Execute SQL query on PostgreSQL database.", scopes: ["database:query"], inputSchema: { type: "object", properties: { sql: { type: "string" } }, required: ["sql"] } },
@@ -1828,6 +1889,12 @@ const HANDLERS: Record<string, (args: Record<string, unknown>, ctx: ToolContext)
   google_drive_delete_file: googleDriveDeleteFile,
   google_calendar_create_event: googleCalendarCreateEvent,
   google_calendar_list_events: googleCalendarListEvents,
+  google_calendar_get_event: googleCalendarGetEvent,
+  google_calendar_update_event: googleCalendarUpdateEvent,
+  google_calendar_delete_event: googleCalendarDeleteEvent,
+  google_docs_create_document: googleDocsCreateDocument,
+  google_docs_get_document: googleDocsGetDocument,
+  google_docs_replace_text: googleDocsReplaceText,
   gmail_send_message: gmailSendMessage,
   gmail_get_messages: gmailGetMessages,
   gmail_get_message: gmailGetMessage,
@@ -1850,7 +1917,10 @@ const HANDLERS: Record<string, (args: Record<string, unknown>, ctx: ToolContext)
   email_send_smtp: emailSendSmtp,
   email_read_imap: emailReadImap,
   teams_send_message: teamsSendMessage,
+  teams_send_adaptive_card: teamsSendAdaptiveCard,
   whatsapp_send_message: whatsappSendMessage,
+  whatsapp_send_template: whatsappSendTemplate,
+  mcp_client_call_tool: mcpClientCallTool,
 
   // 8. Databases & Storage
   postgres_query: postgresQuery,

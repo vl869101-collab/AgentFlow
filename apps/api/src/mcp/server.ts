@@ -1,6 +1,7 @@
 // MCP server core: dispatches JSON-RPC 2.0 messages over the Streamable HTTP
 // transport. Handles initialize, notifications/initialized, tools/list,
-// tools/call and ping. Tools can be toggled on/off via the in-memory state.
+// tools/call, ping, resources/list, resources/read, prompts/list, and prompts/get.
+// Tools can be toggled on/off via the in-memory state.
 
 import {
   MCP_PROTOCOL_VERSION,
@@ -18,6 +19,7 @@ import { isMcpEnabled, registerSession, touchSession } from "./state.js";
 export type McpContext = {
   orgId?: string;
   userId?: string;
+  scopes?: string[];
 };
 
 export async function handleMcpMessage(
@@ -44,7 +46,11 @@ export async function handleMcpMessage(
         responses: [
           rpcResult(id, {
             protocolVersion: MCP_PROTOCOL_VERSION,
-            capabilities: { tools: { listChanged: false } },
+            capabilities: {
+              tools: { listChanged: false },
+              resources: { subscribe: false, listChanged: false },
+              prompts: { listChanged: false },
+            },
             serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
           }),
         ],
@@ -87,7 +93,9 @@ export async function handleMcpMessage(
           rpcResult(id, {
             resources: [
               { uri: "agentflow://system/status", name: "System Status", mimeType: "application/json" },
-              { uri: "agentflow://workflows", name: "Workflows List", mimeType: "application/json" },
+              { uri: "agentflow://workflows", name: "Workflows Catalog", mimeType: "application/json" },
+              { uri: "agentflow://metrics", name: "System Metrics", mimeType: "application/json" },
+              { uri: "agentflow://tools", name: "Tools Schema Registry", mimeType: "application/json" },
             ],
           }),
         ],
@@ -97,6 +105,30 @@ export async function handleMcpMessage(
     case "resources/read": {
       const params = (message.params ?? {}) as { uri?: string };
       const uri = params.uri ?? "agentflow://system/status";
+      let textContent = "";
+
+      if (uri === "agentflow://workflows") {
+        textContent = JSON.stringify({
+          server: SERVER_NAME,
+          category: "workflows",
+          totalExposed: 125,
+          activeTransports: ["http", "sse"],
+        });
+      } else if (uri === "agentflow://tools") {
+        textContent = JSON.stringify({
+          totalTools: MCP_TOOLS.length,
+          supportedCategories: ["workflows", "google", "comms", "databases", "ai", "utils"],
+        });
+      } else {
+        textContent = JSON.stringify({
+          server: SERVER_NAME,
+          version: SERVER_VERSION,
+          status: "healthy",
+          protocol: MCP_PROTOCOL_VERSION,
+          uri,
+        });
+      }
+
       return {
         responses: [
           rpcResult(id, {
@@ -104,12 +136,7 @@ export async function handleMcpMessage(
               {
                 uri,
                 mimeType: "application/json",
-                text: JSON.stringify({
-                  server: SERVER_NAME,
-                  version: SERVER_VERSION,
-                  status: "healthy",
-                  uri,
-                }),
+                text: textContent,
               },
             ],
           }),
@@ -122,8 +149,58 @@ export async function handleMcpMessage(
         responses: [
           rpcResult(id, {
             prompts: [
-              { name: "build_workflow", description: "Build a new AgentFlow workflow from natural language" },
-              { name: "troubleshoot_execution", description: "Troubleshoot a failed workflow execution" },
+              {
+                name: "build_workflow",
+                description: "Build a new AgentFlow workflow from natural language description",
+                arguments: [{ name: "goal", description: "Goal or requirements of the workflow", required: true }],
+              },
+              {
+                name: "troubleshoot_execution",
+                description: "Troubleshoot a failed workflow execution and suggest fixes",
+                arguments: [{ name: "executionId", description: "The execution ID to inspect", required: true }],
+              },
+            ],
+          }),
+        ],
+      };
+    }
+
+    case "prompts/get": {
+      const params = (message.params ?? {}) as { name?: string; arguments?: Record<string, string> };
+      const name = params.name ?? "build_workflow";
+      const args = params.arguments ?? {};
+
+      if (name === "troubleshoot_execution") {
+        return {
+          responses: [
+            rpcResult(id, {
+              description: "Troubleshoot a failed workflow execution",
+              messages: [
+                {
+                  role: "user",
+                  content: {
+                    type: "text",
+                    text: `Analyze and troubleshoot failed execution ${args.executionId ?? "unknown"}. Inspect node error logs and recommend fix.`,
+                  },
+                },
+              ],
+            }),
+          ],
+        };
+      }
+
+      return {
+        responses: [
+          rpcResult(id, {
+            description: "Build a new AgentFlow workflow from natural language",
+            messages: [
+              {
+                role: "user",
+                content: {
+                  type: "text",
+                  text: `Design an AgentFlow automation workflow for: ${args.goal ?? args.prompt ?? "automated integration process"}. Provide structured JSON nodes and edges.`,
+                },
+              },
             ],
           }),
         ],

@@ -1271,6 +1271,96 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: "post",
+  path: "/api/mcp",
+  tags: ["MCP"],
+  summary: "MCP JSON-RPC 2.0 message handler",
+  description: "Execute MCP protocol requests (initialize, tools/list, tools/call, resources/list, resources/read, prompts/list, prompts/get).",
+  security: bearer,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            jsonrpc: z.literal("2.0"),
+            id: z.union([z.string(), z.number(), z.null()]).optional(),
+            method: z.string(),
+            params: z.record(z.unknown()).optional(),
+          }),
+        },
+      },
+      description: "JSON-RPC 2.0 request or batch array of requests",
+    },
+  },
+  responses: {
+    200: {
+      description: "JSON-RPC 2.0 response",
+      content: {
+        "application/json": {
+          schema: z.object({
+            jsonrpc: z.literal("2.0"),
+            id: z.union([z.string(), z.number(), z.null()]).optional(),
+            result: z.unknown().optional(),
+            error: z.object({ code: z.number(), message: z.string(), data: z.unknown().optional() }).optional(),
+          }),
+        },
+      },
+    },
+    401: errorResponses[401],
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mcp/sse",
+  tags: ["MCP"],
+  summary: "Open MCP streaming SSE connection",
+  description: "Opens a Server-Sent Events stream for bidirectional MCP communication.",
+  security: bearer,
+  responses: {
+    200: { description: "Event stream (text/event-stream)" },
+    401: errorResponses[401],
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/mcp/status",
+  tags: ["MCP"],
+  summary: "Get MCP server health and exposed tool metrics",
+  responses: {
+    200: jsonResponse(
+      z.object({
+        enabled: z.boolean(),
+        connectedClients: z.number(),
+        workflowsExposed: z.number(),
+        toolsCount: z.number(),
+        server: z.string(),
+        version: z.string(),
+      }),
+      "MCP status"
+    ),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/mcp/token",
+  tags: ["MCP"],
+  summary: "Generate an MCP API token",
+  responses: {
+    200: jsonResponse(
+      z.object({
+        success: z.boolean(),
+        token: z.string(),
+        createdAt: z.string().openapi({ format: "date-time" }),
+      }),
+      "Generated token"
+    ),
+  },
+});
+
 // ═══════════════════════════════════════════
 // Document generation
 // ═══════════════════════════════════════════
@@ -1312,6 +1402,7 @@ export const openApiDocument: OpenApiDocument = generator.generateDocument({
     { name: "Orgs", description: "Organizations, members and invites" },
     { name: "API Keys", description: "Personal API keys for programmatic access" },
     { name: "Webhooks", description: "Webhook triggers with HMAC signature verification" },
+    { name: "MCP", description: "Model Context Protocol server and tool execution" },
   ],
 });
 

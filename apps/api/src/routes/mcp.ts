@@ -118,9 +118,11 @@ export async function mcpRoutes(app: FastifyInstance) {
     },
   };
 
-  // ── MCP Streamable HTTP endpoints (/mcp/http and /mcp) ────────
+  // ── MCP Streamable HTTP endpoints (/mcp/http, /mcp/sse, and /mcp) ────────
   app.post("/http", mcpRateLimit, handleMcpPost);
   app.get("/http", mcpRateLimit, handleMcpGet);
+  app.post("/sse", mcpRateLimit, handleMcpPost);
+  app.get("/sse", mcpRateLimit, handleMcpGet);
   app.post("/", mcpRateLimit, handleMcpPost);
   app.get("/", mcpRateLimit, handleMcpGet);
 
