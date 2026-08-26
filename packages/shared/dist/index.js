@@ -1,4 +1,5 @@
 import { z } from "zod";
+export { importN8nWorkflow, createAgentFlowFromN8n, validateN8nWorkflow, N8N_SDK_CATALOG, } from "./n8n-import.js";
 // ═══════════════════════════════════════════
 // Auth Schemas
 // ═══════════════════════════════════════════
@@ -34,12 +35,28 @@ const workflowNodeTypeValues = [
     // Persisted/executable node types.
     "webhook",
     "cron",
+    "cronTrigger",
     "manual",
     "http",
+    "httpRequest",
+    "postgres",
+    "postgresql",
+    "redis",
+    "mongo",
+    "mongodb",
     "email",
     "discord",
     "telegram",
+    "telegramTrigger",
+    "slack",
+    "slackTrigger",
     "sheets",
+    "googleSheets",
+    "googleDrive",
+    "drive",
+    "gmail",
+    "googleGmail",
+    "gmailTrigger",
     "ai",
     "ai_agent",
     "condition",
@@ -50,8 +67,11 @@ const workflowNodeTypeValues = [
     "approval",
     "merge",
     "filter",
+    "splitInBatches",
     "set_fields",
     "respond_webhook",
+    "evaluationTrigger",
+    "emailReadImap",
 ];
 export const workflowNodeTypeSchema = z.enum(workflowNodeTypeValues);
 export const nodeConfigSchema = z.object({
@@ -171,11 +191,24 @@ export const executeWorkflowSchema = z.object({
 // ═══════════════════════════════════════════
 // Credential Schemas
 // ═══════════════════════════════════════════
+export const credentialBucketSchema = z.enum([
+    "api_key",
+    "bearer_token",
+    "basic_auth",
+    "oauth2_managed",
+    "oauth2_custom",
+    "header_auth",
+    "query_auth",
+    "mcp_oauth2",
+    "oauth2",
+    "basic",
+    "token",
+]);
 export const createCredentialSchema = z.object({
     name: z.string().min(1).max(100),
-    type: z.enum(["api_key", "oauth2", "basic", "token"]),
-    provider: z.string().min(1).max(50),
-    data: z.record(z.string()),
+    type: credentialBucketSchema.or(z.string().min(1).max(50)),
+    provider: z.string().min(1).max(100),
+    data: z.record(z.any()),
 });
 // ═══════════════════════════════════════════
 // Webhook Schemas
@@ -207,7 +240,7 @@ export const decideApprovalSchema = z.object({
 // ═══════════════════════════════════════════
 // Enums (mirror Prisma)
 // ═══════════════════════════════════════════
-export const PlanEnum = z.enum(["FREE", "STARTER", "PRO", "ENTERPRISE"]);
+export const PlanEnum = z.enum(["FREE", "STARTER", "BASIC", "GROWTH", "PRO", "ENTERPRISE"]);
 export const MemberRoleEnum = z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]);
 export const WorkflowStatusEnum = z.enum(["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]);
 export const ExecutionStatusEnum = z.enum(["PENDING", "RUNNING", "SUCCESS", "FAILED", "CANCELLED", "WAITING_APPROVAL"]);
@@ -218,6 +251,9 @@ export const NODE_TYPES = [
     { type: "webhook", label: "Webhook", icon: "Webhook", color: "#6366f1" },
     { type: "cron", label: "Schedule", icon: "Clock", color: "#8b5cf6" },
     { type: "http", label: "HTTP Request", icon: "Globe", color: "#06b6d4" },
+    { type: "postgres", label: "PostgreSQL", icon: "Database", color: "#336791" },
+    { type: "redis", label: "Redis", icon: "Database", color: "#dc382d" },
+    { type: "mongo", label: "MongoDB", icon: "Database", color: "#13aa52" },
     { type: "email", label: "Send Email", icon: "Mail", color: "#10b981" },
     { type: "discord", label: "Discord", icon: "MessageSquare", color: "#5865f2" },
     { type: "telegram", label: "Telegram", icon: "Send", color: "#229ed9" },
@@ -225,11 +261,24 @@ export const NODE_TYPES = [
     { type: "condition", label: "Condition", icon: "GitBranch", color: "#f59e0b" },
     { type: "transform", label: "Transform", icon: "Shuffle", color: "#ec4899" },
     { type: "delay", label: "Delay", icon: "Timer", color: "#64748b" },
+    { type: "code", label: "Code Sandbox", icon: "Code", color: "#0ea5e9" },
     { type: "ai_agent", label: "AI Agent", icon: "Brain", color: "#a855f7" },
     { type: "approval", label: "Approval", icon: "CheckCircle", color: "#ef4444" },
     { type: "merge", label: "Merge", icon: "Merge", color: "#06b6d4" },
     { type: "filter", label: "Filter", icon: "Filter", color: "#f97316" },
     { type: "set_fields", label: "Set Fields", icon: "Pencil", color: "#14b8a6" },
     { type: "respond_webhook", label: "Respond Webhook", icon: "Reply", color: "#8b5cf6" },
+    { type: "gmailTrigger", label: "Gmail Trigger", icon: "Mail", color: "#ea4335" },
+    { type: "googleDrive", label: "Google Drive", icon: "HardDrive", color: "#34a853" },
+    { type: "drive", label: "Drive", icon: "HardDrive", color: "#34a853" },
+    { type: "evaluationTrigger", label: "Evaluation Trigger", icon: "ClipboardCheck", color: "#f59e0b" },
+    { type: "emailReadImap", label: "IMAP Email", icon: "Mail", color: "#06b6d4" },
+    { type: "gmail", label: "Gmail", icon: "Mail", color: "#ea4335" },
+    { type: "googleGmail", label: "Google Gmail", icon: "Mail", color: "#ea4335" },
+    { type: "googleSheets", label: "Google Sheets", icon: "Table", color: "#34a853" },
+    { type: "slack", label: "Slack", icon: "MessageSquare", color: "#4a154b" },
+    { type: "slackTrigger", label: "Slack Trigger", icon: "Zap", color: "#4a154b" },
+    { type: "telegramTrigger", label: "Telegram Trigger", icon: "Zap", color: "#229ed9" },
+    { type: "cronTrigger", label: "Cron Trigger", icon: "Clock", color: "#8b5cf6" },
 ];
 //# sourceMappingURL=index.js.map

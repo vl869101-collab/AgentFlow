@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma.js";
-import { parsePagination } from "../lib/pagination.js";
+import { parseCursorPagination } from "../lib/pagination.js";
 import { orgIdFromRequest, requireAuth, userIdFromRequest } from "../middleware/auth.js";
 import { checkQuota } from "../middleware/quota.js";
 import { createWorkflowExecution, runExecution } from "../services/executor.js";
@@ -10,7 +10,7 @@ import { executeWorkflowSchema } from "@agentflow/shared";
 export async function executionRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
-  app.post("/trigger", { preHandler: checkQuota }, async (request, reply) => {
+  app.post("/trigger", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } }, preHandler: checkQuota }, async (request, reply) => {
     const body = request.body as { workflowId?: unknown; input?: unknown; trigger?: unknown };
     if (!body || typeof body.workflowId !== "string" || !body.workflowId) {
       return reply.badRequest("workflowId required");
@@ -28,53 +28,201 @@ export async function executionRoutes(app: FastifyInstance) {
     return reply.status(202).send(execution);
   });
 
-  app.get("/", async (request, reply) => {
+  app.get("/", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
     const userId = userIdFromRequest(request);
-    const query = request.query as { workflowId?: string; status?: string };
-    const pagination = parsePagination(request, reply, 50);
-    return prisma.workflowExecution.findMany({
-      where: {
-        ...(orgIdFromRequest(request) ? { orgId: orgIdFromRequest(request) } : { userId }),
-        ...(query.workflowId ? { workflowId: query.workflowId } : {}),
-        ...(query.status ? { status: query.status } : {}),
-      },
+    const orgId = orgIdFromRequest(request);
+    const query = request.query as {
+      workflowId?: string;
+      status?: string;
+      trigger?: string;
+      cursor?: string;
+      limit?: string;
+      paginate?: string;
+      from?: string;
+      to?: string;
+      startDate?: string;
+      endDate?: string;
+    };
+
+    const where: Record<string, unknown> = {
+      ...(orgId ? { orgId } : { userId }),
+    };
+    if (query.workflowId) where.workflowId = query.workflowId;
+    if (query.status) where.status = query.status;
+    if (query.trigger) where.trigger = query.trigger;
+    const dateGte = query.from || query.startDate;
+    const dateLte = query.to || query.endDate;
+    if (dateGte || dateLte) {
+      const dateFilter: Record<string, Date> = {};
+      if (dateGte) dateFilter.gte = new Date(dateGte);
+      if (dateLte) dateFilter.lte = new Date(dateLte);
+      where.startedAt = dateFilter;
+    }
+
+    const pagination = parseCursorPagination(request, reply, 50);
+    const limit = pagination.limit;
+
+    const findArgs: any = {
+      where,
       include: { workflow: { select: { id: true, name: true } } },
       orderBy: { startedAt: "desc" },
-      ...pagination,
-    });
+      take: limit + 1,
+    };
+
+    if (pagination.isCursor && pagination.cursor) {
+      findArgs.cursor = { id: pagination.cursor };
+      findArgs.skip = 1;
+    } else if (pagination.skip !== undefined && pagination.skip > 0) {
+      findArgs.skip = pagination.skip;
+    }
+
+    const executions = await prisma.workflowExecution.findMany(findArgs);
+    const hasMore = executions.length > limit;
+    const items = hasMore ? executions.slice(0, limit) : executions;
+    const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].id : null;
+
+    reply.header("X-Has-More", String(hasMore));
+    if (nextCursor) {
+      reply.header("X-Next-Cursor", nextCursor);
+    }
+
+    if (query.cursor !== undefined || query.paginate === "true" || query.paginate === "1") {
+      return {
+        items,
+        nextCursor,
+        hasMore,
+        limit,
+      };
+    }
+
+    return items;
   });
 
-  app.get("/:id", async (request, reply) => {
+  app.get("/:id", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
+    const orgId = orgIdFromRequest(request);
     const execution = await prisma.workflowExecution.findFirst({
-      where: orgIdFromRequest(request) ? { id, orgId: orgIdFromRequest(request) } : { id, userId },
+      where: orgId ? { id, orgId } : { id, userId },
     });
     if (!execution) return reply.code(404).send({ error: "Execution not found", code: "NOT_FOUND" });
+
     const [nodes, approvals, workflow] = await Promise.all([
       prisma.nodeExecution.findMany({ where: { executionId: id }, orderBy: { startedAt: "asc" } }),
       prisma.approval.findMany({ where: { executionId: id }, orderBy: { createdAt: "desc" } }),
       prisma.workflow.findFirst({ where: { id: execution.workflowId } }),
     ]);
-    return { ...execution, nodes, approvals, workflow: workflow ? { id: workflow.id, name: workflow.name } : null };
+
+    const traces = nodes.map((node: any) => ({
+      id: node.id,
+      nodeId: node.nodeId,
+      status: node.status,
+      input: node.input,
+      output: node.output,
+      error: node.error,
+      startedAt: node.startedAt,
+      finishedAt: node.finishedAt,
+      duration: node.duration,
+    }));
+
+    let errorWorkflow: { id: string; name: string } | null = null;
+    let snapshotSettings: Record<string, unknown> = {};
+    const version = await prisma.workflowVersion.findFirst({
+      where: { workflowId: execution.workflowId },
+      orderBy: { version: "desc" },
+    });
+    if (version?.snapshot) {
+      try {
+        const snap = typeof version.snapshot === "string" ? JSON.parse(version.snapshot) : version.snapshot;
+        if (snap && typeof snap === "object" && snap.settings) {
+          snapshotSettings = snap.settings;
+        }
+      } catch {}
+    }
+    const rawWfSettings = workflow?.settings;
+    let parsedWfSettings: Record<string, unknown> = {};
+    if (rawWfSettings) {
+      try {
+        parsedWfSettings = typeof rawWfSettings === "string" ? JSON.parse(rawWfSettings) : (rawWfSettings as Record<string, unknown>);
+      } catch {}
+    }
+    const combinedSettings = { ...snapshotSettings, ...parsedWfSettings };
+    const errorWorkflowId = (combinedSettings.errorWorkflowId ?? combinedSettings.errorWorkflow ?? (workflow as any)?.errorWorkflowId ?? (workflow as any)?.errorWorkflow) as string | undefined;
+    if (errorWorkflowId && typeof errorWorkflowId === "string") {
+      const errWf = await prisma.workflow.findFirst({ where: { id: errorWorkflowId } });
+      if (errWf) {
+        errorWorkflow = { id: errWf.id, name: errWf.name };
+      }
+    }
+
+    return {
+      ...execution,
+      nodes,
+      traces,
+      approvals,
+      errorWorkflow,
+      workflow: workflow ? { id: workflow.id, name: workflow.name } : null,
+    };
   });
 
-  app.post("/:id/cancel", async (request, reply) => {
+  app.get("/:id/traces", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
+    const orgId = orgIdFromRequest(request);
+    const execution = await prisma.workflowExecution.findFirst({
+      where: orgId ? { id, orgId } : { id, userId },
+    });
+    if (!execution) return reply.code(404).send({ error: "Execution not found", code: "NOT_FOUND" });
+
+    const nodes = await prisma.nodeExecution.findMany({
+      where: { executionId: id },
+      orderBy: { startedAt: "asc" },
+    });
+
+    const traces = nodes.map((node: any) => ({
+      id: node.id,
+      nodeId: node.nodeId,
+      status: node.status,
+      input: node.input,
+      output: node.output,
+      error: node.error,
+      startedAt: node.startedAt,
+      finishedAt: node.finishedAt,
+      duration: node.duration,
+    }));
+
+    return {
+      executionId: id,
+      traceId: (execution as any).traceId || `trace-${id}`,
+      spans: traces,
+      status: execution.status,
+      startedAt: execution.startedAt,
+      finishedAt: execution.finishedAt,
+      duration: execution.duration,
+      traces,
+    };
+  });
+
+  app.post("/:id/cancel", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const orgId = orgIdFromRequest(request);
     const result = await prisma.workflowExecution.updateMany({
-      where: { id, userId, status: { in: ["PENDING", "RUNNING"] } },
+      where: orgId ? { id, orgId, status: { in: ["PENDING", "RUNNING"] } } : { id, userId, status: { in: ["PENDING", "RUNNING"] } },
       data: { status: "CANCELLED", finishedAt: new Date() },
     });
     if (result.count === 0) return reply.code(404).send({ error: "Execution not found or not cancellable", code: "NOT_CANCELLABLE" });
     return { ok: true };
   });
 
-  // node-level execution logs
-  app.get("/:id/nodes", async (request, reply) => {
+  // node-level execution logs — org-scoped to prevent IDOR (see redesign audit H-05)
+  app.get("/:id/nodes", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
-    const execution = await prisma.workflowExecution.findFirst({ where: { id, userId } });
+    const orgId = orgIdFromRequest(request);
+    const execution = await prisma.workflowExecution.findFirst({
+      where: orgId ? { id, orgId } : { id, userId },
+    });
     if (!execution) return reply.code(404).send({ error: "Execution not found", code: "NOT_FOUND" });
 
     return prisma.nodeExecution.findMany({

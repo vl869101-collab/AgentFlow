@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { hashPassword, verifyPassword } from "../middleware/auth.js";
 import { signupSchema, loginSchema } from "@agentflow/shared";
 import { z } from "zod";
-import { InvalidRefreshTokenError, issueRefreshToken, revokeRefreshToken, rotateRefreshToken } from "../lib/refresh-tokens.js";
+import { InvalidRefreshTokenError, issueRefreshToken, revokeRefreshToken, rotateRefreshToken, verifyRefreshJwt } from "../lib/refresh-tokens.js";
 
 const GENERIC_REGISTER_MESSAGE = "If registration can be completed, you can sign in with your credentials.";
 const refreshRequestSchema = z.object({ refreshToken: z.string().min(1).max(4096) });
@@ -43,7 +43,7 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.code(201).send({ message: GENERIC_REGISTER_MESSAGE });
   });
 
-  app.post("/login", { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } }, async (request, reply) => {
+  app.post("/login", { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } }, async (request, reply) => {
     const body = loginSchema.parse(request.body);
     const user = await prisma.user.findUnique({ where: { email: body.email } });
     if (!user) return reply.code(401).send({ error: "Invalid credentials", code: "INVALID_CREDENTIALS" });
@@ -66,7 +66,7 @@ export async function authRoutes(app: FastifyInstance) {
     return {
       token,
       refreshToken,
-      user: { id: user.id, email: user.email, name: user.name },
+      user: { id: user.id, email: user.email, name: user.name, orgId: membership?.orgId },
       org: membership?.org ? { id: membership.org.id, name: membership.org.name, slug: membership.org.slug } : null,
     };
   });
@@ -75,7 +75,7 @@ export async function authRoutes(app: FastifyInstance) {
     const { refreshToken } = refreshRequestSchema.parse(request.body);
 
     try {
-      const payload = refreshJwtSchema.parse(app.jwt.verify(refreshToken));
+      const payload = refreshJwtSchema.parse(verifyRefreshJwt(app, refreshToken));
 
       const user = await prisma.user.findUnique({ where: { id: payload.sub } });
       if (!user) throw new InvalidRefreshTokenError();
@@ -92,7 +92,8 @@ export async function authRoutes(app: FastifyInstance) {
       );
 
       return { token, refreshToken: newRefreshToken };
-    } catch {
+    } catch (err) {
+      request.log.error(err, "Refresh error");
       return reply.code(401).send({ error: "Invalid refresh token", code: "INVALID_TOKEN" });
     }
   });

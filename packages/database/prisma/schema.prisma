@@ -27,10 +27,30 @@ model User {
   refreshTokens     RefreshToken[]
   executions        WorkflowExecution[]   @relation("ExecutionUser")
   approvals         Approval[]
+  approvalsAsApprover Approval[]         @relation("ApprovalApprover")
+  accounts          Account[]
   auditLogs         AuditLog[]
   usageRecords      UsageRecord[]
   stripeCustomerId  String?
   subscription      Subscription?
+}
+
+model Account {
+  id                    String   @id @default(cuid())
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider              String
+  providerAccountId     String
+  refreshTokenEncrypted String?
+  accessTokenEncrypted  String?
+  expiresAt             DateTime?
+  tokenType             String?
+  scope                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Organization {
@@ -94,6 +114,8 @@ model Workflow {
 
   @@index([orgId, updatedAt])
   @@index([ownerId, updatedAt])
+  @@index([status, updatedAt])
+  @@index([orgId, status])
 }
 
 model WorkflowVersion {
@@ -126,6 +148,8 @@ model WorkflowNode {
   executions  NodeExecution[]
 
   @@index([workflowId])
+  @@index([type])
+  @@index([workflowId, type])
 }
 
 model WorkflowEdge {
@@ -176,6 +200,8 @@ model WorkflowExecution {
   @@index([orgId, startedAt])
   @@index([workflowId, startedAt])
   @@index([userId, startedAt])
+  @@index([status, startedAt])
+  @@index([workflowId, status, startedAt])
 }
 
 model NodeExecution {
@@ -205,18 +231,21 @@ model NodeExecution {
 // ═══════════════════════════════════════════
 
 model Credential {
-  id        String   @id @default(cuid())
-  name      String
-  type      String   // api_key, oauth2, basic, token
-  provider  String   // stripe, telegram, discord, gmail, etc.
-  data      String   // Encrypted JSON
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  name       String
+  type       String   // api_key, oauth2, basic, token
+  provider   String   // stripe, telegram, discord, gmail, etc.
+  data       String   // Encrypted JSON
+  keyVersion Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   orgId String
   org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, createdAt])
+  @@index([orgId, provider])
+  @@index([orgId, type])
 }
 
 model Integration {
@@ -238,8 +267,8 @@ model Integration {
 
 model Webhook {
   id        String   @id @default(cuid())
-  path      String   @unique // The URL path segment
-  secret    String?
+  path      String   // The URL path segment, scoped to an organization
+  secret    String
   method    String   @default("POST")
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -250,6 +279,7 @@ model Webhook {
   org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, active])
+  @@unique([orgId, path])
 }
 
 // ═══════════════════════════════════════════
@@ -269,6 +299,7 @@ model Approval {
   userId String
   user   User @relation(fields: [userId], references: [id])
   approverId  String?
+  approver    User?  @relation("ApprovalApprover", fields: [approverId], references: [id], onDelete: SetNull)
 
   @@index([executionId, status])
   @@index([userId, status])
@@ -336,14 +367,18 @@ model ApiKey {
   id        String   @id @default(cuid())
   name      String
   key       String   @unique
+  keyPrefix String?
   lastUsed  DateTime?
   expiresAt DateTime?
   createdAt DateTime @default(now())
 
   userId String
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId  String?
+  org    Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([userId, expiresAt])
 }
 
 model RefreshToken {

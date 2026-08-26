@@ -16,6 +16,13 @@ import { createCodeExecutionError } from "./types.js";
 export const DEFAULT_TIMEOUT_MS = 5_000;
 export const DEFAULT_MEMORY_LIMIT_MB = 64;
 
+export class CodeExecutionDisabledError extends Error {
+  constructor(message = "Code execution is disabled by configuration (EXEC_CODE_DISABLED=true)") {
+    super(message);
+    this.name = "CodeExecutionDisabledError";
+  }
+}
+
 /**
  * Detecta padroes perigosos no codigo antes da execucao (defense in depth).
  * Retorna a lista de padroes detectados; lista vazia significa codigo seguro.
@@ -168,6 +175,10 @@ export async function executeCodeInSandbox(
   n8nVariables: Record<string, unknown>,
   options: { timeoutMs?: number; memoryLimitMb?: number } = {},
 ): Promise<SandboxResult> {
+  if (process.env.EXEC_CODE_DISABLED === "true") {
+    throw new CodeExecutionDisabledError();
+  }
+
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   // Defense in depth: verifica padroes perigosos antes de compilar

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { prisma } from "./prisma.js";
+import { getEnv } from "./env.js";
 
 const DEFAULT_REFRESH_EXPIRES_IN = "7d";
 
@@ -19,6 +20,22 @@ export class InvalidRefreshTokenError extends Error {
 
 export function hashRefreshToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+export function verifyRefreshJwt(app: FastifyInstance, presentedToken: string): RefreshJwtPayload {
+  try {
+    return app.jwt.verify<RefreshJwtPayload>(presentedToken);
+  } catch (err) {
+    const env = getEnv();
+    if (env.JWT_SECRET_PREVIOUS) {
+      try {
+        return app.jwt.verify<RefreshJwtPayload>(presentedToken, { key: env.JWT_SECRET_PREVIOUS });
+      } catch {
+        throw new InvalidRefreshTokenError();
+      }
+    }
+    throw new InvalidRefreshTokenError();
+  }
 }
 
 function signRefreshToken(app: FastifyInstance, userId: string, jti: string): { token: string; expiresAt: Date } {
@@ -55,11 +72,23 @@ export async function rotateRefreshToken(
 
   const tokenHash = hashRefreshToken(presentedToken);
   const current = await client.refreshToken.findUnique({ where: { jti: payload.jti } });
+  
+  if (!current) {
+    throw new InvalidRefreshTokenError();
+  }
+
+  // Token reuse detection: if a revoked token is re-submitted, revoke the entire user token family
+  if (current.revokedAt) {
+    await client.refreshToken.updateMany({
+      where: { userId: current.userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    throw new InvalidRefreshTokenError();
+  }
+
   if (
-    !current ||
     current.userId !== payload.sub ||
     current.tokenHash !== tokenHash ||
-    current.revokedAt ||
     new Date(current.expiresAt).getTime() <= Date.now()
   ) {
     throw new InvalidRefreshTokenError();
@@ -89,7 +118,7 @@ export async function rotateRefreshToken(
 
 export async function revokeRefreshToken(app: FastifyInstance, presentedToken: string, client: any = prisma): Promise<void> {
   try {
-    const payload = app.jwt.verify<RefreshJwtPayload>(presentedToken);
+    const payload = verifyRefreshJwt(app, presentedToken);
     if (payload.type !== "refresh" || !payload.jti) return;
     await client.refreshToken.updateMany({
       where: { jti: payload.jti, tokenHash: hashRefreshToken(presentedToken), revokedAt: null },

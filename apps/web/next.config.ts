@@ -18,8 +18,8 @@ const securityHeaders = [
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self'",
-      "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' https://fonts.cdnfonts.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline' https://fonts.cdnfonts.com",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data: https://fonts.cdnfonts.com",
       `connect-src 'self' ${apiOrigin()}`,
@@ -36,18 +36,32 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   transpilePackages: ["@agentflow/shared"],
 
   eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: false },
+  reactStrictMode: true,
+  poweredByHeader: false,
+
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },
-  // Fix for the workspace root inference warning: the turbopack watcher was
-  // picking C:\Users\VICTOR as root (a stray pnpm-lock.yaml in the home
-  // directory), which made dev compilation crawl. Pin the root to the repo.
+
+  // Turbopack workspace root configuration
   turbopack: {
     root: path.resolve(__dirname, "../.."),
   },
 };
 
-export default nextConfig;
+export default async function configPromise() {
+  if (process.env.ANALYZE === "true") {
+    try {
+      const bundleAnalyzer = (await import("@next/bundle-analyzer")).default;
+      return bundleAnalyzer({ enabled: true })(nextConfig);
+    } catch {
+      return nextConfig;
+    }
+  }
+  return nextConfig;
+}

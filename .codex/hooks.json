@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd\"",
+            "command": "cmd.exe /d /c C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd",
             "timeout": 5,
             "statusMessage": "Overclock soft status"
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd\"",
+            "command": "cmd.exe /d /c C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd",
             "timeout": 5,
             "statusMessage": "Overclock soft status"
           }
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd\"",
+            "command": "cmd.exe /d /c C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd",
             "timeout": 5,
             "statusMessage": "Overclock soft status"
           }
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd\"",
+            "command": "cmd.exe /d /c C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd",
             "timeout": 5,
             "statusMessage": "Overclock soft status"
           }
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd\"",
+            "command": "cmd.exe /d /c C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd",
             "timeout": 5,
             "statusMessage": "Overclock soft status"
           }
@@ -65,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd\"",
+            "command": "cmd.exe /d /c C:\\Users\\VICTOR\\.overclock-app\\soft-status.cmd",
             "timeout": 5,
             "statusMessage": "Overclock soft status"
           }
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:\\Users\\VICTOR\\.overclock-app\\handoff-deliver.cmd\"",
+            "command": "cmd.exe /d /c C:\\Users\\VICTOR\\.overclock-app\\handoff-deliver.cmd",
             "timeout": 5,
             "statusMessage": "Overclock handoff delivery"
           }

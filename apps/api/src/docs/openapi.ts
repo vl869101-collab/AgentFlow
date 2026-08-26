@@ -72,6 +72,45 @@ const oauthProviderParams = z.object({
   }),
 });
 
+registry.registerPath({
+  method: "get",
+  path: "/api/orgs/{id}/usage",
+  tags: ["Orgs"],
+  summary: "Get organization usage statistics and quota limits",
+  security: [{ bearerAuth: [] }],
+  request: { params: idParams },
+  responses: {
+    200: {
+      description: "Organization usage and quota metrics breakdown",
+      content: {
+        "application/json": {
+          schema: z.object({
+            orgId: z.string(),
+            plan: z.string(),
+            periodStart: z.string().openapi({ format: "date-time" }),
+            periodEnd: z.string().openapi({ format: "date-time" }),
+            limits: z.object({
+              executionsPerMonth: z.number(),
+              workflows: z.number(),
+              aiCallsPerMonth: z.number(),
+              members: z.number(),
+              concurrency: z.number(),
+              dataRetentionDays: z.number(),
+            }),
+            metrics: z.object({
+              executions: z.object({ used: z.number(), limit: z.number(), remaining: z.number(), percentage: z.number() }),
+              aiCalls: z.object({ used: z.number(), limit: z.number(), remaining: z.number(), percentage: z.number() }),
+              workflows: z.object({ used: z.number(), limit: z.number(), remaining: z.number(), percentage: z.number() }),
+              members: z.object({ used: z.number(), limit: z.number(), remaining: z.number(), percentage: z.number() }),
+            }),
+          }),
+        },
+      },
+    },
+    404: { description: "Organization not found" },
+  },
+});
+
 const paginationQuery = z.object({
   page: z.coerce.number().int().min(1).openapi({ param: { name: "page", in: "query" }, example: 1 }),
   limit: z.coerce.number().int().min(1).max(100).openapi({ param: { name: "limit", in: "query" }, example: 25 }),
@@ -355,16 +394,55 @@ registry.registerPath({
   method: "get",
   path: "/api/docs",
   tags: ["System"],
-  summary: "This OpenAPI document",
+  summary: "OpenAPI 3.1 JSON document",
   responses: { 200: { description: "OpenAPI 3.1 specification" } },
 });
 
 registry.registerPath({
   method: "get",
-  path: "/api/docs/ui",
+  path: "/docs",
   tags: ["System"],
-  summary: "Interactive Swagger UI",
+  summary: "Interactive Swagger UI documentation",
   responses: { 200: { description: "Swagger UI HTML page" } },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/docs/json",
+  tags: ["System"],
+  summary: "OpenAPI 3.1 JSON document alias",
+  responses: { 200: { description: "OpenAPI 3.1 specification" } },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/metrics",
+  tags: ["System"],
+  summary: "Prometheus formatted OpenTelemetry metrics",
+  responses: { 200: { description: "Prometheus text metrics" } },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/telemetry/stats",
+  tags: ["System"],
+  summary: "Telemetry summary metrics in JSON format",
+  responses: {
+    200: jsonResponse(
+      z.object({
+        service: z.string(),
+        timestamp: z.string(),
+        activeExecutions: z.number(),
+        counters: z.object({
+          httpRequests: z.number(),
+          workflowExecutions: z.number(),
+          aiGenerations: z.number(),
+        }),
+        spansRecorded: z.number(),
+      }),
+      "Telemetry metrics summary"
+    ),
+  },
 });
 
 // ═══════════════════════════════════════════
@@ -1261,6 +1339,12 @@ const swaggerUiHtml = `<!DOCTYPE html>
 </html>`;
 
 export async function docsRoutes(app: FastifyInstance) {
+  // JSON OpenAPI Specification
   app.get("/api/docs", async () => openApiDocument);
+  app.get("/docs/json", async () => openApiDocument);
+
+  // Interactive Swagger UI
+  app.get("/docs", async (_request, reply) => reply.type("text/html; charset=utf-8").send(swaggerUiHtml));
+  app.get("/docs/ui", async (_request, reply) => reply.type("text/html; charset=utf-8").send(swaggerUiHtml));
   app.get("/api/docs/ui", async (_request, reply) => reply.type("text/html; charset=utf-8").send(swaggerUiHtml));
 }

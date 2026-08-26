@@ -10,7 +10,7 @@
  * - runOnceForAllItems: codigo roda uma vez com todos os items
  */
 import { NodeHandler, NodeExecutionContext, NodeExecutionResult, createCodeExecutionError } from "./types.js";
-import { executeCodeInSandbox, detectDangerousPatterns } from "./code-sandbox.js";
+import { executeCodeInSandbox, detectDangerousPatterns, CodeExecutionDisabledError } from "./code-sandbox.js";
 
 export interface CodeNodeParameters {
   mode?: "runOnceForEachItem" | "runOnceForAllItems";
@@ -57,6 +57,9 @@ export class CodeNodeHandler implements NodeHandler {
   readonly category = "transform";
 
   async execute(ctx: NodeExecutionContext): Promise<NodeExecutionResult> {
+    if (process.env.EXEC_CODE_DISABLED === "true") {
+      throw new CodeExecutionDisabledError();
+    }
     const params = ctx.nodeConfig.parameters as CodeNodeParameters | undefined;
     if (!params) {
       throw createCodeExecutionError("Code node has no parameters", "CODE_MISSING_PARAMS");

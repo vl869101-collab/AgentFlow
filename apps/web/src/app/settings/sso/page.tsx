@@ -1,0 +1,4 @@
+"use client";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { GatedFeatureBanner } from "@/components/GatedFeatureBanner";
+export default function SSOPage(){ return <AppLayout><div className="max-w-3xl"><h1 className="text-2xl font-semibold text-zinc-50">Single Sign-On</h1><p className="mt-1 text-sm text-zinc-400">Configure SSO to let your team sign in using your identity provider. Supports SAML 2.0 and OpenID Connect. Learn more in the <a href="https://docs.n8n.io/administer/use-source-control-and-environments" className="text-violet-400 underline" target="_blank">documentation</a>.</p><div className="mt-8"><GatedFeatureBanner description="Use Single Sign On to consolidate authentication into a single platform to improve security and agility." learnMoreUrl="https://docs.n8n.io/administer/use-source-control-and-environments" /></div></div></AppLayout>; }

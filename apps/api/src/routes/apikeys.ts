@@ -6,7 +6,7 @@ import crypto from "crypto";
 export async function apiKeyRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
-  app.get("/", async (request) => {
+  app.get("/", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
     const userId = userIdFromRequest(request);
     return prisma.apiKey.findMany({
       where: { userId },
@@ -15,7 +15,7 @@ export async function apiKeyRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/", async (request, reply) => {
+  app.post("/", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request, reply) => {
     const userId = userIdFromRequest(request);
     const { name, expiresAt } = request.body as { name?: unknown; expiresAt?: string };
     if (typeof name !== "string" || name.trim().length < 1 || name.length > 100) {
@@ -40,7 +40,7 @@ export async function apiKeyRoutes(app: FastifyInstance) {
     return reply.status(201).send({ id: apiKey.id, name: apiKey.name, key, createdAt: apiKey.createdAt });
   });
 
-  app.delete("/:id", async (request, reply) => {
+  app.delete("/:id", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
     const result = await prisma.apiKey.deleteMany({ where: { id, userId } });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+export { importN8nWorkflow, createAgentFlowFromN8n, validateN8nWorkflow, N8N_SDK_CATALOG, type N8nWorkflowExport, type N8nNode, type N8nConnections, type N8nNodeSdkSpec, type N8nValidationResult, type N8nValidationError, type AgentFlowImportResult, type ImportOptions, } from "./n8n-import.js";
 export declare const signupSchema: z.ZodObject<{
     email: z.ZodString;
     password: z.ZodString;
@@ -42,10 +43,10 @@ export declare const inviteMemberSchema: z.ZodObject<{
     email: string;
     role: "MEMBER" | "VIEWER";
 }>;
-export declare const workflowNodeTypeSchema: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+export declare const workflowNodeTypeSchema: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
 export declare const nodeConfigSchema: z.ZodEffects<z.ZodObject<{
     id: z.ZodOptional<z.ZodString>;
-    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
     label: z.ZodOptional<z.ZodString>;
     config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -63,7 +64,7 @@ export declare const nodeConfigSchema: z.ZodEffects<z.ZodObject<{
     height: z.ZodOptional<z.ZodNumber>;
 }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
     id: z.ZodOptional<z.ZodString>;
-    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
     label: z.ZodOptional<z.ZodString>;
     config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -81,7 +82,7 @@ export declare const nodeConfigSchema: z.ZodEffects<z.ZodObject<{
     height: z.ZodOptional<z.ZodNumber>;
 }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
     id: z.ZodOptional<z.ZodString>;
-    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
     label: z.ZodOptional<z.ZodString>;
     config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -99,7 +100,7 @@ export declare const nodeConfigSchema: z.ZodEffects<z.ZodObject<{
     height: z.ZodOptional<z.ZodNumber>;
 }, z.ZodTypeAny, "passthrough">>, z.objectOutputType<{
     id: z.ZodOptional<z.ZodString>;
-    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
     label: z.ZodOptional<z.ZodString>;
     config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -117,7 +118,7 @@ export declare const nodeConfigSchema: z.ZodEffects<z.ZodObject<{
     height: z.ZodOptional<z.ZodNumber>;
 }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
     id: z.ZodOptional<z.ZodString>;
-    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+    type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
     label: z.ZodOptional<z.ZodString>;
     config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -211,7 +212,7 @@ export declare const updateWorkflowSchema: z.ZodObject<{
 export declare const saveWorkflowCanvasSchema: z.ZodObject<{
     nodes: z.ZodArray<z.ZodEffects<z.ZodObject<{
         id: z.ZodOptional<z.ZodString>;
-        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
         label: z.ZodOptional<z.ZodString>;
         config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -229,7 +230,7 @@ export declare const saveWorkflowCanvasSchema: z.ZodObject<{
         height: z.ZodOptional<z.ZodNumber>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         id: z.ZodOptional<z.ZodString>;
-        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
         label: z.ZodOptional<z.ZodString>;
         config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -247,7 +248,7 @@ export declare const saveWorkflowCanvasSchema: z.ZodObject<{
         height: z.ZodOptional<z.ZodNumber>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         id: z.ZodOptional<z.ZodString>;
-        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
         label: z.ZodOptional<z.ZodString>;
         config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -265,7 +266,7 @@ export declare const saveWorkflowCanvasSchema: z.ZodObject<{
         height: z.ZodOptional<z.ZodNumber>;
     }, z.ZodTypeAny, "passthrough">>, z.objectOutputType<{
         id: z.ZodOptional<z.ZodString>;
-        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
         label: z.ZodOptional<z.ZodString>;
         config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -283,7 +284,7 @@ export declare const saveWorkflowCanvasSchema: z.ZodObject<{
         height: z.ZodOptional<z.ZodNumber>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         id: z.ZodOptional<z.ZodString>;
-        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
         label: z.ZodOptional<z.ZodString>;
         config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -354,7 +355,7 @@ export declare const saveWorkflowCanvasSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     nodes: z.objectOutputType<{
         id: z.ZodOptional<z.ZodString>;
-        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
         label: z.ZodOptional<z.ZodString>;
         config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -385,7 +386,7 @@ export declare const saveWorkflowCanvasSchema: z.ZodObject<{
 }, {
     nodes: z.objectInputType<{
         id: z.ZodOptional<z.ZodString>;
-        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
         label: z.ZodOptional<z.ZodString>;
         config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -419,7 +420,7 @@ export declare const generatedWorkflowSchema: z.ZodEffects<z.ZodObject<{
     description: z.ZodString;
     nodes: z.ZodArray<z.ZodEffects<z.ZodObject<{
         id: z.ZodString;
-        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "manual", "http", "email", "discord", "telegram", "sheets", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "set_fields", "respond_webhook"]>;
+        type: z.ZodEnum<["trigger", "action", "logic", "advanced", "webhook", "cron", "cronTrigger", "manual", "http", "httpRequest", "postgres", "postgresql", "redis", "mongo", "mongodb", "email", "discord", "telegram", "telegramTrigger", "slack", "slackTrigger", "sheets", "googleSheets", "googleDrive", "drive", "gmail", "googleGmail", "gmailTrigger", "ai", "ai_agent", "condition", "transform", "delay", "code", "output", "approval", "merge", "filter", "splitInBatches", "set_fields", "respond_webhook", "evaluationTrigger", "emailReadImap"]>;
         label: z.ZodOptional<z.ZodString>;
         config: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -436,51 +437,51 @@ export declare const generatedWorkflowSchema: z.ZodEffects<z.ZodObject<{
         width: z.ZodOptional<z.ZodNumber>;
         height: z.ZodOptional<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
-        type: "email" | "code" | "filter" | "trigger" | "action" | "logic" | "advanced" | "webhook" | "cron" | "manual" | "http" | "discord" | "telegram" | "sheets" | "ai" | "ai_agent" | "condition" | "transform" | "delay" | "output" | "approval" | "merge" | "set_fields" | "respond_webhook";
+        type: "trigger" | "action" | "logic" | "transform" | "advanced" | "webhook" | "cron" | "manual" | "gmailTrigger" | "emailReadImap" | "evaluationTrigger" | "postgres" | "redis" | "mongo" | "http" | "condition" | "merge" | "set_fields" | "code" | "filter" | "splitInBatches" | "delay" | "gmail" | "email" | "googleDrive" | "sheets" | "telegram" | "discord" | "ai" | "respond_webhook" | "cronTrigger" | "httpRequest" | "postgresql" | "mongodb" | "telegramTrigger" | "slack" | "slackTrigger" | "googleSheets" | "drive" | "googleGmail" | "ai_agent" | "output" | "approval";
         id: string;
         config: Record<string, unknown>;
         position: {
             x: number;
             y: number;
         };
-        label?: string | undefined;
         data?: Record<string, unknown> | undefined;
+        label?: string | undefined;
         width?: number | undefined;
         height?: number | undefined;
     }, {
-        type: "email" | "code" | "filter" | "trigger" | "action" | "logic" | "advanced" | "webhook" | "cron" | "manual" | "http" | "discord" | "telegram" | "sheets" | "ai" | "ai_agent" | "condition" | "transform" | "delay" | "output" | "approval" | "merge" | "set_fields" | "respond_webhook";
+        type: "trigger" | "action" | "logic" | "transform" | "advanced" | "webhook" | "cron" | "manual" | "gmailTrigger" | "emailReadImap" | "evaluationTrigger" | "postgres" | "redis" | "mongo" | "http" | "condition" | "merge" | "set_fields" | "code" | "filter" | "splitInBatches" | "delay" | "gmail" | "email" | "googleDrive" | "sheets" | "telegram" | "discord" | "ai" | "respond_webhook" | "cronTrigger" | "httpRequest" | "postgresql" | "mongodb" | "telegramTrigger" | "slack" | "slackTrigger" | "googleSheets" | "drive" | "googleGmail" | "ai_agent" | "output" | "approval";
         id: string;
         position: {
             x: number;
             y: number;
         };
+        data?: Record<string, unknown> | undefined;
         label?: string | undefined;
         config?: Record<string, unknown> | undefined;
-        data?: Record<string, unknown> | undefined;
         width?: number | undefined;
         height?: number | undefined;
     }>, {
-        type: "email" | "code" | "filter" | "trigger" | "action" | "logic" | "advanced" | "webhook" | "cron" | "manual" | "http" | "discord" | "telegram" | "sheets" | "ai" | "ai_agent" | "condition" | "transform" | "delay" | "output" | "approval" | "merge" | "set_fields" | "respond_webhook";
+        type: "trigger" | "action" | "logic" | "transform" | "advanced" | "webhook" | "cron" | "manual" | "gmailTrigger" | "emailReadImap" | "evaluationTrigger" | "postgres" | "redis" | "mongo" | "http" | "condition" | "merge" | "set_fields" | "code" | "filter" | "splitInBatches" | "delay" | "gmail" | "email" | "googleDrive" | "sheets" | "telegram" | "discord" | "ai" | "respond_webhook" | "cronTrigger" | "httpRequest" | "postgresql" | "mongodb" | "telegramTrigger" | "slack" | "slackTrigger" | "googleSheets" | "drive" | "googleGmail" | "ai_agent" | "output" | "approval";
         id: string;
         config: Record<string, unknown>;
         position: {
             x: number;
             y: number;
         };
-        label?: string | undefined;
         data?: Record<string, unknown> | undefined;
+        label?: string | undefined;
         width?: number | undefined;
         height?: number | undefined;
     }, {
-        type: "email" | "code" | "filter" | "trigger" | "action" | "logic" | "advanced" | "webhook" | "cron" | "manual" | "http" | "discord" | "telegram" | "sheets" | "ai" | "ai_agent" | "condition" | "transform" | "delay" | "output" | "approval" | "merge" | "set_fields" | "respond_webhook";
+        type: "trigger" | "action" | "logic" | "transform" | "advanced" | "webhook" | "cron" | "manual" | "gmailTrigger" | "emailReadImap" | "evaluationTrigger" | "postgres" | "redis" | "mongo" | "http" | "condition" | "merge" | "set_fields" | "code" | "filter" | "splitInBatches" | "delay" | "gmail" | "email" | "googleDrive" | "sheets" | "telegram" | "discord" | "ai" | "respond_webhook" | "cronTrigger" | "httpRequest" | "postgresql" | "mongodb" | "telegramTrigger" | "slack" | "slackTrigger" | "googleSheets" | "drive" | "googleGmail" | "ai_agent" | "output" | "approval";
         id: string;
         position: {
             x: number;
             y: number;
         };
+        data?: Record<string, unknown> | undefined;
         label?: string | undefined;
         config?: Record<string, unknown> | undefined;
-        data?: Record<string, unknown> | undefined;
         width?: number | undefined;
         height?: number | undefined;
     }>, "many">;
@@ -536,18 +537,16 @@ export declare const generatedWorkflowSchema: z.ZodEffects<z.ZodObject<{
         targetHandle?: string | undefined;
     }>, "many">;
 }, "strip", z.ZodTypeAny, {
-    name: string;
-    description: string;
     nodes: {
-        type: "email" | "code" | "filter" | "trigger" | "action" | "logic" | "advanced" | "webhook" | "cron" | "manual" | "http" | "discord" | "telegram" | "sheets" | "ai" | "ai_agent" | "condition" | "transform" | "delay" | "output" | "approval" | "merge" | "set_fields" | "respond_webhook";
+        type: "trigger" | "action" | "logic" | "transform" | "advanced" | "webhook" | "cron" | "manual" | "gmailTrigger" | "emailReadImap" | "evaluationTrigger" | "postgres" | "redis" | "mongo" | "http" | "condition" | "merge" | "set_fields" | "code" | "filter" | "splitInBatches" | "delay" | "gmail" | "email" | "googleDrive" | "sheets" | "telegram" | "discord" | "ai" | "respond_webhook" | "cronTrigger" | "httpRequest" | "postgresql" | "mongodb" | "telegramTrigger" | "slack" | "slackTrigger" | "googleSheets" | "drive" | "googleGmail" | "ai_agent" | "output" | "approval";
         id: string;
         config: Record<string, unknown>;
         position: {
             x: number;
             y: number;
         };
-        label?: string | undefined;
         data?: Record<string, unknown> | undefined;
+        label?: string | undefined;
         width?: number | undefined;
         height?: number | undefined;
     }[];
@@ -562,19 +561,19 @@ export declare const generatedWorkflowSchema: z.ZodEffects<z.ZodObject<{
         sourceHandle?: string | undefined;
         targetHandle?: string | undefined;
     }[];
-}, {
     name: string;
     description: string;
+}, {
     nodes: {
-        type: "email" | "code" | "filter" | "trigger" | "action" | "logic" | "advanced" | "webhook" | "cron" | "manual" | "http" | "discord" | "telegram" | "sheets" | "ai" | "ai_agent" | "condition" | "transform" | "delay" | "output" | "approval" | "merge" | "set_fields" | "respond_webhook";
+        type: "trigger" | "action" | "logic" | "transform" | "advanced" | "webhook" | "cron" | "manual" | "gmailTrigger" | "emailReadImap" | "evaluationTrigger" | "postgres" | "redis" | "mongo" | "http" | "condition" | "merge" | "set_fields" | "code" | "filter" | "splitInBatches" | "delay" | "gmail" | "email" | "googleDrive" | "sheets" | "telegram" | "discord" | "ai" | "respond_webhook" | "cronTrigger" | "httpRequest" | "postgresql" | "mongodb" | "telegramTrigger" | "slack" | "slackTrigger" | "googleSheets" | "drive" | "googleGmail" | "ai_agent" | "output" | "approval";
         id: string;
         position: {
             x: number;
             y: number;
         };
+        data?: Record<string, unknown> | undefined;
         label?: string | undefined;
         config?: Record<string, unknown> | undefined;
-        data?: Record<string, unknown> | undefined;
         width?: number | undefined;
         height?: number | undefined;
     }[];
@@ -589,19 +588,19 @@ export declare const generatedWorkflowSchema: z.ZodEffects<z.ZodObject<{
         sourceHandle?: string | undefined;
         targetHandle?: string | undefined;
     }[];
+    name: string;
+    description: string;
 }>, {
-    name: string;
-    description: string;
     nodes: {
-        type: "email" | "code" | "filter" | "trigger" | "action" | "logic" | "advanced" | "webhook" | "cron" | "manual" | "http" | "discord" | "telegram" | "sheets" | "ai" | "ai_agent" | "condition" | "transform" | "delay" | "output" | "approval" | "merge" | "set_fields" | "respond_webhook";
+        type: "trigger" | "action" | "logic" | "transform" | "advanced" | "webhook" | "cron" | "manual" | "gmailTrigger" | "emailReadImap" | "evaluationTrigger" | "postgres" | "redis" | "mongo" | "http" | "condition" | "merge" | "set_fields" | "code" | "filter" | "splitInBatches" | "delay" | "gmail" | "email" | "googleDrive" | "sheets" | "telegram" | "discord" | "ai" | "respond_webhook" | "cronTrigger" | "httpRequest" | "postgresql" | "mongodb" | "telegramTrigger" | "slack" | "slackTrigger" | "googleSheets" | "drive" | "googleGmail" | "ai_agent" | "output" | "approval";
         id: string;
         config: Record<string, unknown>;
         position: {
             x: number;
             y: number;
         };
-        label?: string | undefined;
         data?: Record<string, unknown> | undefined;
+        label?: string | undefined;
         width?: number | undefined;
         height?: number | undefined;
     }[];
@@ -616,19 +615,19 @@ export declare const generatedWorkflowSchema: z.ZodEffects<z.ZodObject<{
         sourceHandle?: string | undefined;
         targetHandle?: string | undefined;
     }[];
-}, {
     name: string;
     description: string;
+}, {
     nodes: {
-        type: "email" | "code" | "filter" | "trigger" | "action" | "logic" | "advanced" | "webhook" | "cron" | "manual" | "http" | "discord" | "telegram" | "sheets" | "ai" | "ai_agent" | "condition" | "transform" | "delay" | "output" | "approval" | "merge" | "set_fields" | "respond_webhook";
+        type: "trigger" | "action" | "logic" | "transform" | "advanced" | "webhook" | "cron" | "manual" | "gmailTrigger" | "emailReadImap" | "evaluationTrigger" | "postgres" | "redis" | "mongo" | "http" | "condition" | "merge" | "set_fields" | "code" | "filter" | "splitInBatches" | "delay" | "gmail" | "email" | "googleDrive" | "sheets" | "telegram" | "discord" | "ai" | "respond_webhook" | "cronTrigger" | "httpRequest" | "postgresql" | "mongodb" | "telegramTrigger" | "slack" | "slackTrigger" | "googleSheets" | "drive" | "googleGmail" | "ai_agent" | "output" | "approval";
         id: string;
         position: {
             x: number;
             y: number;
         };
+        data?: Record<string, unknown> | undefined;
         label?: string | undefined;
         config?: Record<string, unknown> | undefined;
-        data?: Record<string, unknown> | undefined;
         width?: number | undefined;
         height?: number | undefined;
     }[];
@@ -643,6 +642,8 @@ export declare const generatedWorkflowSchema: z.ZodEffects<z.ZodObject<{
         sourceHandle?: string | undefined;
         targetHandle?: string | undefined;
     }[];
+    name: string;
+    description: string;
 }>;
 export declare const executeWorkflowSchema: z.ZodObject<{
     input: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -654,20 +655,21 @@ export declare const executeWorkflowSchema: z.ZodObject<{
     trigger?: "webhook" | "cron" | "manual" | "api" | undefined;
     input?: Record<string, unknown> | undefined;
 }>;
+export declare const credentialBucketSchema: z.ZodEnum<["api_key", "bearer_token", "basic_auth", "oauth2_managed", "oauth2_custom", "header_auth", "query_auth", "mcp_oauth2", "oauth2", "basic", "token"]>;
 export declare const createCredentialSchema: z.ZodObject<{
     name: z.ZodString;
-    type: z.ZodEnum<["api_key", "oauth2", "basic", "token"]>;
+    type: z.ZodUnion<[z.ZodEnum<["api_key", "bearer_token", "basic_auth", "oauth2_managed", "oauth2_custom", "header_auth", "query_auth", "mcp_oauth2", "oauth2", "basic", "token"]>, z.ZodString]>;
     provider: z.ZodString;
-    data: z.ZodRecord<z.ZodString, z.ZodString>;
+    data: z.ZodRecord<z.ZodString, z.ZodAny>;
 }, "strip", z.ZodTypeAny, {
+    data: Record<string, any>;
     name: string;
-    type: "api_key" | "oauth2" | "basic" | "token";
-    data: Record<string, string>;
+    type: string;
     provider: string;
 }, {
+    data: Record<string, any>;
     name: string;
-    type: "api_key" | "oauth2" | "basic" | "token";
-    data: Record<string, string>;
+    type: string;
     provider: string;
 }>;
 export declare const createWebhookSchema: z.ZodObject<{
@@ -729,7 +731,7 @@ export type ApiError = {
     code: string;
     details?: Record<string, string[]>;
 };
-export declare const PlanEnum: z.ZodEnum<["FREE", "STARTER", "PRO", "ENTERPRISE"]>;
+export declare const PlanEnum: z.ZodEnum<["FREE", "STARTER", "BASIC", "GROWTH", "PRO", "ENTERPRISE"]>;
 export declare const MemberRoleEnum: z.ZodEnum<["OWNER", "ADMIN", "MEMBER", "VIEWER"]>;
 export declare const WorkflowStatusEnum: z.ZodEnum<["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]>;
 export declare const ExecutionStatusEnum: z.ZodEnum<["PENDING", "RUNNING", "SUCCESS", "FAILED", "CANCELLED", "WAITING_APPROVAL"]>;
@@ -752,6 +754,21 @@ export declare const NODE_TYPES: readonly [{
     readonly label: "HTTP Request";
     readonly icon: "Globe";
     readonly color: "#06b6d4";
+}, {
+    readonly type: "postgres";
+    readonly label: "PostgreSQL";
+    readonly icon: "Database";
+    readonly color: "#336791";
+}, {
+    readonly type: "redis";
+    readonly label: "Redis";
+    readonly icon: "Database";
+    readonly color: "#dc382d";
+}, {
+    readonly type: "mongo";
+    readonly label: "MongoDB";
+    readonly icon: "Database";
+    readonly color: "#13aa52";
 }, {
     readonly type: "email";
     readonly label: "Send Email";
@@ -788,6 +805,11 @@ export declare const NODE_TYPES: readonly [{
     readonly icon: "Timer";
     readonly color: "#64748b";
 }, {
+    readonly type: "code";
+    readonly label: "Code Sandbox";
+    readonly icon: "Code";
+    readonly color: "#0ea5e9";
+}, {
     readonly type: "ai_agent";
     readonly label: "AI Agent";
     readonly icon: "Brain";
@@ -817,5 +839,173 @@ export declare const NODE_TYPES: readonly [{
     readonly label: "Respond Webhook";
     readonly icon: "Reply";
     readonly color: "#8b5cf6";
+}, {
+    readonly type: "gmailTrigger";
+    readonly label: "Gmail Trigger";
+    readonly icon: "Mail";
+    readonly color: "#ea4335";
+}, {
+    readonly type: "googleDrive";
+    readonly label: "Google Drive";
+    readonly icon: "HardDrive";
+    readonly color: "#34a853";
+}, {
+    readonly type: "drive";
+    readonly label: "Drive";
+    readonly icon: "HardDrive";
+    readonly color: "#34a853";
+}, {
+    readonly type: "evaluationTrigger";
+    readonly label: "Evaluation Trigger";
+    readonly icon: "ClipboardCheck";
+    readonly color: "#f59e0b";
+}, {
+    readonly type: "emailReadImap";
+    readonly label: "IMAP Email";
+    readonly icon: "Mail";
+    readonly color: "#06b6d4";
+}, {
+    readonly type: "gmail";
+    readonly label: "Gmail";
+    readonly icon: "Mail";
+    readonly color: "#ea4335";
+}, {
+    readonly type: "googleGmail";
+    readonly label: "Google Gmail";
+    readonly icon: "Mail";
+    readonly color: "#ea4335";
+}, {
+    readonly type: "googleSheets";
+    readonly label: "Google Sheets";
+    readonly icon: "Table";
+    readonly color: "#34a853";
+}, {
+    readonly type: "slack";
+    readonly label: "Slack";
+    readonly icon: "MessageSquare";
+    readonly color: "#4a154b";
+}, {
+    readonly type: "slackTrigger";
+    readonly label: "Slack Trigger";
+    readonly icon: "Zap";
+    readonly color: "#4a154b";
+}, {
+    readonly type: "telegramTrigger";
+    readonly label: "Telegram Trigger";
+    readonly icon: "Zap";
+    readonly color: "#229ed9";
+}, {
+    readonly type: "cronTrigger";
+    readonly label: "Cron Trigger";
+    readonly icon: "Clock";
+    readonly color: "#8b5cf6";
 }];
+export type SignupInput = z.infer<typeof signupSchema>;
+export type LoginInput = z.infer<typeof loginSchema>;
+export type CreateOrgInput = z.infer<typeof createOrgSchema>;
+export type InviteMemberInput = z.infer<typeof inviteMemberSchema>;
+export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
+export type UpdateWorkflowInput = z.infer<typeof updateWorkflowSchema>;
+export type SaveWorkflowCanvasInput = z.infer<typeof saveWorkflowCanvasSchema>;
+export type NodeConfigInput = z.infer<typeof nodeConfigSchema>;
+export type EdgeConfigInput = z.infer<typeof edgeConfigSchema>;
+export type ExecuteWorkflowInput = z.infer<typeof executeWorkflowSchema>;
+export type CreateCredentialInput = z.infer<typeof createCredentialSchema>;
+export type CredentialBucket = z.infer<typeof credentialBucketSchema>;
+export type CreateWebhookInput = z.infer<typeof createWebhookSchema>;
+export type GenerateWorkflowInput = z.infer<typeof generateWorkflowSchema>;
+export type ExplainErrorInput = z.infer<typeof explainErrorSchema>;
+export type DecideApprovalInput = z.infer<typeof decideApprovalSchema>;
+export type GeneratedWorkflow = z.infer<typeof generatedWorkflowSchema>;
+export type PlanLimits = {
+    executionsPerMonth: number;
+    workflows: number;
+    aiCallsPerMonth: number;
+    members: number;
+    concurrency: number;
+    dataRetentionDays: number;
+};
+export type MetricUsage = {
+    used: number;
+    limit: number;
+    remaining: number;
+    percentage: number;
+};
+export type OrgUsageSummary = {
+    orgId: string;
+    plan: string;
+    periodStart: string;
+    periodEnd: string;
+    limits: PlanLimits;
+    metrics: {
+        executions: MetricUsage;
+        aiCalls: MetricUsage;
+        workflows: MetricUsage;
+        members: MetricUsage;
+    };
+};
+export type UsageType = "execution" | "ai_call" | "integration_call" | "webhook_call";
+export interface RecordUsageParams {
+    orgId: string;
+    userId?: string;
+    type: UsageType | string;
+    quantity?: number;
+    metadata?: Record<string, unknown>;
+}
+export interface TraceContext {
+    traceId: string;
+    spanId: string;
+    traceFlags: string;
+    traceState?: string;
+}
+export type SpanStatusCode = "UNSET" | "OK" | "ERROR";
+export interface SpanData {
+    name: string;
+    traceId: string;
+    spanId: string;
+    parentSpanId?: string;
+    startTime: number;
+    endTime?: number;
+    durationMs?: number;
+    attributes: Record<string, string | number | boolean>;
+    status: {
+        code: SpanStatusCode;
+        description?: string;
+    };
+    events: Array<{
+        name: string;
+        timestamp: number;
+        attributes?: Record<string, unknown>;
+    }>;
+}
+export interface TelemetryStats {
+    service: string;
+    timestamp: string;
+    activeExecutions: number;
+    counters: {
+        httpRequests: number;
+        workflowExecutions: number;
+        aiGenerations: number;
+    };
+    spansRecorded: number;
+}
+export interface NodeTrace {
+    id: string;
+    nodeId: string;
+    status: string;
+    input?: unknown;
+    output?: unknown;
+    error?: string | null;
+    startedAt: Date | string;
+    finishedAt?: Date | string | null;
+    duration?: number | null;
+}
+export interface ExecutionTrace {
+    executionId: string;
+    status: string;
+    startedAt: Date | string;
+    finishedAt?: Date | string | null;
+    duration?: number | null;
+    traces: NodeTrace[];
+}
 //# sourceMappingURL=index.d.ts.map

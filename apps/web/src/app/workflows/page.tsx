@@ -62,10 +62,26 @@ export default function WorkflowsPage() {
     if (!newWorkflow.name.trim()) return;
     try {
       const created = await workflows.create({ name: newWorkflow.name, description: newWorkflow.description });
-      setData((items) => [created, ...items]);
       setNewWorkflow({ name: "", description: "" });
       setCreateOpen(false);
+      router.push(`/workflows/${created.id}/editor`);
     } catch {}
+  }
+
+  async function createWorkflowQuick() {
+    const base = "My workflow";
+    let n = data.length + 1;
+    let name = `${base} ${n}`;
+    // avoid collision
+    const names = new Set(data.map((w) => w.name));
+    while (names.has(name)) { n += 1; name = `${base} ${n}`; }
+    try {
+      const created = await workflows.create({ name, description: "" });
+      router.push(`/workflows/${created.id}/editor`);
+    } catch (e: any) {
+      // fallback open modal
+      setCreateOpen(true);
+    }
   }
 
   async function handleToggle(id: string, current: string) {
@@ -98,17 +114,37 @@ export default function WorkflowsPage() {
   return (
     <AppLayout>
       <div className="animate-in fade-in duration-300">
+        {/* n8n Personal header — imagem 1787618677762 */}
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
           <div>
-            <h1 className="text-2xl font-semibold text-zinc-50">Workflows</h1>
-            <p className="mt-1 text-sm text-zinc-500">Manage your automation workflows</p>
+            <h1 className="text-[18px] font-semibold text-zinc-50 tracking-tight">Personal</h1>
+            <p className="mt-0.5 text-sm text-zinc-500">Workflows, credentials and data tables owned by you</p>
+            <div className="mt-3 flex items-center gap-5 text-sm">
+              <span className="border-b-2 border-[#ff6a2b] pb-1 font-medium text-white">Workflows</span>
+              <a href="/credentials" className="pb-1 text-zinc-500 hover:text-zinc-300">Credentials</a>
+              <a href="/executions" className="pb-1 text-zinc-500 hover:text-zinc-300">Executions</a>
+              <span className="pb-1 text-zinc-500">Variables</span>
+              <span className="pb-1 text-zinc-500">Data tables</span>
+            </div>
           </div>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-2 rounded-md bg-violet-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-600"
-          >
-            Create workflow <ChevronDown className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={createWorkflowQuick}
+              className="inline-flex items-center gap-2 rounded-md bg-[#ff6a2b] px-4 py-2 text-sm font-semibold text-white shadow-[0_2px_10px_rgba(255,106,43,0.3)] transition-colors hover:bg-[#ff7a3a]"
+            >
+              Create workflow
+            </button>
+            <button
+              onClick={() => setCreateOpen(true)}
+              className="inline-flex h-9 w-7 items-center justify-center rounded-md bg-[#ff6a2b] text-white hover:bg-[#ff7a3a] border-l border-white/20"
+              aria-label="More create options"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+        <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
+          <span className="inline-flex items-center gap-1.5"><UserRound className="h-3 w-3" /> Personal</span>
         </div>
 
         <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">

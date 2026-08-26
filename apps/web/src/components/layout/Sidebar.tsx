@@ -6,7 +6,6 @@ import {
   BarChart3,
   ChevronRight,
   Clock,
-  CreditCard,
   HelpCircle,
   Home,
   KeyRound,
@@ -20,7 +19,6 @@ import {
   ShieldCheck,
   Sparkles,
   UserRound,
-  Workflow,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -32,11 +30,7 @@ const topNav = [
   { label: "Personal", href: "/personal", icon: UserRound },
 ];
 
-const workspaceNav = [
-  { label: "Credentials", href: "/credentials", icon: KeyRound },
-  { label: "Approvals", href: "/approvals", icon: ShieldCheck, badge: "3" },
-  { label: "Billing", href: "/billing", icon: CreditCard },
-];
+const workspaceNav: { label: string; href: string; icon: typeof KeyRound; badge?: string }[] = [];
 
 const footerNav = [
   { label: "Admin Panel", href: "/settings", icon: Settings },
@@ -55,19 +49,40 @@ function LogoMark({ className }: { className?: string }) {
   );
 }
 
+const settingsDrawerItems = [
+  { label: "Personal", href: "/settings", icon: UserRound },
+  { label: "Users", href: "/settings/users", icon: UserRound },
+  { label: "AI Usage", href: "/settings/ai-usage", icon: Sparkles },
+  { label: "Roles", href: "/settings/roles", icon: ShieldCheck },
+  { label: "External Secrets", href: "/settings/external-secrets", icon: KeyRound },
+  { label: "Environments", href: "/settings/environments", icon: LayoutGrid },
+  { label: "SSO", href: "/settings/sso", icon: ShieldCheck },
+  { label: "Security & policies", href: "/settings/security", icon: ShieldCheck },
+  { label: "LDAP", href: "/settings/ldap", icon: UserRound },
+  { label: "Log Streaming", href: "/settings/log-streaming", icon: BarChart3 },
+  { label: "OpenTelemetry", href: "/settings/opentelemetry", icon: BarChart3 },
+  { label: "Community nodes", href: "/settings/community-nodes", icon: LayoutGrid },
+  { label: "Instance-level MCP", href: "/mcp", icon: LayoutGrid },
+  { label: "Chat Preview", href: "/chat", icon: HelpCircle },
+  { label: "AI Assistant Preview", href: "/assistant", icon: Sparkles },
+] as const;
+
 export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClose }: { collapsed: boolean; onCollapsedChange: (value: boolean) => void; mobileOpen: boolean; onMobileClose: () => void }) {
   const pathname = usePathname();
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [variableHover, setVariableHover] = useState(false);
+  const [settingsFlyoutOpen, setSettingsFlyoutOpen] = useState(false);
   const plusMenuRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onDocClick(event: MouseEvent) {
       if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) setPlusMenuOpen(false);
+      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) setSettingsFlyoutOpen(false);
     }
-    if (plusMenuOpen) document.addEventListener("click", onDocClick);
+    if (plusMenuOpen || settingsFlyoutOpen) document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
-  }, [plusMenuOpen]);
+  }, [plusMenuOpen, settingsFlyoutOpen]);
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -143,17 +158,22 @@ export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClos
                 key={item.label}
                 href={item.href}
                 onClick={onMobileClose}
+                aria-current={active ? "page" : undefined}
                 title={collapsed ? item.label : undefined}
-                className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors", collapsed && "justify-center px-0", active ? "bg-white/5 text-zinc-50" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200")}
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500",
+                  collapsed && "justify-center px-0",
+                  active ? "bg-white/5 text-zinc-50 font-medium" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+                )}
               >
-                <Icon className={cn("h-4 w-4 shrink-0", active ? "text-violet-500" : "text-zinc-500")} />
+                <Icon className={cn("h-4 w-4 shrink-0", active ? "text-violet-500" : "text-zinc-500")} aria-hidden="true" />
                 {!collapsed ? <span>{item.label}</span> : null}
               </Link>
             );
           })}
         </nav>
 
-        <div className="mx-2 my-4 border-t border-white/10" />
+        <div className="mx-2 my-4 border-t border-white/10" role="separator" />
 
         {/* Workspace extras */}
         <nav className="space-y-0.5 px-2" aria-label="Workspace navigation">
@@ -165,10 +185,15 @@ export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClos
                 key={item.href}
                 href={item.href}
                 onClick={onMobileClose}
+                aria-current={active ? "page" : undefined}
                 title={collapsed ? item.label : undefined}
-                className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors", collapsed && "justify-center px-0", active ? "bg-white/5 text-zinc-50" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200")}
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500",
+                  collapsed && "justify-center px-0",
+                  active ? "bg-white/5 text-zinc-50 font-medium" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+                )}
               >
-                <Icon className={cn("h-4 w-4 shrink-0", active ? "text-violet-500" : "text-zinc-500")} />
+                <Icon className={cn("h-4 w-4 shrink-0", active ? "text-violet-500" : "text-zinc-500")} aria-hidden="true" />
                 {!collapsed ? <span className="flex-1">{item.label}</span> : null}
                 {!collapsed && item.badge ? <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">{item.badge}</span> : null}
               </Link>
@@ -180,7 +205,7 @@ export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClos
 
         {/* Footer nav */}
         <nav className="space-y-0.5 border-t border-white/10 px-2 py-2" aria-label="Utility navigation">
-          {footerNav.map((item) => {
+          {footerNav.filter((i) => i.label !== "Settings").map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
             return (
@@ -188,15 +213,49 @@ export function Sidebar({ collapsed, onCollapsedChange, mobileOpen, onMobileClos
                 key={item.label}
                 href={item.href}
                 onClick={onMobileClose}
+                aria-current={active ? "page" : undefined}
                 title={collapsed ? item.label : undefined}
-                className={cn("group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors", collapsed && "justify-center px-0", active ? "bg-white/5 text-zinc-50" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200")}
+                className={cn(
+                  "group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500",
+                  collapsed && "justify-center px-0",
+                  active ? "bg-white/5 text-zinc-50 font-medium" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+                )}
               >
-                <Icon className={cn("h-4 w-4 shrink-0", active ? "text-violet-500" : "text-zinc-500")} />
+                <Icon className={cn("h-4 w-4 shrink-0", active ? "text-violet-500" : "text-zinc-500")} aria-hidden="true" />
                 {!collapsed ? <span className="flex-1">{item.label}</span> : null}
-                {!collapsed ? <ChevronRight className="h-3.5 w-3.5 text-zinc-600 transition-transform group-hover:translate-x-0.5" /> : null}
+                {!collapsed ? <ChevronRight className="h-3.5 w-3.5 text-zinc-600 transition-transform group-hover:translate-x-0.5" aria-hidden="true" /> : null}
               </Link>
             );
           })}
+          {!collapsed ? (
+            <div className="relative" ref={settingsRef}>
+              <button type="button" onClick={() => setSettingsFlyoutOpen((v) => !v)} className={cn("group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors", settingsFlyoutOpen || pathname.startsWith("/settings") || pathname.startsWith("/mcp") ? "bg-white/5 text-zinc-50" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200")} aria-expanded={settingsFlyoutOpen}>
+                <Settings className={cn("h-4 w-4 shrink-0", settingsFlyoutOpen ? "text-violet-500" : "text-zinc-500")} />
+                <span className="flex-1">Settings</span>
+                <ChevronRight className={cn("h-3.5 w-3.5 text-zinc-600 transition-transform", settingsFlyoutOpen && "rotate-90")} />
+              </button>
+              {settingsFlyoutOpen ? (
+                <div className="absolute bottom-0 left-full z-50 ml-2 w-56 rounded-xl border border-white/10 bg-zinc-900 py-2 shadow-2xl shadow-black/50">
+                  {settingsDrawerItems.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <Link key={item.label} href={item.href} onClick={() => { setSettingsFlyoutOpen(false); onMobileClose(); }} className={cn("flex items-center gap-2.5 px-3.5 py-2 text-sm", isActive(item.href) ? "bg-violet-500/10 text-violet-300" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200")}>
+                        <Icon className="h-3.5 w-3.5 shrink-0" />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                  <div className="my-2 border-t border-white/10" />
+                  <button type="button" onClick={() => { setSettingsFlyoutOpen(false); try { localStorage.removeItem("agentflow_token"); localStorage.removeItem("agentflow_user"); window.location.href = "/login"; } catch {} }} className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-zinc-500 hover:bg-white/5 hover:text-zinc-300">Sign out</button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {collapsed ? (
+            <Link href="/settings" onClick={onMobileClose} title="Settings" className={cn("flex items-center justify-center rounded-md px-0 py-2 text-sm", isActive("/settings") ? "bg-white/5 text-zinc-50" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200")}>
+              <Settings className={cn("h-4 w-4", isActive("/settings") ? "text-violet-500" : "text-zinc-500")} />
+            </Link>
+          ) : null}
         </nav>
 
         {/* Collapse only - profile removed per n8n original, Settings via footerNav */}

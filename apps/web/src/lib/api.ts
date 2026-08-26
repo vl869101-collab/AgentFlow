@@ -35,6 +35,33 @@ export function clearToken() {
 let isRefreshing = false;
 let refreshPromise: Promise<string> | null = null;
 
+async function parseErrorMessage(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "");
+  if (!text) return res.statusText;
+  try {
+    const data = JSON.parse(text) as { error?: string; message?: string };
+    if (data.error) return data.error;
+    if (data.message) return data.message;
+  } catch {
+    // not JSON
+  }
+  return text;
+}
+
+// Auth endpoints must NOT go through the refresh-retry wrapper: a 401 from
+// /login means bad credentials, not an expired session.
+async function rawRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const { method = "GET", body } = options;
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 204) return undefined as T;
+  if (!res.ok) throw new ApiError(res.status, await parseErrorMessage(res));
+  return res.json();
+}
+
 async function tryRefreshToken(): Promise<string> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) throw new Error("No refresh token");
@@ -78,8 +105,7 @@ async function requestWithRefresh<T>(path: string, options: ApiOptions = {}, att
         body: body ? JSON.stringify(body) : undefined,
       });
       if (!retryRes.ok) {
-        const text = await retryRes.text().catch(() => retryRes.statusText);
-        throw new ApiError(retryRes.status, text);
+        throw new ApiError(retryRes.status, await parseErrorMessage(retryRes));
       }
       return retryRes.json();
     } catch {
@@ -93,8 +119,7 @@ async function requestWithRefresh<T>(path: string, options: ApiOptions = {}, att
   }
 
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new ApiError(res.status, text);
+    throw new ApiError(res.status, await parseErrorMessage(res));
   }
 
   return res.json();
@@ -107,11 +132,13 @@ export async function api<T = unknown>(path: string, options: ApiOptions = {}): 
 // Auth
 export const auth = {
   login: (email: string, password: string) =>
-    api<{ token: string; refreshToken: string }>("/api/auth/login", { method: "POST", body: { email, password } }),
+    rawRequest<{ token: string; refreshToken: string }>("/api/auth/login", { method: "POST", body: { email, password } }),
   register: (email: string, password: string, name: string) =>
-    api<{ message: string }>("/api/auth/register", { method: "POST", body: { email, password, name } }),
+    rawRequest<{ message: string }>("/api/auth/register", { method: "POST", body: { email, password, name } }),
   logout: (refreshToken: string) =>
-    api<void>("/api/auth/logout", { method: "POST", body: { refreshToken } }),
+    rawRequest<void>("/api/auth/logout", { method: "POST", body: { refreshToken } }),
+  exchangeOAuthCode: (code: string) =>
+    rawRequest<{ token: string; refreshToken: string }>("/api/auth/oauth/exchange", { method: "POST", body: { code } }),
 };
 
 // Workflows
@@ -153,6 +180,17 @@ export interface Execution {
   output?: unknown;
   error?: string;
   workflow?: { id: string; name: string };
+  traces?: Array<{
+    id: string;
+    nodeId: string;
+    status: string;
+    duration?: number;
+    error?: string;
+    input?: unknown;
+    output?: unknown;
+    startedAt?: string;
+    finishedAt?: string;
+  }>;
 }
 
 export const executions = {

@@ -81,6 +81,55 @@ export async function handleMcpMessage(
       return { responses: [rpcResult(id, result)] };
     }
 
+    case "resources/list": {
+      return {
+        responses: [
+          rpcResult(id, {
+            resources: [
+              { uri: "agentflow://system/status", name: "System Status", mimeType: "application/json" },
+              { uri: "agentflow://workflows", name: "Workflows List", mimeType: "application/json" },
+            ],
+          }),
+        ],
+      };
+    }
+
+    case "resources/read": {
+      const params = (message.params ?? {}) as { uri?: string };
+      const uri = params.uri ?? "agentflow://system/status";
+      return {
+        responses: [
+          rpcResult(id, {
+            contents: [
+              {
+                uri,
+                mimeType: "application/json",
+                text: JSON.stringify({
+                  server: SERVER_NAME,
+                  version: SERVER_VERSION,
+                  status: "healthy",
+                  uri,
+                }),
+              },
+            ],
+          }),
+        ],
+      };
+    }
+
+    case "prompts/list": {
+      return {
+        responses: [
+          rpcResult(id, {
+            prompts: [
+              { name: "build_workflow", description: "Build a new AgentFlow workflow from natural language" },
+              { name: "troubleshoot_execution", description: "Troubleshoot a failed workflow execution" },
+            ],
+          }),
+        ],
+      };
+    }
+
     default:
       return { responses: [rpcError(id, -32601, `Method not found: ${message.method}`)] };
   }

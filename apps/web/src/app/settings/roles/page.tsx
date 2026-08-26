@@ -1,0 +1,8 @@
+"use client";
+import { useState } from "react";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { GatedFeatureBanner } from "@/components/GatedFeatureBanner";
+export default function RolesPage(){
+  const [tab,setTab]=useState<"instance"|"project">("instance");
+  return <AppLayout><div className="max-w-4xl"><div className="flex items-center gap-2"><h1 className="text-2xl font-semibold text-zinc-50">Roles</h1><span className="bg-zinc-800 text-zinc-400 text-xs px-2 py-0.5 rounded-full font-medium">New</span></div><p className="mt-1 text-sm text-zinc-400">Roles allow you to manage specific permissions tailored to your team&apos;s needs. Define granular access to workflows, credentials, project resources and instance settings. Learn more in <a href="https://docs.n8n.io/administer/use-source-control-and-environments" target="_blank" className="text-violet-400 hover:text-violet-300 underline">documentation</a>.</p><div className="mt-6 flex gap-6 border-b border-white/10 text-sm"><button onClick={()=>setTab("instance")} className={tab==="instance"?"border-b-2 border-violet-500 text-white font-medium pb-2":"text-zinc-400 hover:text-zinc-200 pb-2"}>Instance roles</button><button onClick={()=>setTab("project")} className={tab==="project"?"border-b-2 border-violet-500 text-white font-medium pb-2":"text-zinc-400 hover:text-zinc-200 pb-2"}>Project roles</button></div><div className="mt-8"><GatedFeatureBanner title="Upgrade to Enterprise" description="Upgrade to Enterprise to unlock custom roles. It will allow to create custom, granular permissions that let you fine-tune access." learnMoreUrl="https://docs.n8n.io/administer/use-source-control-and-environments" showIlustrations /></div></div></AppLayout>;
+}

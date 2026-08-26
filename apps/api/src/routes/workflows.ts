@@ -1,12 +1,12 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
-import { parsePagination } from "../lib/pagination.js";
+import { parseCursorPagination } from "../lib/pagination.js";
 import { orgIdFromRequest, requireAuth, userIdFromRequest } from "../middleware/auth.js";
-import { checkQuota } from "../middleware/quota.js";
+import { checkQuota, checkWorkflowQuota } from "../middleware/quota.js";
 import { createWorkflowExecution, runExecution } from "../services/executor.js";
 import { enqueueExecution } from "../services/queue.js";
-import { createWorkflowSchema, saveWorkflowCanvasSchema, updateWorkflowSchema } from "@agentflow/shared";
+import { createWorkflowSchema, saveWorkflowCanvasSchema, updateWorkflowSchema, importN8nWorkflow } from "@agentflow/shared";
 import { limitsForPlan } from "../lib/plans.js";
 
 type CanvasValue = Record<string, any>;
@@ -16,13 +16,14 @@ function asObject(value: unknown): CanvasValue {
 }
 
 function canvasKind(type: string): string {
-  if (["webhook", "cron"].includes(type)) return "trigger";
-  if (["http", "email", "discord", "telegram", "sheets"].includes(type)) return "action";
-  if (["condition", "transform", "delay"].includes(type)) return "logic";
+  if (["webhook", "cron", "gmailTrigger", "evaluationTrigger", "emailReadImap"].includes(type)) return "trigger";
+  if (["http", "email", "discord", "telegram", "sheets", "googleDrive", "gmail"].includes(type)) return "action";
+  if (["condition", "transform", "delay", "code"].includes(type)) return "logic";
   return "advanced";
 }
 
 function serializeWorkflow(workflow: any) {
+  if (!workflow) return workflow;
   const nodes = Array.isArray(workflow.nodes)
     ? workflow.nodes.map((node: any) => {
         const data = asObject(node.data);
@@ -59,14 +60,12 @@ function serializeWorkflow(workflow: any) {
 
 async function activeOrgId(request: FastifyRequest): Promise<string | undefined> {
   const userId = userIdFromRequest(request);
+  if (!userId) return undefined;
   const tokenOrgId = orgIdFromRequest(request);
-  if (tokenOrgId) {
-    const membership = await prisma.organizationMember.findUnique({
-      where: { userId_orgId: { userId, orgId: tokenOrgId } },
-    });
-    if (membership) return membership.orgId;
-  }
-  const membership = await prisma.organizationMember.findFirst({ where: { userId } });
+  if (!tokenOrgId) return undefined;
+  const membership = await prisma.organizationMember.findUnique({
+    where: { userId_orgId: { userId, orgId: tokenOrgId } },
+  });
   return membership?.orgId;
 }
 
@@ -126,41 +125,78 @@ async function saveCanvas(workflowId: string, body: any) {
 export async function workflowRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
-  app.get("/", async (request, reply) => {
+  // List workflows with Org Scoping + Search `q` + Cursor Pagination
+  app.get("/", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = await activeOrgId(request);
     if (!orgId) return [];
-    const pagination = parsePagination(request, reply);
-    const workflows = await prisma.workflow.findMany({ where: { orgId }, orderBy: { updatedAt: "desc" }, ...pagination });
-    return workflows.map(serializeWorkflow);
+
+    const query = (request.query ?? {}) as Record<string, unknown>;
+    const q = typeof query.q === "string" && query.q.trim() ? query.q.trim() : typeof query.search === "string" && query.search.trim() ? query.search.trim() : undefined;
+
+    const { cursor, limit, skip, isCursor } = parseCursorPagination(request, reply, 25);
+
+    const whereClause: any = { orgId };
+    if (q) {
+      whereClause.OR = [
+        { name: { contains: q, mode: "insensitive" } },
+        { description: { contains: q, mode: "insensitive" } },
+      ];
+    }
+
+    if (query.status && typeof query.status === "string") {
+      whereClause.status = query.status;
+    }
+
+    let workflows: any[] = [];
+    if (isCursor && cursor) {
+      workflows = await prisma.workflow.findMany({
+        where: whereClause,
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        cursor: { id: cursor },
+        skip: 1,
+        take: limit + 1,
+      });
+    } else {
+      workflows = await prisma.workflow.findMany({
+        where: whereClause,
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        skip: skip ?? 0,
+        take: limit + 1,
+      });
+    }
+
+    const hasMore = workflows.length > limit;
+    const items = hasMore ? workflows.slice(0, limit) : workflows;
+    const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].id : null;
+
+    reply.header("X-Next-Cursor", nextCursor ?? "");
+    reply.header("X-Has-More", String(hasMore));
+
+    const serialized = items.map(serializeWorkflow);
+    if (query.paginate === "true") {
+      return { items: serialized, nextCursor, hasMore };
+    }
+    return serialized;
   });
 
-  app.get("/:id", async (request, reply) => {
+  app.get("/:id", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const orgId = await activeOrgId(request);
-    const workflow = orgId
-      ? await prisma.workflow.findFirst({
-          where: { id, orgId },
-          include: { nodes: true, edges: true, versions: { orderBy: { version: "desc" }, take: 1 } },
-        })
-      : null;
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const workflow = await prisma.workflow.findFirst({
+      where: { id, orgId },
+      include: { nodes: true, edges: true, versions: { orderBy: { version: "desc" }, take: 1 } },
+    });
     if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
     return serializeWorkflow(workflow);
   });
 
-  app.post("/", async (request, reply) => {
+  app.post("/", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } }, preHandler: checkWorkflowQuota }, async (request, reply) => {
     const userId = userIdFromRequest(request);
     const orgId = await activeOrgId(request);
-    if (!orgId) return reply.code(400).send({ error: "No organization", code: "NO_ORG" });
-    const organization = await prisma.organization.findUnique({ where: { id: orgId }, select: { plan: true } });
-    const workflowLimit = limitsForPlan(organization?.plan).workflows;
-    const workflowCount = await prisma.workflow.count({ where: { orgId, status: { not: "ARCHIVED" } } });
-    if (workflowCount >= workflowLimit) {
-      return reply.code(403).send({
-        error: `Your plan allows ${workflowLimit} workflow${workflowLimit === 1 ? "" : "s"}`,
-        code: "WORKFLOW_LIMIT_REACHED",
-        limit: workflowLimit,
-      });
-    }
+    if (!orgId) return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });
+
     const body = createWorkflowSchema.parse(request.body);
     const workflow = await prisma.workflow.create({
       data: { name: body.name, description: body.description, ownerId: userId, orgId },
@@ -193,36 +229,79 @@ export async function workflowRoutes(app: FastifyInstance) {
     return serializeWorkflow(updated);
   }
 
-  app.put("/:id", update);
-  app.patch("/:id", update);
+  app.put("/:id", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, update);
+  app.patch("/:id", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, update);
 
-  app.delete("/:id", async (request, reply) => {
+  app.delete("/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const orgId = await activeOrgId(request);
-    const result = orgId ? await prisma.workflow.deleteMany({ where: { id, orgId } }) : { count: 0 };
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const result = await prisma.workflow.deleteMany({ where: { id, orgId } });
     if (result.count === 0) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
     return { ok: true };
   });
 
-  app.put("/:id/canvas", async (request, reply) => {
+  app.put("/:id/canvas", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const orgId = await activeOrgId(request);
-    const workflow = orgId ? await prisma.workflow.findFirst({ where: { id, orgId } }) : null;
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
     if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
     const canvas = await saveCanvas(id, request.body);
     return { ok: true, ...canvas };
   });
 
-  app.post("/:id/run", { preHandler: checkQuota }, async (request, reply) => {
+  app.post("/:id/run", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } }, preHandler: checkQuota }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
     const orgId = await activeOrgId(request);
-    const workflow = orgId ? await prisma.workflow.findFirst({ where: { id, orgId } }) : null;
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
     if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
 
     const execution = await createWorkflowExecution(id, undefined, { userId, trigger: "manual" });
     await prisma.usageRecord.create({ data: { type: "execution", quantity: 1, orgId: workflow.orgId, userId } });
     if (!(await enqueueExecution(execution.id))) void runExecution(execution.id);
     return reply.status(202).send(execution);
+  });
+
+  app.post("/import", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } }, preHandler: checkWorkflowQuota }, async (request, reply) => {
+    const userId = userIdFromRequest(request);
+    const orgId = await activeOrgId(request);
+    if (!orgId) return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });
+
+    const body = request.body as { n8nJson?: unknown; workflowJson?: unknown };
+    const raw = body.n8nJson ?? body.workflowJson;
+    if (!raw) return reply.code(400).send({ error: "n8nJson or workflowJson is required", code: "INVALID_INPUT" });
+
+    let result;
+    try {
+      result = importN8nWorkflow(raw as string | Record<string, unknown>);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Invalid n8n workflow JSON";
+      return reply.code(400).send({ error: message, code: "IMPORT_FAILED" });
+    }
+
+    const workflow = await prisma.workflow.create({
+      data: {
+        name: result.workflow.name,
+        status: result.workflow.status,
+        ownerId: userId,
+        orgId,
+      },
+    });
+
+    if (result.nodes.length > 0 || result.edges.length > 0) {
+      await saveCanvas(workflow.id, { nodes: result.nodes, edges: result.edges });
+    }
+
+    const created = await prisma.workflow.findFirst({
+      where: { id: workflow.id, orgId },
+      include: { nodes: true, edges: true },
+    });
+    return reply.status(201).send({ workflow: serializeWorkflow(created), warnings: result.warnings });
   });
 }

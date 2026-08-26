@@ -5,7 +5,7 @@ import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
 export async function settingsRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
-  app.get("/", async (request) => {
+  app.get("/", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
     const userId = userIdFromRequest(request);
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: userId },
@@ -20,7 +20,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     return { ...user, organizations: memberships.map((m: any) => ({ ...m.org, role: m.role })) };
   });
 
-  app.put("/", async (request) => {
+  app.put("/", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => {
     const userId = userIdFromRequest(request);
     const { name, avatarUrl } = request.body as { name?: string; avatarUrl?: string };
     await prisma.user.update({ where: { id: userId }, data: { name, avatarUrl } });

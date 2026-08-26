@@ -65,7 +65,7 @@ async function upsertSubscription(source: StripeObject) {
 }
 
 export async function billingRoutes(app: FastifyInstance) {
-  app.get("/subscription", { preHandler: requireAuth }, async (request) => {
+  app.get("/subscription", { preHandler: requireAuth, config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
     const userId = userIdFromRequest(request);
     const sub = await prisma.subscription.findFirst({
       where: { userId },
@@ -74,7 +74,7 @@ export async function billingRoutes(app: FastifyInstance) {
     return sub ?? { status: "free" };
   });
 
-  app.get("/usage", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/usage", { preHandler: requireAuth, config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
     const userId = userIdFromRequest(request);
     const records = await prisma.usageRecord.findMany({
       where: { userId },
@@ -144,7 +144,7 @@ export async function billingRoutes(app: FastifyInstance) {
     return { url: session.url, sessionId: session.id };
   });
 
-  app.post("/webhook", async (request, reply) => {
+  app.post("/webhook", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!webhookSecret) {
       return reply.code(503).send({ error: "Stripe webhook is not configured", code: "STRIPE_NOT_CONFIGURED" });

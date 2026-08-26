@@ -6,7 +6,7 @@ import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
 export async function approvalRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
-  app.get("/", async (request, reply) => {
+  app.get("/", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
     const userId = userIdFromRequest(request);
     const memberships = await prisma.organizationMember.findMany({
       where: { userId },
@@ -43,7 +43,6 @@ export async function approvalRoutes(app: FastifyInstance) {
     });
     if (result.count === 0) return reply.code(404).send({ error: "Approval not found or already decided", code: "NOT_FOUND" });
 
-    // ponytail: resume execution if approval was approved
     if (status === "APPROVED") {
       await prisma.workflowExecution.updateMany({
         where: { id: approval.executionId, status: "WAITING_APPROVAL" },
@@ -54,6 +53,6 @@ export async function approvalRoutes(app: FastifyInstance) {
     return { ok: true };
   }
 
-  app.post("/:id/approve", async (request, reply) => decide(request, reply, "APPROVED"));
-  app.post("/:id/reject", async (request, reply) => decide(request, reply, "REJECTED"));
+  app.post("/:id/approve", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => decide(request, reply, "APPROVED"));
+  app.post("/:id/reject", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => decide(request, reply, "REJECTED"));
 }

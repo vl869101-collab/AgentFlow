@@ -14,7 +14,7 @@ const paletteGroups = [
   { label: "Advanced", types: ["ai_agent", "approval"] },
 ] as const;
 
-const iconMap = {
+const iconMap: Record<string, string> = {
   webhook: "↗",
   cron: "◷",
   http: "↔",
@@ -36,9 +36,9 @@ const iconMap = {
   evaluationTrigger: "✓",
   emailReadImap: "@",
   gmail: "@",
-} satisfies Record<NodeTypeKey, string>;
+};
 
-const colorMap: Record<NodeTypeKey, string> = {
+const colorMap: Record<string, string> = {
   webhook: "bg-indigo-500/10 text-indigo-400",
   cron: "bg-violet-500/10 text-violet-400",
   http: "bg-cyan-500/10 text-cyan-400",

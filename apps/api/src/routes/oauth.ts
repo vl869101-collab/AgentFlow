@@ -221,7 +221,7 @@ export async function oauthRoutes(app: FastifyInstance) {
   nonceCleanupTimer.unref();
 
   for (const provider of providers) {
-    app.get(`/${provider}`, async (request, reply) => {
+    app.get(`/${provider}`, { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (request, reply) => {
       const config = getOAuthConfig(provider);
       if (!config || !config.clientId) {
         return reply.code(501).send({ error: `${provider} OAuth not configured`, code: "OAUTH_NOT_CONFIGURED" });
@@ -246,7 +246,7 @@ export async function oauthRoutes(app: FastifyInstance) {
       return reply.redirect(`${config.authUrl}?${params.toString()}`);
     });
 
-    app.get(`/${provider}/callback`, async (request, reply) => {
+    app.get(`/${provider}/callback`, { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (request, reply) => {
       const config = getOAuthConfig(provider);
       if (!config) return reply.code(500).send({ error: "Invalid provider" });
 

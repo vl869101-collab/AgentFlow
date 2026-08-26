@@ -1,12 +1,21 @@
-import { lookup, resolve4, resolve6 } from "node:dns/promises";
-import ipaddr from "ipaddr.js";
 import { prisma } from "../lib/prisma.js";
 import { getEnv } from "../lib/env.js";
 import { decryptCredential } from "../lib/crypto.js";
+import { telemetry } from "../lib/otel.js";
 
 // Native handler (registered via the registry-pending process — Part 2)
 import { executeEvaluationTrigger } from "./nodes/evaluationTrigger.js";
 import { CodeNodeHandler } from "./nodes/code.js";
+import { SwitchNodeHandler } from "./nodes/switch.js";
+import { SplitInBatchesNodeHandler } from "./nodes/split-in-batches.js";
+import { ChatTriggerNodeHandler } from "./nodes/chat-trigger.js";
+import { McpClientNodeHandler } from "./nodes/mcp-client.js";
+import { TeamsNodeHandler } from "./nodes/teams.js";
+import { WhatsAppNodeHandler } from "./nodes/whatsapp.js";
+import { GoogleCalendarNodeHandler } from "./nodes/google-calendar.js";
+import { GoogleDocsNodeHandler } from "./nodes/google-docs.js";
+import { ErrorTriggerNodeHandler } from "./nodes/error-trigger.js";
+import { WaitNodeHandler } from "./nodes/wait.js";
 
 export type ExecutionResult = {
   id: string;
@@ -50,7 +59,10 @@ function parseJson(value: unknown, fallback?: unknown): any {
   try {
     return JSON.parse(value);
   } catch {
-    throw new Error("Invalid JSON in workflow definition");
+    const error = new Error("Invalid JSON in workflow definition");
+    (error as any).code = "VALIDATION_ERROR";
+    (error as any).statusCode = 400;
+    throw error;
   }
 }
 
@@ -159,130 +171,38 @@ function followsConditionEdge(edge: WorkflowEdge, output: unknown): boolean {
   return true;
 }
 
-function isBlockedHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
-
-  if (
-    normalized === "localhost" ||
-    normalized.endsWith(".localhost") ||
-    normalized.endsWith(".local") ||
-    normalized.endsWith(".internal") ||
-    normalized === "metadata.google.internal"
-  ) {
-    return true;
-  }
-
-  if (!ipaddr.isValid(normalized)) return false;
-  try {
-    return ipaddr.parse(normalized).range() !== "unicast";
-  } catch {
-    return true;
-  }
-}
-
-async function resolveDns(hostname: string): Promise<string[]> {
-  const results = await Promise.allSettled([resolve4(hostname), resolve6(hostname)]);
-  const addresses = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
-  const errors = results
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-    .map((result) => result.reason as NodeJS.ErrnoException);
-  const hasUnexpectedError = errors.some((error) => !["ENOTFOUND", "ENODATA"].includes(error?.code ?? ""));
-  if (hasUnexpectedError) throw new Error("HTTP node hostname could not be resolved safely");
-  if (addresses.length > 0) return addresses;
-
-  try {
-    const records = await lookup(hostname, { all: true, verbatim: true });
-    return records.map((record) => record.address);
-  } catch {
-    return [];
-  }
-}
-
-function isAllowedEgressHostname(hostname: string): boolean {
-  const allowedHosts = getEnv().EGRESS_ALLOWED_HOSTS;
-  if (!allowedHosts || allowedHosts.length === 0) return true;
-  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
-  return allowedHosts.some((allowedHost) => {
-    if (allowedHost.startsWith("*.")) {
-      const suffix = allowedHost.slice(1);
-      return normalized.endsWith(suffix) && normalized.length > suffix.length;
-    }
-    return normalized === allowedHost;
-  });
-}
+import { validateUrl, safeFetch, SsrFSecurityError, isBlockedIpOrHost, assertSafeDestination } from "../lib/ssrf.js";
 
 function assertSafeUrl(value: unknown): URL {
-  let url: URL;
   try {
-    url = new URL(String(value));
-  } catch {
-    throw new Error("HTTP node URL is invalid");
-  }
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
-    throw new Error("HTTP node only supports public HTTP(S) URLs");
-  }
-  if (!isAllowedEgressHostname(url.hostname)) {
-    throw new Error("HTTP node host is not in the egress allowlist");
-  }
-  if (isBlockedHostname(url.hostname)) {
-    throw new Error("HTTP node cannot call private or local network addresses");
-  }
-  return url;
-}
-
-// H-01 fix: redirects are followed manually (native redirect following would
-// silently bypass the URL/IP allowlist). Every hop resolves DNS and re-validates
-// all A+AAAA records; the Location header must be http(s) and safe.
-async function fetchWithTimeout(input: string | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const timeoutPerRequest = Math.max(Math.floor(timeoutMs / (MAX_REDIRECTS + 1)), 5_000);
-  let current: string | URL = input;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const url = typeof current === "string" ? new URL(current) : current;
-    await assertSafeResolved(url);
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutPerRequest);
-    let response: Response;
-    try {
-      response = await fetch(current, { ...init, redirect: "manual", signal: controller.signal });
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(`Request timed out after ${timeoutMs}ms`);
+    return validateUrl(String(value));
+  } catch (err: any) {
+    if (err instanceof SsrFSecurityError) {
+      if (err.code === "INVALID_URL") throw new Error("HTTP node URL is invalid");
+      if (err.code === "UNSUPPORTED_PROTOCOL" || err.code === "CREDENTIALS_IN_URL") {
+        throw new Error("HTTP node only supports public HTTP(S) URLs");
       }
-      throw error;
-    } finally {
-      clearTimeout(timer);
+      if (err.code === "EGRESS_BLOCKED") throw new Error("HTTP node host is not in the egress allowlist");
+      if (err.code === "SSRF_BLOCKED") throw new Error("HTTP node cannot call private or local network addresses");
     }
-
-    if (response.status < 300 || response.status >= 400) return response;
-    const location = response.headers.get("location");
-    if (!location) throw new Error("HTTP redirect response has no Location header");
-    const next = new URL(location, url);
-    if (!["http:", "https:"].includes(next.protocol)) {
-      throw new Error("HTTP redirect to non-HTTP(S) URL is not allowed");
-    }
-    if (!isAllowedEgressHostname(next.hostname)) {
-      throw new Error("HTTP redirect host is not in the egress allowlist");
-    }
-    if (isBlockedHostname(next.hostname)) {
-      throw new Error("HTTP redirect to private or local network address is not allowed");
-    }
-    current = next;
+    throw err;
   }
-  throw new Error(`Too many redirects (max ${MAX_REDIRECTS})`);
 }
 
-// H-01 fix: resolves DNS and re-validates every A/AAAA record before a request
-// goes out. Blocks hostnames that resolve (in part) to private/local IPs, so a
-// split-horizon DNS rebinding cannot reach metadata or internal services.
-async function assertSafeResolved(url: URL): Promise<void> {
-  if (isBlockedHostname(url.hostname)) {
-    throw new Error("HTTP node cannot call private or local network addresses");
-  }
-  if (ipaddr.isValid(url.hostname)) return; // Literal IPs are already validated.
-  const addresses = await resolveDns(url.hostname);
-  if (addresses.length === 0 || addresses.some((address) => !ipaddr.isValid(address) || isBlockedHostname(address))) {
-    throw new Error("HTTP node cannot resolve to private or local network addresses");
+async function fetchWithTimeout(input: string | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
+  try {
+    return await safeFetch(input, { ...init, timeoutMs, maxRedirects: MAX_REDIRECTS, maxResponseBytes: MAX_HTTP_RESPONSE_BYTES });
+  } catch (err: any) {
+    if (err instanceof SsrFSecurityError) {
+      if (err.code === "TIMEOUT") throw new Error(`Request timed out after ${timeoutMs}ms`);
+      if (err.code === "SSRF_BLOCKED") throw new Error("HTTP node cannot call private or local network addresses");
+      if (err.code === "EGRESS_BLOCKED") throw new Error("HTTP redirect host is not in the egress allowlist");
+      if (err.code === "UNSUPPORTED_PROTOCOL") throw new Error("HTTP redirect to non-HTTP(S) URL is not allowed");
+      if (err.code === "INVALID_REDIRECT") throw new Error("HTTP redirect response has no Location header");
+      if (err.code === "TOO_MANY_REDIRECTS") throw new Error(`Too many redirects (max ${MAX_REDIRECTS})`);
+      if (err.code === "RESPONSE_TOO_LARGE") throw new Error("HTTP response is too large");
+    }
+    throw err;
   }
 }
 
@@ -505,6 +425,122 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
         _config: { operation: params?.operation },
       };
     }
+    case "switch": {
+      const handler = new SwitchNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "splitInBatches":
+    case "split_in_batches": {
+      const handler = new SplitInBatchesNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "chatTrigger":
+    case "chat_trigger": {
+      const handler = new ChatTriggerNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "mcpClient":
+    case "mcp_client": {
+      const handler = new McpClientNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "teams": {
+      const handler = new TeamsNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "whatsapp": {
+      const handler = new WhatsAppNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "googleCalendar":
+    case "google_calendar": {
+      const handler = new GoogleCalendarNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "googleDocs":
+    case "google_docs": {
+      const handler = new GoogleDocsNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "errorTrigger":
+    case "error_trigger": {
+      const handler = new ErrorTriggerNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
+    case "wait": {
+      const handler = new WaitNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+    }
     default:
       throw new Error(`Unsupported workflow node type: ${node.type}`);
   }
@@ -558,7 +594,27 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
   for (const edge of edges) outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
 
   const trigger = nodes.find((node) =>
-    ["trigger", "webhook", "cron", "manual", "evaluationTrigger", "gmailTrigger", "emailReadImap"].includes(node.type),
+    [
+      "trigger",
+      "webhook",
+      "cron",
+      "cronTrigger",
+      "cron_trigger",
+      "manual",
+      "chatTrigger",
+      "chat_trigger",
+      "formTrigger",
+      "form_trigger",
+      "errorTrigger",
+      "error_trigger",
+      "slackTrigger",
+      "slack_trigger",
+      "telegramTrigger",
+      "telegram_trigger",
+      "evaluationTrigger",
+      "gmailTrigger",
+      "emailReadImap",
+    ].includes(node.type),
   );
   if (!trigger) throw new Error("Workflow has no trigger node");
 
@@ -606,26 +662,42 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
       },
     });
     const nodeStartedAt = Date.now();
+    const nodeSpan = telemetry.startSpan(`node.execution ${node.type} (${node.id})`, {
+      "workflow.id": workflow.id,
+      "execution.id": execution.id,
+      "node.id": node.id,
+      "node.type": node.type,
+      "org.id": execution.orgId,
+    });
 
     if (!active.has(nodeId)) {
       await prisma.nodeExecution.update({
         where: { id: nodeExecution.id },
         data: { status: "CANCELLED", finishedAt: new Date(), duration: Date.now() - nodeStartedAt },
       });
+      nodeSpan.setAttribute("node.status", "CANCELLED");
+      nodeSpan.setStatus("OK");
+      nodeSpan.end();
       continue;
     }
 
     try {
       const output = await withTimeout(executeNode(node, nodeInput, execution.orgId), NODE_TIMEOUT_MS, "Node execution timed out");
+      const nodeDuration = Date.now() - nodeStartedAt;
       await prisma.nodeExecution.update({
         where: { id: nodeExecution.id },
         data: {
           status: "SUCCESS",
           output: output === undefined ? null : output,
           finishedAt: new Date(),
-          duration: Date.now() - nodeStartedAt,
+          duration: nodeDuration,
         },
       });
+      nodeSpan.setAttribute("node.status", "SUCCESS");
+      nodeSpan.setAttribute("node.duration_ms", nodeDuration);
+      nodeSpan.setStatus("OK");
+      nodeSpan.end();
+
       finalOutput = output;
       if (node.type === "output") {
         returnedOutput = true;
@@ -647,10 +719,16 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
         }
       }
     } catch (error) {
+      const nodeDuration = Date.now() - nodeStartedAt;
       await prisma.nodeExecution.update({
         where: { id: nodeExecution.id },
-        data: { status: "FAILED", error: errorMessage(error), finishedAt: new Date(), duration: Date.now() - nodeStartedAt },
+        data: { status: "FAILED", error: errorMessage(error), finishedAt: new Date(), duration: nodeDuration },
       });
+      nodeSpan.setAttribute("node.status", "FAILED");
+      nodeSpan.setAttribute("node.duration_ms", nodeDuration);
+      nodeSpan.recordException(error);
+      nodeSpan.setStatus("ERROR", errorMessage(error));
+      nodeSpan.end();
       throw error;
     }
   }
@@ -694,25 +772,94 @@ export async function runExecution(executionId: string): Promise<ExecutionResult
   });
   if (!workflow) return updateExecution(executionId, { status: "FAILED", error: "Workflow not found", finishedAt: new Date() });
 
+  const wfSpan = telemetry.startSpan(`workflow.execution ${workflow.name || workflow.id}`, {
+    "workflow.id": workflow.id,
+    "workflow.name": workflow.name,
+    "execution.id": executionId,
+    "execution.trigger": execution.trigger,
+    "org.id": execution.orgId,
+  });
+  telemetry.incActiveExecutions();
+
   const startedAt = new Date(execution.startedAt ?? Date.now());
   await updateExecution(executionId, { status: "RUNNING" });
   try {
     const output = await withTimeout(executeGraph(execution, workflow), EXECUTION_TIMEOUT_MS, "Execution timed out");
+    const duration = Date.now() - startedAt.getTime();
+    wfSpan.setAttribute("execution.status", "SUCCESS");
+    wfSpan.setAttribute("execution.duration_ms", duration);
+    wfSpan.setStatus("OK");
+    wfSpan.end();
+    telemetry.decActiveExecutions();
+    telemetry.recordWorkflowExecution("SUCCESS", execution.trigger, execution.orgId, duration);
+
     return updateExecution(executionId, {
       status: "SUCCESS",
       output: output === undefined ? null : output,
       finishedAt: new Date(),
-      duration: Date.now() - startedAt.getTime(),
+      duration,
     });
   } catch (error) {
+    const duration = Date.now() - startedAt.getTime();
     const current = await prisma.workflowExecution.findUnique({ where: { id: executionId } });
-    if (current?.status === "CANCELLED") return current as ExecutionResult;
-    return updateExecution(executionId, {
+    if (current?.status === "CANCELLED") {
+      wfSpan.setAttribute("execution.status", "CANCELLED");
+      wfSpan.setStatus("OK");
+      wfSpan.end();
+      telemetry.decActiveExecutions();
+      telemetry.recordWorkflowExecution("CANCELLED", execution.trigger, execution.orgId, duration);
+      return current as ExecutionResult;
+    }
+    wfSpan.setAttribute("execution.status", "FAILED");
+    wfSpan.setAttribute("execution.duration_ms", duration);
+    wfSpan.recordException(error);
+    wfSpan.setStatus("ERROR", errorMessage(error));
+    wfSpan.end();
+    telemetry.decActiveExecutions();
+    telemetry.recordWorkflowExecution("FAILED", execution.trigger, execution.orgId, duration);
+
+    const failedExecution = await updateExecution(executionId, {
       status: "FAILED",
       error: errorMessage(error),
       finishedAt: new Date(),
-      duration: Date.now() - startedAt.getTime(),
+      duration,
     });
+
+    // Trigger errorWorkflow if configured in settings or version snapshot
+    try {
+      const version = Array.isArray(workflow.versions) ? workflow.versions[0] : undefined;
+      const snapshot = asObject(parseJson(version?.snapshot, {}));
+      const rawSettings = (workflow as any).settings ?? snapshot.settings;
+      const settings = asObject(parseJson(rawSettings, {}));
+      const errorWorkflowId = (settings.errorWorkflowId ?? settings.errorWorkflow ?? (workflow as any).errorWorkflowId ?? (workflow as any).errorWorkflow) as string | undefined;
+
+      if (errorWorkflowId && typeof errorWorkflowId === "string" && errorWorkflowId !== workflow.id) {
+        const errWf = await prisma.workflow.findFirst({
+          where: { id: errorWorkflowId, ...(workflow.orgId ? { orgId: workflow.orgId } : {}) },
+        });
+        if (errWf) {
+          const errExecution = await createWorkflowExecution(errWf.id, {
+            error: {
+              message: errorMessage(error),
+              workflowId: workflow.id,
+              workflowName: workflow.name,
+              executionId,
+            },
+            execution: failedExecution,
+          }, { userId: execution.userId, trigger: "error" });
+
+          const { enqueueExecution } = await import("./queue.js");
+          const enqueued = await enqueueExecution(errExecution.id);
+          if (!enqueued) {
+            void runExecution(errExecution.id).catch((e) => console.error("[errorWorkflow] Async run error:", e));
+          }
+        }
+      }
+    } catch (errWfError) {
+      console.error("[errorWorkflow] Failed to trigger error workflow:", errWfError);
+    }
+
+    return failedExecution;
   }
 }
 

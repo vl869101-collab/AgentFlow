@@ -9,6 +9,11 @@ function cuid() {
 function now() {
   return new Date().toISOString();
 }
+function toIsoString(val: any): string {
+  if (!val) return "";
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
+}
 
 // ── Tables ──────────────────────────────────
 export const users = new Map<string, any>();
@@ -31,8 +36,12 @@ export const refreshTokens = new Map<string, any>();
 // ── Helpers ─────────────────────────────────
 function matches(value: any, where: any): boolean {
   if (!where) return true;
+  if (Array.isArray(where.OR)) {
+    const orMatches = where.OR.some((subWhere: any) => matches(value, subWhere));
+    if (!orMatches) return false;
+  }
   for (const [key, expected] of Object.entries(where)) {
-    if (expected === undefined) continue;
+    if (key === "OR" || expected === undefined) continue;
     if (expected && typeof expected === "object") {
       const condition = expected as any;
       if (Array.isArray(condition.in) && !condition.in.includes(value[key])) return false;
@@ -41,7 +50,29 @@ function matches(value: any, where: any): boolean {
       if (condition.lte !== undefined && new Date(value[key]) > new Date(condition.lte)) return false;
       if (condition.lt !== undefined && !(value[key] < condition.lt)) return false;
       if (condition.not !== undefined && value[key] === condition.not) return false;
-      if (condition.in || condition.gte !== undefined || condition.gt !== undefined || condition.lte !== undefined || condition.lt !== undefined || condition.not !== undefined) continue;
+      if (condition.contains !== undefined) {
+        const valStr = String(value[key] ?? "");
+        const searchStr = String(condition.contains);
+        if (condition.mode === "insensitive") {
+          if (!valStr.toLowerCase().includes(searchStr.toLowerCase())) return false;
+        } else {
+          if (!valStr.includes(searchStr)) return false;
+        }
+      }
+      if (
+        condition.in ||
+        condition.gte !== undefined ||
+        condition.gt !== undefined ||
+        condition.lte !== undefined ||
+        condition.lt !== undefined ||
+        condition.not !== undefined ||
+        condition.contains !== undefined
+      )
+        continue;
+    }
+    if (expected === null) {
+      if (value[key] !== null && value[key] !== undefined) return false;
+      continue;
     }
     if (value[key] !== expected) return false;
   }
@@ -56,11 +87,7 @@ function find(table: Map<string, any>, where: any): any | null {
 function findMany<T>(table: Map<string, T>, where?: any): T[] {
   let result = Array.from(table.values());
   if (!where) return result;
-  for (const [key, val] of Object.entries(where)) {
-    if (val === undefined) continue;
-    result = result.filter((v: any) => matches(v, { [key]: val }));
-  }
-  return result;
+  return result.filter((v: any) => matches(v, where));
 }
 
 function project(value: any, select?: Record<string, boolean>): any {
@@ -134,6 +161,15 @@ export const store = {
       Object.assign(o, data, { updatedAt: now() });
       return o;
     },
+    async updateMany({ where, data }: { where?: any; data: any }) {
+      let count = 0;
+      for (const org of orgs.values()) {
+        if (where && !matches(org, where)) continue;
+        Object.assign(org, data, { updatedAt: now() });
+        count++;
+      }
+      return { count };
+    },
   },
 
   organizationMember: {
@@ -155,6 +191,9 @@ export const store = {
     async findMany({ where }: { where?: any } = {}) {
       return findMany(orgMembers, where);
     },
+    async count({ where }: { where?: any } = {}) {
+      return findMany(orgMembers, where).length;
+    },
     async create({ data }: { data: any }) {
       const id = cuid();
       const member = { id, ...data, createdAt: now() };
@@ -167,10 +206,49 @@ export const store = {
     async count({ where }: { where?: any } = {}) {
       return findMany(workflows, where).length;
     },
-    async findMany({ where, orderBy, include, skip = 0, take }: { where?: any; orderBy?: any; include?: any; skip?: number; take?: number } = {}) {
+    async findMany({
+      where,
+      orderBy,
+      include,
+      cursor,
+      skip = 0,
+      take,
+    }: {
+      where?: any;
+      orderBy?: any;
+      include?: any;
+      cursor?: { id?: string };
+      skip?: number;
+      take?: number;
+    } = {}) {
       let result = findMany(workflows, where);
-      if (orderBy?.updatedAt === "desc") result.sort((a: any, b: any) => b.updatedAt.localeCompare(a.updatedAt));
-      if (take !== undefined) result = result.slice(skip, skip + take);
+      const isDesc = Array.isArray(orderBy)
+        ? orderBy[0]?.updatedAt === "desc" || orderBy[0]?.createdAt === "desc"
+        : orderBy?.updatedAt === "desc" || orderBy?.createdAt === "desc";
+      if (isDesc) {
+        result.sort((a: any, b: any) => toIsoString(b.updatedAt || b.createdAt).localeCompare(toIsoString(a.updatedAt || a.createdAt)));
+      } else {
+        result.sort((a: any, b: any) => toIsoString(a.updatedAt || a.createdAt).localeCompare(toIsoString(b.updatedAt || b.createdAt)));
+      }
+
+      let startIndex = 0;
+      if (cursor?.id) {
+        const cursorIdx = result.findIndex((item: any) => item.id === cursor.id);
+        if (cursorIdx !== -1) {
+          startIndex = cursorIdx + skip;
+        } else {
+          startIndex = skip;
+        }
+      } else {
+        startIndex = skip;
+      }
+
+      if (take !== undefined) {
+        result = result.slice(startIndex, startIndex + take);
+      } else if (startIndex > 0) {
+        result = result.slice(startIndex);
+      }
+
       result = result.map((workflow) => withWorkflowRelations(workflow, include));
       if (include?.owner) {
         result = result.map((w: any) => ({ ...w, owner: find(users, { id: w.ownerId }) }));
@@ -186,8 +264,21 @@ export const store = {
       return withWorkflowRelations(result[0], include);
     },
     async create({ data }: { data: any }) {
-      const wf = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };
+      const { nodes, edges, versions, ...scalarData } = data;
+      const wf = { id: cuid(), ...scalarData, createdAt: now(), updatedAt: now() };
       workflows.set(wf.id, wf);
+      if (Array.isArray(nodes)) {
+        for (const n of nodes) {
+          const nodeObj = { id: n.id ?? cuid(), workflowId: wf.id, ...n };
+          workflowNodes.set(nodeObj.id, nodeObj);
+        }
+      }
+      if (Array.isArray(edges)) {
+        for (const e of edges) {
+          const edgeObj = { id: e.id ?? cuid(), workflowId: wf.id, ...e };
+          workflowEdges.set(edgeObj.id, edgeObj);
+        }
+      }
       return wf;
     },
     async update({ where, data }: { where: any; data: any }) {
@@ -292,11 +383,32 @@ export const store = {
       executions.set(ex.id, ex);
       return ex;
     },
-    async findMany({ where, orderBy, include, skip = 0, take }: { where?: any; orderBy?: any; include?: any; skip?: number; take?: number } = {}) {
+    async count({ where }: { where?: any } = {}) {
+      return findMany(executions, where).length;
+    },
+    async findMany({ where, orderBy, include, skip = 0, take, cursor }: { where?: any; orderBy?: any; include?: any; skip?: number; take?: number; cursor?: { id?: string } } = {}) {
       let result = findMany(executions, where);
-      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
-      if (take !== undefined) result = result.slice(skip, skip + take);
-      if (include?.workflow) result = result.map((execution: any) => ({ ...execution, workflow: find(workflows, { id: execution.workflowId }) }));
+      if (orderBy?.startedAt === "desc" || orderBy?.createdAt === "desc") {
+        result.sort((a: any, b: any) => {
+          const aTime = toIsoString(a.startedAt || a.createdAt);
+          const bTime = toIsoString(b.startedAt || b.createdAt);
+          return bTime.localeCompare(aTime) || String(b.id ?? "").localeCompare(String(a.id ?? ""));
+        });
+      }
+      if (cursor?.id) {
+        const idx = result.findIndex((e: any) => e.id === cursor.id);
+        if (idx !== -1) {
+          result = result.slice(idx + (skip ?? 0));
+        }
+      } else if (skip > 0) {
+        result = result.slice(skip);
+      }
+      if (take !== undefined) {
+        result = result.slice(0, take);
+      }
+      if (include?.workflow) {
+        result = result.map((execution: any) => ({ ...execution, workflow: find(workflows, { id: execution.workflowId }) }));
+      }
       return result;
     },
     async findFirst({ where }: { where: any }) {
@@ -342,11 +454,14 @@ export const store = {
   credential: {
     async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
       let result = findMany(credentials, where);
-      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
       if (take !== undefined) result = result.slice(skip, skip + take);
       return result;
     },
     async findFirst({ where }: { where: any }) {
+      return find(credentials, where);
+    },
+    async findUnique({ where }: { where: any }) {
       return find(credentials, where);
     },
     async create({ data }: { data: any }) {
@@ -363,7 +478,7 @@ export const store = {
   approval: {
     async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
       let result = findMany(approvals, where);
-      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
       if (take !== undefined) result = result.slice(skip, skip + take);
       return result;
     },
@@ -410,7 +525,7 @@ export const store = {
   webhook: {
     async findMany({ where, include, orderBy, skip = 0, take }: { where?: any; include?: any; orderBy?: any; skip?: number; take?: number }) {
       let result = findMany(webhooks, where);
-      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
       if (take !== undefined) result = result.slice(skip, skip + take);
       if (include?.workflow) result = result.map((webhook: any) => ({ ...webhook, workflow: find(workflows, { id: webhook.workflowId }) }));
       return result;
@@ -456,8 +571,11 @@ export const store = {
   usageRecord: {
     async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
       const result = findMany(usageRecords, where);
-      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
       return take === undefined ? result : result.slice(skip, skip + take);
+    },
+    async count({ where }: { where?: any } = {}) {
+      return findMany(usageRecords, where).length;
     },
     async create({ data }: { data: any }) {
       const record = { id: cuid(), ...data, createdAt: now() };

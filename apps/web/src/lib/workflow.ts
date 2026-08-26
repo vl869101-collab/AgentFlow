@@ -21,7 +21,14 @@ export interface NodeStyleTokens {
   badgeColor: string;
 }
 
-const nodeStyles: Record<NodeTypeKey, NodeStyleTokens> = {
+const defaultNodeStyle: NodeStyleTokens = {
+  iconBg: "bg-indigo-500/10",
+  iconColor: "text-indigo-400",
+  borderColor: "border-l-indigo-500",
+  badgeColor: "bg-indigo-500/10",
+};
+
+const nodeStyles: Partial<Record<NodeTypeKey, NodeStyleTokens>> = {
   webhook: { iconBg: "bg-indigo-500/10", iconColor: "text-indigo-400", borderColor: "border-l-indigo-500", badgeColor: "bg-indigo-500/10" },
   cron: { iconBg: "bg-violet-500/10", iconColor: "text-violet-400", borderColor: "border-l-violet-500", badgeColor: "bg-violet-500/10" },
   http: { iconBg: "bg-cyan-500/10", iconColor: "text-cyan-400", borderColor: "border-l-cyan-400", badgeColor: "bg-cyan-500/10" },
@@ -38,11 +45,16 @@ const nodeStyles: Record<NodeTypeKey, NodeStyleTokens> = {
   filter: { iconBg: "bg-amber-500/10", iconColor: "text-amber-400", borderColor: "border-l-amber-400", badgeColor: "bg-amber-500/10" },
   set_fields: { iconBg: "bg-pink-500/10", iconColor: "text-pink-400", borderColor: "border-l-pink-400", badgeColor: "bg-pink-500/10" },
   respond_webhook: { iconBg: "bg-indigo-500/10", iconColor: "text-indigo-400", borderColor: "border-l-indigo-400", badgeColor: "bg-indigo-500/10" },
+  gmailTrigger: { iconBg: "bg-red-500/10", iconColor: "text-red-400", borderColor: "border-l-red-400", badgeColor: "bg-red-500/10" },
+  googleDrive: { iconBg: "bg-green-500/10", iconColor: "text-green-400", borderColor: "border-l-green-400", badgeColor: "bg-green-500/10" },
+  evaluationTrigger: { iconBg: "bg-amber-500/10", iconColor: "text-amber-400", borderColor: "border-l-amber-400", badgeColor: "bg-amber-500/10" },
+  emailReadImap: { iconBg: "bg-cyan-500/10", iconColor: "text-cyan-400", borderColor: "border-l-cyan-400", badgeColor: "bg-cyan-500/10" },
+  gmail: { iconBg: "bg-red-500/10", iconColor: "text-red-400", borderColor: "border-l-red-400", badgeColor: "bg-red-500/10" },
 };
 
 export function getNodeMeta(type: NodeTypeKey) {
   const definition = NODE_TYPES.find((node) => node.type === type) ?? NODE_TYPES[0];
-  return { ...definition, styles: nodeStyles[type] };
+  return { ...definition, styles: nodeStyles[type] ?? defaultNodeStyle };
 }
 
 export function nodeKindFor(type: NodeTypeKey): CanvasNodeKind {
@@ -64,7 +76,7 @@ export function createNodeData(type: NodeTypeKey, label?: string): WorkflowNodeD
 }
 
 function defaultDescription(type: NodeTypeKey) {
-  const descriptions: Record<NodeTypeKey, string> = {
+  const descriptions: Partial<Record<NodeTypeKey, string>> = {
     webhook: "Receive a signed event from any app",
     cron: "Start on a reliable schedule",
     http: "Call an external API endpoint",
@@ -81,12 +93,17 @@ function defaultDescription(type: NodeTypeKey) {
     filter: "Pass or block items based on a condition",
     set_fields: "Add or override fields in the data",
     respond_webhook: "Send a custom response back to the webhook source",
+    gmailTrigger: "Start when a Gmail event arrives",
+    googleDrive: "Read or write files in Google Drive",
+    evaluationTrigger: "Start from an evaluation event",
+    emailReadImap: "Read messages from an IMAP inbox",
+    gmail: "Send or manage Gmail messages",
   };
-  return descriptions[type];
+  return descriptions[type] ?? "Execute workflow node";
 }
 
 function defaultConfig(type: NodeTypeKey): Record<string, string | number | boolean> {
-  const configs: Record<NodeTypeKey, Record<string, string | number | boolean>> = {
+  const configs: Partial<Record<NodeTypeKey, Record<string, string | number | boolean>>> = {
     webhook: { path: "/v1/order-events", method: "POST" },
     cron: { schedule: "0 9 * * 1-5", timezone: "UTC" },
     http: { method: "POST", url: "https://api.acme.test/orders", timeout: 30 },
@@ -103,8 +120,13 @@ function defaultConfig(type: NodeTypeKey): Record<string, string | number | bool
     filter: { expression: "true" },
     set_fields: { fieldName: "value" },
     respond_webhook: { statusCode: 200, body: "OK" },
+    gmailTrigger: { event: "messageReceived" },
+    googleDrive: { resource: "file", operation: "download" },
+    evaluationTrigger: { dataTableId: "" },
+    emailReadImap: { mailbox: "INBOX" },
+    gmail: { operation: "send" },
   };
-  return configs[type];
+  return configs[type] ?? {};
 }
 
 export const initialWorkflowNodes: WorkflowCanvasNode[] = [

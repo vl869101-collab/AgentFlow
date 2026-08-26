@@ -1,0 +1,4 @@
+"use client";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { GatedFeatureBanner } from "@/components/GatedFeatureBanner";
+export default function LogStreamingPage(){ return <AppLayout><div className="max-w-3xl"><h1 className="text-2xl font-semibold text-zinc-50">Log Streaming</h1><p className="mt-1 text-sm text-zinc-400">Stream logs to external systems. Learn more in <a href="https://docs.n8n.io/administer/observe-and-log/stream-logs-to-external-systems" target="_blank" className="text-violet-400 underline">documentation</a>.</p><div className="mt-8"><GatedFeatureBanner description="Stream execution and audit logs to Datadog, Splunk, or your SIEM." learnMoreUrl="https://docs.n8n.io/administer/observe-and-log/stream-logs-to-external-systems" /></div></div></AppLayout>; }

@@ -2,12 +2,14 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
 import { createOrgSchema, inviteMemberSchema } from "@agentflow/shared";
+import { getOrgUsageSummary } from "../services/metering.js";
+import { limitsForPlan } from "../lib/plans.js";
 
 export async function orgRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
   // list user's orgs
-  app.get("/", async (request) => {
+  app.get("/", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
     const userId = userIdFromRequest(request);
     const memberships = await prisma.organizationMember.findMany({
       where: { userId },
@@ -16,7 +18,7 @@ export async function orgRoutes(app: FastifyInstance) {
     return memberships.map((m: any) => ({ ...m.org, role: m.role }));
   });
 
-  app.post("/", async (request, reply) => {
+  app.post("/", { config: { rateLimit: { max: 10, timeWindow: "1 hour" } } }, async (request, reply) => {
     const userId = userIdFromRequest(request);
     const body = createOrgSchema.parse(request.body);
 
@@ -34,7 +36,7 @@ export async function orgRoutes(app: FastifyInstance) {
     return reply.status(201).send(org);
   });
 
-  app.get("/:id", async (request, reply) => {
+  app.get("/:id", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
     const membership = await prisma.organizationMember.findUnique({
@@ -45,7 +47,7 @@ export async function orgRoutes(app: FastifyInstance) {
     return { ...membership.org, role: membership.role };
   });
 
-  app.put("/:id", async (request, reply) => {
+  app.put("/:id", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
     const membership = await prisma.organizationMember.findUnique({
@@ -60,8 +62,23 @@ export async function orgRoutes(app: FastifyInstance) {
     return org;
   });
 
+  // Get Organization Usage & Metering Summary
+  app.get("/:id/usage", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const membership = await prisma.organizationMember.findUnique({
+      where: { userId_orgId: { userId, orgId: id } },
+    });
+    if (!membership) return reply.code(404).send({ error: "Organization not found", code: "NOT_FOUND" });
+
+    const summary = await getOrgUsageSummary(id);
+    if (!summary) return reply.code(404).send({ error: "Usage summary not found", code: "NOT_FOUND" });
+
+    return summary;
+  });
+
   // members
-  app.get("/:id/members", async (request, reply) => {
+  app.get("/:id/members", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
     const membership = await prisma.organizationMember.findUnique({
@@ -75,7 +92,7 @@ export async function orgRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/:id/invite", async (request, reply) => {
+  app.post("/:id/invite", { config: { rateLimit: { max: 20, timeWindow: "1 hour" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
     const body = inviteMemberSchema.parse(request.body);
@@ -87,18 +104,25 @@ export async function orgRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: "Insufficient permissions", code: "FORBIDDEN" });
     }
 
+    // Check member quota for organization plan
+    const org = await prisma.organization.findUnique({ where: { id } });
+    const memberLimit = limitsForPlan(org?.plan).members;
+    const currentMembers = await prisma.organizationMember.count({ where: { orgId: id } });
+    if (currentMembers >= memberLimit) {
+      return reply.code(403).send({
+        error: `Organization has reached member limit for plan ${org?.plan || "FREE"} (${memberLimit})`,
+        code: "MEMBER_LIMIT_REACHED",
+        limit: memberLimit,
+        current: currentMembers,
+      });
+    }
+
     // H-05: only OWNER may grant ADMIN. ADMIN inviters are capped at MEMBER/VIEWER.
     let role = body.role as "ADMIN" | "MEMBER" | "VIEWER";
     if (role === "ADMIN" && membership.role !== "OWNER") {
-      // Downgrade instead of rejecting so admins can still invite members
-      // without gaining the ability to mint peers with equal or higher privilege.
       role = "MEMBER";
     }
 
-    // find existing user by email — do NOT create placeholder accounts (H-05/H-04).
-    // Invites target registered users only; a real invite-email flow is a future
-    // enhancement (Invite entity). Creating disabled User rows here used to lock
-    // invitees out of registration (register → 409 EMAIL_EXISTS, login → 401).
     const invitee = await prisma.user.findUnique({ where: { email: body.email } });
     if (!invitee) return reply.code(404).send({ error: "User not found; ask them to register first", code: "USER_NOT_FOUND" });
     if (invitee.passwordHash === "pending") {
