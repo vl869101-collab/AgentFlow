@@ -58,6 +58,10 @@ export class Span {
     return this.data.spanId;
   }
 
+  get name(): string {
+    return this.data.name;
+  }
+
   setAttribute(key: string, value: string | number | boolean): this {
     if (!this.ended) {
       this.data.attributes[key] = value;
@@ -159,6 +163,45 @@ class TelemetryManager {
     return `00-${ctx.traceId}-${ctx.spanId}-${ctx.traceFlags || "01"}`;
   }
 
+  injectTraceContext(carrier: Record<string, any>, context?: TraceContext | Span | null): Record<string, any> {
+    if (!carrier) carrier = {};
+    if (!context) return carrier;
+
+    const ctx: TraceContext = context instanceof Span
+      ? { traceId: context.traceId, spanId: context.spanId, traceFlags: "01" }
+      : context;
+
+    if (ctx && ctx.traceId && ctx.spanId) {
+      carrier["traceparent"] = this.formatTraceParent(ctx);
+      if (ctx.traceState) {
+        carrier["tracestate"] = ctx.traceState;
+      }
+    }
+    return carrier;
+  }
+
+  extractTraceContext(carrier?: Record<string, any> | null): TraceContext | null {
+    if (!carrier || typeof carrier !== "object") return null;
+    const header =
+      carrier["traceparent"] ||
+      carrier["Traceparent"] ||
+      carrier["TRACEPARENT"] ||
+      carrier["traceParent"] ||
+      carrier["x-traceparent"];
+
+    const traceState =
+      carrier["tracestate"] ||
+      carrier["Tracestate"] ||
+      carrier["TRACESTATE"] ||
+      carrier["traceState"];
+
+    const parsed = this.parseTraceParent(typeof header === "string" ? header : undefined);
+    if (parsed && typeof traceState === "string") {
+      parsed.traceState = traceState;
+    }
+    return parsed;
+  }
+
   startSpan(
     name: string,
     attributes: Record<string, string | number | boolean> = {},
@@ -170,6 +213,27 @@ class TelemetryManager {
     return new Span(name, traceId, spanId, parentSpanId, attributes);
   }
 
+  startNodeSpan(
+    nodeType: string,
+    nodeId: string,
+    workflowId: string,
+    executionId: string,
+    orgId: string,
+    attributes: Record<string, string | number | boolean> = {},
+    parentContext?: TraceContext | null
+  ): Span {
+    const spanName = `agentflow.node.${nodeType}`;
+    const baseAttrs: Record<string, string | number | boolean> = {
+      "workflow.id": workflowId,
+      "execution.id": executionId,
+      "node.id": nodeId,
+      "node.type": nodeType,
+      "org.id": orgId,
+      ...attributes,
+    };
+    return this.startSpan(spanName, baseAttrs, parentContext);
+  }
+
   recordSpan(span: SpanData): void {
     this.completedSpans.push(span);
     if (this.completedSpans.length > this.maxSpansToRetain) {
@@ -179,6 +243,78 @@ class TelemetryManager {
 
   getRecentSpans(limit = 100): SpanData[] {
     return this.completedSpans.slice(-limit);
+  }
+
+  getSpansByTraceId(traceId: string): SpanData[] {
+    return this.completedSpans.filter((s) => s.traceId === traceId);
+  }
+
+  getSpansByExecutionId(executionId: string): SpanData[] {
+    return this.completedSpans.filter((s) => s.attributes["execution.id"] === executionId);
+  }
+
+  // ── OTLP Exporter Representation ────────────
+
+  exportSpansOTLP(): { resourceSpans: Array<Record<string, any>> } {
+    const spans = this.getRecentSpans(500);
+
+    const otlpSpans = spans.map((span) => {
+      const attributes = Object.entries(span.attributes).map(([key, value]) => ({
+        key,
+        value: typeof value === "number"
+          ? (Number.isInteger(value) ? { intValue: value } : { doubleValue: value })
+          : typeof value === "boolean"
+            ? { boolValue: value }
+            : { stringValue: String(value) },
+      }));
+
+      const events = span.events.map((evt) => ({
+        timeUnixNano: String(Math.floor(evt.timestamp * 1_000_000)),
+        name: evt.name,
+        attributes: evt.attributes
+          ? Object.entries(evt.attributes).map(([k, v]) => ({
+              key: k,
+              value: { stringValue: String(v) },
+            }))
+          : [],
+      }));
+
+      return {
+        traceId: span.traceId,
+        spanId: span.spanId,
+        parentSpanId: span.parentSpanId || undefined,
+        name: span.name,
+        kind: 1, // SPAN_KIND_INTERNAL
+        startTimeUnixNano: String(Math.floor(span.startTime * 1_000_000)),
+        endTimeUnixNano: span.endTime ? String(Math.floor(span.endTime * 1_000_000)) : undefined,
+        attributes,
+        events,
+        status: {
+          code: span.status.code === "OK" ? 1 : span.status.code === "ERROR" ? 2 : 0,
+          message: span.status.description,
+        },
+      };
+    });
+
+    return {
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              { key: "service.name", value: { stringValue: "agentflow-api" } },
+              { key: "service.version", value: { stringValue: "0.1.0" } },
+              { key: "telemetry.sdk.language", value: { stringValue: "nodejs" } },
+            ],
+          },
+          scopeSpans: [
+            {
+              scope: { name: "@agentflow/api", version: "0.1.0" },
+              spans: otlpSpans,
+            },
+          ],
+        },
+      ],
+    };
   }
 
   // ── Metrics Recording ───────────────────────

@@ -4,6 +4,7 @@ import { prisma } from "./lib/prisma.js";
 import { getEnv } from "./lib/env.js";
 import { runExecution } from "./services/executor.js";
 import { sendToDLQ, DEFAULT_JOB_OPTIONS } from "./services/queue.js";
+import { telemetry } from "./lib/otel.js";
 
 const env = getEnv();
 const redis = new URL(env.REDIS_URL);
@@ -26,11 +27,32 @@ export const worker = new Worker(
     const executionId = String(job.data?.executionId ?? "");
     if (!executionId) throw new Error("Workflow job is missing executionId");
 
-    // The executor loads the workflow graph, executes every reachable node,
-    // records node-level input/output/status and finalizes the execution.
-    const result = await runExecution(executionId);
-    if (result.status === "FAILED") throw new Error(result.error || "Workflow execution failed");
-    return { executionId, status: result.status };
+    // Extract W3C trace context from BullMQ job data (TASK-10)
+    const traceParent = job.data?.traceparent || job.data?.traceParent || job.data?.traceContext?.traceparent;
+    const parentContext = telemetry.parseTraceParent(traceParent);
+    const workerSpan = telemetry.startSpan("bullmq.job.workflows", {
+      "execution.id": executionId,
+      "job.id": String(job.id || ""),
+      "job.name": String(job.name || ""),
+      "job.attempts_made": job.attemptsMade ?? 0,
+    }, parentContext);
+
+    try {
+      // The executor loads the workflow graph, executes every reachable node,
+      // records node-level input/output/status and finalizes the execution.
+      const result = await runExecution(executionId);
+      if (result.status === "FAILED") {
+        throw new Error(result.error || "Workflow execution failed");
+      }
+      workerSpan.setStatus("OK");
+      workerSpan.end();
+      return { executionId, status: result.status };
+    } catch (error) {
+      workerSpan.recordException(error);
+      workerSpan.setStatus("ERROR", error instanceof Error ? error.message : String(error));
+      workerSpan.end();
+      throw error;
+    }
   },
   { connection, concurrency },
 );

@@ -1,15 +1,30 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { createHash } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { orgIdFromRequest, userIdFromRequest } from "../middleware/auth.js";
 import { limitsForPlan, type PlanLimits } from "../lib/plans.js";
+import { getRedisClient } from "../lib/redis.js";
 
-export type UsageType = "execution" | "ai_call" | "integration_call" | "webhook_call";
+export type UsageType =
+  | "execution"
+  | "ai_call"
+  | "integration_call"
+  | "webhook_call"
+  | "execution_count"
+  | "execution_duration_ms"
+  | "llm_prompt_tokens"
+  | "llm_completion_tokens"
+  | "storage_bytes";
 
 export interface RecordUsageParams {
   orgId: string;
   userId?: string;
-  type: UsageType | string;
+  workflowId?: string;
+  executionId?: string;
+  type?: UsageType | string;
+  metricType?: UsageType | string;
   quantity?: number;
+  value?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -23,6 +38,7 @@ export interface MetricUsage {
 export interface OrgUsageSummary {
   orgId: string;
   plan: string;
+  status?: string;
   periodStart: string;
   periodEnd: string;
   limits: PlanLimits;
@@ -31,6 +47,11 @@ export interface OrgUsageSummary {
     aiCalls: MetricUsage;
     workflows: MetricUsage;
     members: MetricUsage;
+    totalDurationMs?: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    storageBytes?: number;
   };
 }
 
@@ -41,34 +62,77 @@ export function getCurrentBillingMonthBounds(now = new Date()): { monthStart: Da
 }
 
 /**
- * Record resource consumption in UsageRecord table.
+ * Generate cryptographic signature for tamper-proof ledger auditability.
  */
-export async function recordUsage({
+function generateLedgerSignature(orgId: string, metricType: string, value: number, timestamp: string): string {
+  const secret = process.env.JWT_SECRET || "agentflow-ledger-signing-secret";
+  return createHash("sha256")
+    .update(`${orgId}:${metricType}:${value}:${timestamp}:${secret}`)
+    .digest("hex");
+}
+
+/**
+ * Record atomic resource consumption event into the usage ledger.
+ */
+export async function recordUsageEvent({
   orgId,
   userId,
+  workflowId,
+  executionId,
   type,
-  quantity = 1,
-  metadata,
+  metricType,
+  quantity,
+  value,
+  metadata = {},
 }: RecordUsageParams) {
   if (!orgId) return null;
+
+  const effectiveType = (metricType || type || "execution") as string;
+  const effectiveValue = Number(value ?? quantity ?? 1);
   const effectiveUserId = userId || "system";
+  const timestamp = new Date().toISOString();
+  const signature = generateLedgerSignature(orgId, effectiveType, effectiveValue, timestamp);
+
+  const enrichedMetadata = {
+    ...metadata,
+    workflowId: workflowId ?? metadata.workflowId,
+    executionId: executionId ?? metadata.executionId,
+    metricType: effectiveType,
+    value: effectiveValue,
+    timestamp,
+    signature,
+  };
 
   try {
-    return await prisma.usageRecord.create({
+    const record = await prisma.usageRecord.create({
       data: {
         orgId,
         userId: effectiveUserId,
-        type,
-        quantity,
-        metadata: metadata ? (metadata as any) : undefined,
+        type: effectiveType,
+        quantity: effectiveValue,
+        metadata: enrichedMetadata as any,
       },
     });
+
+    // Increment real-time aggregate in Redis if available
+    const redis = getRedisClient();
+    if (redis) {
+      const { monthStart } = getCurrentBillingMonthBounds();
+      const periodKey = monthStart.toISOString().slice(0, 7);
+      const redisKey = `metering:org:${orgId}:${periodKey}:${effectiveType}`;
+      await redis.incrby(redisKey, effectiveValue).catch(() => {});
+      await redis.expire(redisKey, 86400 * 35).catch(() => {});
+    }
+
+    return record;
   } catch (error) {
-    // If usage recording fails, log without breaking core workflow execution
-    console.error(`[metering] Failed to record usage for org ${orgId}:`, error);
+    console.error(`[metering] Failed to record usage event for org ${orgId}:`, error);
     return null;
   }
 }
+
+// Backwards-compatible alias for existing callers
+export const recordUsage = recordUsageEvent;
 
 /**
  * Get comprehensive usage summary and quota status for an organization.
@@ -84,6 +148,13 @@ export async function getOrgUsageSummary(orgId: string): Promise<OrgUsageSummary
   const limits = limitsForPlan(plan);
   const { monthStart, monthEnd } = getCurrentBillingMonthBounds();
 
+  // Check subscription status
+  const subscription = await prisma.subscription.findFirst({
+    where: { orgId },
+    orderBy: { createdAt: "desc" },
+  });
+  const subStatus = subscription?.status || "active";
+
   // Aggregate monthly usage records
   const records = await prisma.usageRecord.findMany({
     where: {
@@ -94,13 +165,27 @@ export async function getOrgUsageSummary(orgId: string): Promise<OrgUsageSummary
 
   let executionUsed = 0;
   let aiCallsUsed = 0;
+  let totalDurationMs = 0;
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let storageBytes = 0;
 
   for (const record of records) {
-    const qty = record.quantity ?? 1;
-    if (record.type === "execution") {
+    const qty = Number(record.quantity ?? 1);
+    const recType = record.type;
+
+    if (recType === "execution" || recType === "execution_count") {
       executionUsed += qty;
-    } else if (record.type === "ai_call") {
+    } else if (recType === "ai_call") {
       aiCallsUsed += qty;
+    } else if (recType === "execution_duration_ms") {
+      totalDurationMs += qty;
+    } else if (recType === "llm_prompt_tokens") {
+      promptTokens += qty;
+    } else if (recType === "llm_completion_tokens") {
+      completionTokens += qty;
+    } else if (recType === "storage_bytes") {
+      storageBytes += qty;
     }
   }
 
@@ -130,6 +215,7 @@ export async function getOrgUsageSummary(orgId: string): Promise<OrgUsageSummary
   return {
     orgId,
     plan,
+    status: subStatus,
     periodStart: monthStart.toISOString(),
     periodEnd: monthEnd.toISOString(),
     limits,
@@ -138,7 +224,78 @@ export async function getOrgUsageSummary(orgId: string): Promise<OrgUsageSummary
       aiCalls: calcMetric(aiCallsUsed, limits.aiCallsPerMonth),
       workflows: calcMetric(workflowsCount, limits.workflows),
       members: calcMetric(membersCount, limits.members),
+      totalDurationMs,
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      storageBytes,
     },
+  };
+}
+
+/**
+ * Detailed breakdown of usage records by workflow and date.
+ */
+export async function getOrgUsageBreakdown(
+  orgId: string,
+  options: { startDate?: Date | string; endDate?: Date | string; workflowId?: string; metricType?: string; limit?: number } = {}
+) {
+  const { monthStart, monthEnd } = getCurrentBillingMonthBounds();
+  const start = options.startDate ? new Date(options.startDate) : monthStart;
+  const end = options.endDate ? new Date(options.endDate) : monthEnd;
+
+  const where: Record<string, any> = {
+    orgId,
+    createdAt: { gte: start, lte: end },
+  };
+
+  if (options.metricType) {
+    where.type = options.metricType;
+  }
+
+  const records = await prisma.usageRecord.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    take: options.limit ?? 200,
+  });
+
+  const byWorkflow = new Map<string, { executions: number; durationMs: number; promptTokens: number; completionTokens: number }>();
+  const byDay = new Map<string, { executions: number; aiCalls: number; durationMs: number }>();
+
+  for (const r of records) {
+    const meta = (r.metadata as Record<string, any>) || {};
+    const wfId = meta.workflowId || "unassigned";
+    const day = (r.createdAt ? new Date(r.createdAt) : new Date()).toISOString().slice(0, 10);
+    const qty = Number(r.quantity ?? 1);
+
+    // Group by workflow
+    if (!byWorkflow.has(wfId)) {
+      byWorkflow.set(wfId, { executions: 0, durationMs: 0, promptTokens: 0, completionTokens: 0 });
+    }
+    const wfData = byWorkflow.get(wfId)!;
+    if (r.type === "execution" || r.type === "execution_count") wfData.executions += qty;
+    if (r.type === "execution_duration_ms") wfData.durationMs += qty;
+    if (r.type === "llm_prompt_tokens") wfData.promptTokens += qty;
+    if (r.type === "llm_completion_tokens") wfData.completionTokens += qty;
+
+    // Group by day
+    if (!byDay.has(day)) {
+      byDay.set(day, { executions: 0, aiCalls: 0, durationMs: 0 });
+    }
+    const dayData = byDay.get(day)!;
+    if (r.type === "execution" || r.type === "execution_count") dayData.executions += qty;
+    if (r.type === "ai_call") dayData.aiCalls += qty;
+    if (r.type === "execution_duration_ms") dayData.durationMs += qty;
+  }
+
+  return {
+    orgId,
+    periodStart: start.toISOString(),
+    periodEnd: end.toISOString(),
+    totalRecords: records.length,
+    byWorkflow: Object.fromEntries(byWorkflow),
+    byDay: Object.fromEntries(byDay),
+    recentEvents: records.slice(0, 50),
   };
 }
 
@@ -168,17 +325,31 @@ export async function checkExecutionQuota(request: FastifyRequest, reply: Fastif
   const limit = limitsForPlan(organization?.plan).executionsPerMonth;
   const { monthStart, monthEnd } = getCurrentBillingMonthBounds();
 
+  // Check subscription status
+  const subscription = await prisma.subscription.findFirst({
+    where: { orgId },
+    orderBy: { createdAt: "desc" },
+  });
+  if (subscription && ["past_due", "unpaid"].includes(subscription.status)) {
+    reply.header("X-Subscription-Status", subscription.status);
+    return reply.code(402).send({
+      error: "Subscription payment is past due or unpaid. Please update payment method.",
+      code: "PAYMENT_REQUIRED",
+      status: subscription.status,
+    });
+  }
+
   const records = await prisma.usageRecord.findMany({
     where: {
       orgId,
-      type: "execution",
+      type: { in: ["execution", "execution_count"] },
       createdAt: { gte: monthStart },
     },
   });
 
   const used = records.reduce((total: number, record: { quantity?: number; createdAt?: Date | string }) => {
     if (record.createdAt && new Date(record.createdAt) < monthStart) return total;
-    return total + (record.quantity ?? 1);
+    return total + Number(record.quantity ?? 1);
   }, 0);
 
   const isUnlimited = !Number.isFinite(limit);
@@ -234,7 +405,7 @@ export async function checkAiQuota(request: FastifyRequest, reply: FastifyReply)
     },
   });
 
-  const used = records.reduce((total: number, record: { quantity?: number }) => total + (record.quantity ?? 1), 0);
+  const used = records.reduce((total: number, record: { quantity?: number }) => total + Number(record.quantity ?? 1), 0);
   const isUnlimited = !Number.isFinite(limit);
   const remaining = isUnlimited ? 999999999 : Math.max(limit - used, 0);
 
@@ -345,4 +516,3 @@ export async function checkMemberQuota(request: FastifyRequest, reply: FastifyRe
 
 // Re-export default execution check as checkQuota
 export const checkQuota = checkExecutionQuota;
-

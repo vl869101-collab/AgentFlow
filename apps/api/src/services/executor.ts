@@ -2,6 +2,9 @@ import { prisma } from "../lib/prisma.js";
 import { getEnv } from "../lib/env.js";
 import { decryptCredential } from "../lib/crypto.js";
 import { telemetry } from "../lib/otel.js";
+import { httpCircuitBreaker } from "../lib/circuit-breaker.js";
+import { applyHttpAuthentication, type HttpAuthConfig } from "../lib/http-auth.js";
+import { ensureFreshOAuth2Token } from "./vault/oauth-refresh.js";
 
 // Native handler (registered via the registry-pending process — Part 2)
 import { executeEvaluationTrigger } from "./nodes/evaluationTrigger.js";
@@ -252,6 +255,16 @@ async function credentialHeaders(config: JsonObject, orgId: string): Promise<Rec
   const credential = await prisma.credential.findFirst({ where: { id: credentialId, orgId } });
   if (!credential) throw new Error("Credential not found");
 
+  // OAuth2 auto-refresh
+  if (credential.type === "oauth2" || credential.bucket === "oauth2_managed" || credential.bucket === "oauth2_custom") {
+    try {
+      const fresh = await ensureFreshOAuth2Token(credentialId, orgId);
+      return { Authorization: `${fresh.tokenType || "Bearer"} ${fresh.accessToken}` };
+    } catch {
+      // Fallback to direct decryption if refresh fails
+    }
+  }
+
   let data: unknown;
   try {
     data = JSON.parse(decryptCredential(credential.data));
@@ -274,19 +287,29 @@ async function credentialHeaders(config: JsonObject, orgId: string): Promise<Rec
 }
 
 async function executeHttp(config: JsonObject, input: unknown, orgId: string): Promise<unknown> {
-  const url = assertSafeUrl(config.url);
+  let url = assertSafeUrl(config.url);
   const method = String(config.method ?? "GET").toUpperCase();
   if (!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].includes(method)) {
     throw new Error(`Unsupported HTTP method: ${method}`);
   }
 
-  const headers = Object.fromEntries(
+  let headers = Object.fromEntries(
     Object.entries(asObject(config.headers)).map(([key, value]) => [key, String(value)]),
   );
   const storedHeaders = await credentialHeaders(config, orgId);
   for (const [key, value] of Object.entries(storedHeaders)) {
     if (!Object.keys(headers).some((header) => header.toLowerCase() === key.toLowerCase())) headers[key] = value;
   }
+
+  // TASK-11: Apply 6 authentication schemes (Basic, Bearer, API Key, OAuth2, Digest, mTLS)
+  const authConfig = (config.auth ?? config.authentication) as HttpAuthConfig | undefined;
+  if (authConfig) {
+    const authOrgConfig = { ...authConfig, orgId: authConfig.orgId || orgId };
+    const prepared = await applyHttpAuthentication(url.toString(), method, authOrgConfig, headers);
+    url = new URL(prepared.url);
+    headers = prepared.headers;
+  }
+
   const configuredBody = config.body;
   const bodyValue = configuredBody === undefined && method !== "GET" && method !== "HEAD" ? input : configuredBody;
   const body = bodyValue === undefined ? undefined : typeof bodyValue === "string" ? bodyValue : JSON.stringify(bodyValue);
@@ -294,7 +317,21 @@ async function executeHttp(config: JsonObject, input: unknown, orgId: string): P
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetchWithTimeout(url, { method, headers, body }, Math.min(Number(config.timeout ?? 30) * 1000, NODE_TIMEOUT_MS));
+  // W3C Trace Context propagation for distributed tracing (TASK-10)
+  telemetry.injectTraceContext(headers);
+
+  // TASK-11: Circuit Breaker for HTTP egress
+  let hostname = "default-host";
+  try {
+    hostname = new URL(url).hostname;
+  } catch {}
+
+  const timeoutMs = Math.min(Number(config.timeout ?? 30) * 1000, NODE_TIMEOUT_MS);
+
+  const response = await httpCircuitBreaker.execute(hostname, () =>
+    fetchWithTimeout(url, { method, headers, body }, timeoutMs)
+  );
+
   const text = await readResponse(response);
   let result: unknown = text;
   try {
@@ -662,12 +699,14 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
       },
     });
     const nodeStartedAt = Date.now();
-    const nodeSpan = telemetry.startSpan(`node.execution ${node.type} (${node.id})`, {
+    const itemsCount = Array.isArray(nodeInput) ? nodeInput.length : nodeInput !== undefined && nodeInput !== null ? 1 : 0;
+    const nodeSpan = telemetry.startSpan(`agentflow.node.${node.type}`, {
       "workflow.id": workflow.id,
       "execution.id": execution.id,
       "node.id": node.id,
       "node.type": node.type,
       "org.id": execution.orgId,
+      "items.count": itemsCount,
     });
 
     if (!active.has(nodeId)) {

@@ -23,8 +23,13 @@ import { orgRoutes } from "./routes/orgs.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { apiKeyRoutes } from "./routes/apikeys.js";
 import { oauthRoutes } from "./routes/oauth.js";
-import { mcpRoutes } from "./routes/mcp.js";
 import { bullBoardRoutes } from "./routes/bullboard.js";
+import { auditRoutes } from "./routes/audit.js";
+import { usageRoutes } from "./routes/usage.js";
+import { stripeWebhookRoutes } from "./routes/stripe-webhook.js";
+import { chatRoutes } from "./routes/chat.js";
+import { dlqRoutes } from "./routes/dlq.js";
+import { mcpRoutes } from "./routes/mcp.js";
 import { docsRoutes } from "./docs/openapi.js";
 
 function parseTrustProxy(value: string | boolean | number): number | boolean | string[] {
@@ -317,7 +322,7 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
   });
   await app.register(jwt, { secret: env.JWT_SECRET });
 
-  // Telemetry & Metrics endpoint
+  // Telemetry & Metrics endpoints (TASK-10)
   app.get("/metrics", async (_request, reply) => {
     return reply
       .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -326,6 +331,19 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
 
   app.get("/api/telemetry/stats", async () => {
     return telemetry.getMetricsSummary();
+  });
+
+  app.get("/api/telemetry/spans", async (request) => {
+    const limit = (request.query as { limit?: string })?.limit;
+    return telemetry.getRecentSpans(limit ? Number(limit) : 100);
+  });
+
+  app.get("/api/telemetry/traces", async () => {
+    return telemetry.exportSpansOTLP();
+  });
+
+  app.get("/api/telemetry/otlp", async () => {
+    return telemetry.exportSpansOTLP();
   });
 
   await app.register(healthRoutes);
@@ -338,12 +356,18 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
   await app.register(settingsRoutes, { prefix: "/api/settings" });
   await app.register(aiRoutes, { prefix: "/api/ai" });
   await app.register(billingRoutes, { prefix: "/api/billing" });
+  await app.register(stripeWebhookRoutes, { prefix: "/api/stripe" });
+  await app.register(usageRoutes, { prefix: "/api/usage" });
   await app.register(orgRoutes, { prefix: "/api/orgs" });
   await app.register(apiKeyRoutes, { prefix: "/api/api-keys" });
   await app.register(webhookRoutes, { prefix: "/api/webhooks" });
   await app.register(oauthRoutes, { prefix: "/api/auth" });
   await app.register(mcpRoutes, { prefix: "/mcp" });
+  await app.register(mcpRoutes, { prefix: "/api/mcp" });
   await app.register(bullBoardRoutes, { prefix: "/admin/queues" });
+  await app.register(chatRoutes, { prefix: "/api/chat" });
+  await app.register(dlqRoutes, { prefix: "/api/admin/dlq" });
+  await app.register(auditRoutes, { prefix: "/api/audit" });
   await app.register(docsRoutes);
 
   return app;
