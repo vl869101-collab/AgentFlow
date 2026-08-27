@@ -148,7 +148,7 @@ test("TASK-10: End-to-end Workflow Execution generates hierarchical trace tree w
       type: "code",
       config: JSON.stringify({
         parameters: {
-          jsCode: "return items.map(i => ({ json: { ...i.json, processed: true } }));",
+          jsCode: "return { json: { ...$json, processed: true } };",
         },
       }),
       position: JSON.stringify({ x: 200, y: 0 }),
