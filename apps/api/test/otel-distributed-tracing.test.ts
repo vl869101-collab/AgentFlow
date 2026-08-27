@@ -146,7 +146,11 @@ test("TASK-10: End-to-end Workflow Execution generates hierarchical trace tree w
       workflowId: workflow.id,
       name: "Transform Code",
       type: "code",
-      config: JSON.stringify({ jsCode: "return items.map(i => ({ json: { ...i.json, processed: true } }));" }),
+      config: JSON.stringify({
+        parameters: {
+          jsCode: "return items.map(i => ({ json: { ...i.json, processed: true } }));",
+        },
+      }),
       position: JSON.stringify({ x: 200, y: 0 }),
     },
   });
@@ -226,7 +230,11 @@ test("TASK-10: Node execution error records span ERROR status and exception deta
       workflowId: workflow.id,
       name: "Failing Code",
       type: "code",
-      config: JSON.stringify({ jsCode: "throw new Error('Custom intentional failure in node');" }),
+      config: JSON.stringify({
+        parameters: {
+          jsCode: "throw new Error('Custom intentional failure in node');",
+        },
+      }),
       position: JSON.stringify({ x: 200, y: 0 }),
     },
   });
@@ -274,8 +282,10 @@ test("TASK-10: Handled node error policy (onError: continue) records status OK w
       name: "Handled Code",
       type: "code",
       config: JSON.stringify({
-        jsCode: "throw new Error('Non-fatal failure');",
         onError: "continue",
+        parameters: {
+          jsCode: "throw new Error('Non-fatal failure');",
+        },
       }),
     },
   });
@@ -337,9 +347,15 @@ test("TASK-10: OTLP Exporter representation & Telemetry API endpoints (/traces, 
 
   const scopeSpans = otlpExport.resourceSpans[0].scopeSpans[0].spans;
   assert.equal(scopeSpans.length, 2);
-  assert.equal(scopeSpans[0].traceId, root.traceId);
-  assert.equal(scopeSpans[1].traceId, root.traceId);
-  assert.equal(scopeSpans[1].parentSpanId, root.spanId);
+  const childOtlp = scopeSpans.find((s: any) => s.name === "agentflow.node.http");
+  const rootOtlp = scopeSpans.find((s: any) => s.name === "test.http.inbound");
+
+  assert.ok(childOtlp);
+  assert.ok(rootOtlp);
+  assert.equal(childOtlp?.traceId, root.traceId);
+  assert.equal(rootOtlp?.traceId, root.traceId);
+  assert.equal(childOtlp?.parentSpanId, root.spanId);
+  assert.equal(rootOtlp?.parentSpanId, undefined);
 
   // 2. GET /api/telemetry/traces
   const tracesRes = await app.inject({ method: "GET", url: "/api/telemetry/traces" });

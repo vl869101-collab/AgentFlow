@@ -9,6 +9,7 @@ import { enqueueExecution } from "../services/queue.js";
 import { limitsForPlan } from "../lib/plans.js";
 import { checkAndSetWebhookIdempotency } from "../lib/redis.js";
 import { verifyWebhookRequest } from "../services/webhook-verifier.js";
+import { telemetry } from "../lib/otel.js";
 
 function executeTelegramTrigger(_config: any, body: any) {
   return {
