@@ -250,6 +250,7 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
       "NO_ORG",
       "QUOTA_EXCEEDED",
       "AI_QUOTA_EXCEEDED",
+      "RATE_LIMIT_EXCEEDED",
       "MEMBER_LIMIT_REACHED",
       "WORKFLOW_LIMIT_REACHED",
       "INVALID_SIGNATURE",
@@ -361,6 +362,7 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
   await app.register(stripeWebhookRoutes, { prefix: "/api/stripe" });
   await app.register(usageRoutes, { prefix: "/api/usage" });
   await app.register(orgRoutes, { prefix: "/api/orgs" });
+  await app.register(orgRoutes, { prefix: "/api/organizations" });
   await app.register(apiKeyRoutes, { prefix: "/api/api-keys" });
   await app.register(webhookRoutes, { prefix: "/api/webhooks" });
   await app.register(oauthRoutes, { prefix: "/api/auth" });
