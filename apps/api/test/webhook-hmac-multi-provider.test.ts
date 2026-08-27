@@ -259,7 +259,7 @@ test("TASK-09: E2E Webhook Trigger verification with all providers against /api/
     },
   });
 
-  const triggerNode = await prisma.node.create({
+  const triggerNode = await (prisma as any).workflowNode.create({
     data: {
       workflowId: workflow.id,
       name: "Webhook Trigger",
@@ -268,7 +268,7 @@ test("TASK-09: E2E Webhook Trigger verification with all providers against /api/
       position: JSON.stringify({ x: 0, y: 0 }),
     },
   });
-  const outputNode = await prisma.node.create({
+  const outputNode = await (prisma as any).workflowNode.create({
     data: {
       workflowId: workflow.id,
       name: "Output",
@@ -277,7 +277,7 @@ test("TASK-09: E2E Webhook Trigger verification with all providers against /api/
       position: JSON.stringify({ x: 200, y: 0 }),
     },
   });
-  await prisma.edge.create({
+  await (prisma as any).workflowEdge.create({
     data: {
       workflowId: workflow.id,
       source: triggerNode.id,

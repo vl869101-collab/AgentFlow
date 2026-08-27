@@ -39,9 +39,10 @@ export function verifyGitHubSignature(
   signatureHeader?: string
 ): boolean {
   if (!signatureHeader || !secret) return false;
-  const normalized = signatureHeader.startsWith("sha256=")
-    ? signatureHeader.slice("sha256=".length)
-    : signatureHeader;
+  let normalized = signatureHeader.trim();
+  if (normalized.toLowerCase().startsWith("sha256=")) {
+    normalized = normalized.slice("sha256=".length);
+  }
 
   const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
   return safeCompare(expected.toLowerCase(), normalized.toLowerCase());
