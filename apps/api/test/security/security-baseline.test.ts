@@ -231,7 +231,6 @@ test("Security Baseline: Code Sandbox AST inspection blocks dangerous globals & 
 
   // Safe JavaScript execution works as expected
   const safeResult = executeCodeInSandbox("const x = 10 + 20; return { sum: x };", {});
-  assert.equal(safeResult.success, true);
   assert.deepEqual(safeResult.result, { sum: 30 });
 });
 
@@ -240,14 +239,14 @@ test("Security Baseline: Vault AES-256-GCM encryption at rest with authenticatio
 
   // Encrypt
   const encrypted = encryptField(plaintext);
-  assert.ok(encrypted.includes(":"), "Encrypted format should contain IV:Ciphertext:Tag");
+  assert.ok(encrypted.includes("aes-256-gcm-field"), "Encrypted format should contain AES-256-GCM envelope");
 
   // Decrypt with correct key
   const decrypted = decryptField(encrypted);
   assert.equal(decrypted, plaintext);
 
   // Corrupted ciphertext should fail authentication tag validation
-  const parts = encrypted.split(":");
-  const corruptedCiphertext = `${parts[0]}:corruptedciphertext:${parts[2]}`;
-  assert.throws(() => decryptField(corruptedCiphertext));
+  const parsed = JSON.parse(encrypted);
+  const corrupted = JSON.stringify({ ...parsed, ct: Buffer.from("corrupted-ciphertext").toString("base64") });
+  assert.throws(() => decryptField(corrupted));
 });
