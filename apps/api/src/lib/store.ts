@@ -264,21 +264,22 @@ export const store = {
       if (where.owner?.id) result = result.filter((w: any) => w.ownerId === where.owner.id);
       return withWorkflowRelations(result[0], include);
     },
+    async findUnique({ where, include }: { where: any; include?: any }) {
+      return this.findFirst({ where, include });
+    },
     async create({ data }: { data: any }) {
       const { nodes, edges, versions, ...scalarData } = data;
       const wf = { id: cuid(), ...scalarData, createdAt: now(), updatedAt: now() };
       workflows.set(wf.id, wf);
-      if (Array.isArray(nodes)) {
-        for (const n of nodes) {
-          const nodeObj = { id: n.id ?? cuid(), workflowId: wf.id, ...n };
-          workflowNodes.set(nodeObj.id, nodeObj);
-        }
+      const nodeList = Array.isArray(nodes) ? nodes : Array.isArray(nodes?.create) ? nodes.create : [];
+      for (const n of nodeList) {
+        const nodeObj = { id: n.id ?? cuid(), workflowId: wf.id, ...n };
+        workflowNodes.set(nodeObj.id, nodeObj);
       }
-      if (Array.isArray(edges)) {
-        for (const e of edges) {
-          const edgeObj = { id: e.id ?? cuid(), workflowId: wf.id, ...e };
-          workflowEdges.set(edgeObj.id, edgeObj);
-        }
+      const edgeList = Array.isArray(edges) ? edges : Array.isArray(edges?.create) ? edges.create : [];
+      for (const e of edgeList) {
+        const edgeObj = { id: e.id ?? cuid(), workflowId: wf.id, ...e };
+        workflowEdges.set(edgeObj.id, edgeObj);
       }
       return wf;
     },
@@ -552,14 +553,24 @@ export const store = {
       if (include?.workflow) result = result.map((webhook: any) => ({ ...webhook, workflow: find(workflows, { id: webhook.workflowId }) }));
       return result;
     },
-    async findFirst({ where }: { where: any }) {
-      return find(webhooks, where);
+    async findFirst({ where, include }: { where: any; include?: any }) {
+      const wh = find(webhooks, where);
+      if (!wh) return null;
+      if (include?.workflow) {
+        return { ...wh, workflow: find(workflows, { id: wh.workflowId }) };
+      }
+      return wh;
     },
-    async findUnique({ where }: { where: any }) {
-      return find(webhooks, where);
+    async findUnique({ where, include }: { where: any; include?: any }) {
+      const wh = find(webhooks, where);
+      if (!wh) return null;
+      if (include?.workflow) {
+        return { ...wh, workflow: find(workflows, { id: wh.workflowId }) };
+      }
+      return wh;
     },
     async create({ data }: { data: any }) {
-      const wh = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };
+      const wh = { id: cuid(), active: true, method: "POST", ...data, createdAt: now(), updatedAt: now() };
       webhooks.set(wh.id, wh);
       return wh;
     },

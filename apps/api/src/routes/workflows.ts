@@ -9,6 +9,7 @@ import { enqueueExecution } from "../services/queue.js";
 import { createWorkflowSchema, saveWorkflowCanvasSchema, updateWorkflowSchema, importN8nWorkflow } from "@agentflow/shared";
 import { limitsForPlan } from "../lib/plans.js";
 import { computeWorkflowDiff, type WorkflowSnapshot } from "../services/workflow-diff.js";
+import { cronScheduler } from "../services/cron-scheduler.js";
 
 type CanvasValue = Record<string, any>;
 
@@ -120,6 +121,8 @@ async function saveCanvas(workflowId: string, body: any) {
       },
     });
   });
+  void cronScheduler.syncWorkflow(workflowId);
+  void cronScheduler.publishSyncEvent({ action: "SYNC", workflowId });
   return canvas;
 }
 
@@ -227,6 +230,8 @@ export async function workflowRoutes(app: FastifyInstance) {
       await saveCanvas(id, { nodes: raw.nodes ?? existingCanvas.nodes, edges: raw.edges ?? existingCanvas.edges });
     }
     const updated = await prisma.workflow.findFirst({ where: { id, orgId }, include: { nodes: true, edges: true } });
+    void cronScheduler.syncWorkflow(id);
+    void cronScheduler.publishSyncEvent({ action: "SYNC", workflowId: id });
     return serializeWorkflow(updated);
   }
 
@@ -240,6 +245,8 @@ export async function workflowRoutes(app: FastifyInstance) {
 
     const result = await prisma.workflow.deleteMany({ where: { id, orgId } });
     if (result.count === 0) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+    void cronScheduler.unregisterWorkflow(id);
+    void cronScheduler.publishSyncEvent({ action: "UNREGISTER", workflowId: id });
     return { ok: true };
   });
 
