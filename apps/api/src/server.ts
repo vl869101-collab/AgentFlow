@@ -267,6 +267,8 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
       "EXEC_CODE_DISABLED",
       "SSRF_BLOCKED",
       "EGRESS_BLOCKED",
+      "PAYMENT_REQUIRED",
+      "CONCURRENCY_LIMIT_EXCEEDED",
       "INVALID_URL",
       "UNSUPPORTED_PROTOCOL",
       "CREDENTIALS_IN_URL",

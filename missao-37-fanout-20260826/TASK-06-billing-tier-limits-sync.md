@@ -44,6 +44,7 @@
 - `apps/api/src/services/billing.ts`: Idempotência de eventos Stripe, sincronização atômica de planos e ciclo de vida, degradação graciosa e auditoria.
 - `apps/api/src/services/metering.ts`: Enforçamento de cotas com retorno 402, verificação de concorrência, headers informativos e bloqueio por status de assinatura.
 - `apps/api/src/routes/webhooks.ts`: Enforçamento de cota e bloqueio por suspensão em gatilhos de webhook externos antes do enfileiramento BullMQ.
+- `apps/api/src/server.ts`: Inclusão de códigos operacionais 402 (`PAYMENT_REQUIRED`, `CONCURRENCY_LIMIT_EXCEEDED`) no error handler central.
 - `apps/api/src/lib/store.ts`: Suporte a relações `workflow` em `webhook.findFirst/findUnique` e defaults no mock in-memory.
 - `apps/api/tests/unit/billing-stripe.test.ts`: Suíte unitária focada para mapeamento de preços, planos, limites e catálogo Stripe.
 - `apps/api/test/billing-observability.test.ts`: Suíte de integração cobrindo simulação de webhooks Stripe assinados, idempotência, ciclo de vida, bloqueio 402 por cota, concorrência e suspensão.
