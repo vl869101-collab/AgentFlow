@@ -7,6 +7,10 @@ import {
   replayAllDLQ,
   purgeDLQ,
   getQueueMetrics,
+  getDLQIncidents,
+  getDLQIncidentById,
+  updateDLQIncidentStatus,
+  type DLQIncidentRecord,
 } from "../services/queue.js";
 
 export async function dlqRoutes(app: FastifyInstance) {
@@ -17,8 +21,11 @@ export async function dlqRoutes(app: FastifyInstance) {
     const offset = query.offset ? parseInt(query.offset, 10) : 0;
     const workflowId = query.workflowId;
     const orgId = query.orgId;
+    const startDate = query.startDate;
+    const endDate = query.endDate;
+    const search = query.search || query.q;
 
-    const result = await getDLQJobsList({ workflowId, orgId, limit, offset });
+    const result = await getDLQJobsList({ workflowId, orgId, startDate, endDate, search, limit, offset });
     return {
       items: result.jobs,
       total: result.total,
@@ -35,6 +42,49 @@ export async function dlqRoutes(app: FastifyInstance) {
       anomaly: metrics.dlq.anomalyAlert ?? false,
       timestamp: new Date().toISOString(),
     };
+  });
+
+  // Get incident history & audit log for DLQ
+  app.get("/incidents", async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = (request.query as Record<string, string>) ?? {};
+    const limit = query.limit ? parseInt(query.limit, 10) : 50;
+    const offset = query.offset ? parseInt(query.offset, 10) : 0;
+    const workflowId = query.workflowId;
+    const orgId = query.orgId;
+    const status = query.status;
+    const severity = query.severity;
+
+    const result = await getDLQIncidents({ workflowId, orgId, status, severity, limit, offset });
+    return {
+      items: result.incidents,
+      total: result.total,
+      limit,
+      offset,
+    };
+  });
+
+  // Get specific incident details
+  app.get("/incidents/:id", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string };
+    const incident = await getDLQIncidentById(id);
+    if (!incident) {
+      return reply.code(404).send({ error: `Incident '${id}' not found`, code: "NOT_FOUND" });
+    }
+    return incident;
+  });
+
+  // Update incident status
+  app.patch("/incidents/:id", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body as { status?: DLQIncidentRecord["status"] }) ?? {};
+    if (!body.status) {
+      return reply.code(400).send({ error: "Missing status field", code: "INVALID_REQUEST" });
+    }
+    const updated = await updateDLQIncidentStatus(id, body.status);
+    if (!updated) {
+      return reply.code(404).send({ error: `Incident '${id}' not found`, code: "NOT_FOUND" });
+    }
+    return { ok: true, incident: updated };
   });
 
   // Get specific job details

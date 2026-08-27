@@ -525,6 +525,45 @@ test("TASK-07: Dead Letter Queue (DLQ) — isolation, listing, replay, purge, me
   const listData = JSON.parse(listRes.body);
   assert.ok(listData.items.length >= 1);
 
+  // Test search & date filtering
+  const searchRes = await app.inject({
+    method: "GET",
+    url: "/api/admin/dlq?search=API%20Failure",
+  });
+  assert.equal(searchRes.statusCode, 200);
+  const searchData = JSON.parse(searchRes.body);
+  assert.equal(searchData.items.length, 1);
+  assert.equal(searchData.items[0].executionId, "exec-dlq-api-1");
+
+  // Test Incidents endpoints
+  const incListRes = await app.inject({
+    method: "GET",
+    url: "/api/admin/dlq/incidents",
+  });
+  assert.equal(incListRes.statusCode, 200);
+  const incListData = JSON.parse(incListRes.body);
+  assert.ok(incListData.items.length >= 1);
+  const firstIncident = incListData.items[0];
+
+  const incDetailRes = await app.inject({
+    method: "GET",
+    url: `/api/admin/dlq/incidents/${firstIncident.id}`,
+  });
+  assert.equal(incDetailRes.statusCode, 200);
+  const incDetail = JSON.parse(incDetailRes.body);
+  assert.equal(incDetail.id, firstIncident.id);
+  assert.equal(incDetail.status, "OPEN");
+
+  const incPatchRes = await app.inject({
+    method: "PATCH",
+    url: `/api/admin/dlq/incidents/${firstIncident.id}`,
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify({ status: "INVESTIGATING" }),
+  });
+  assert.equal(incPatchRes.statusCode, 200);
+  const patched = JSON.parse(incPatchRes.body);
+  assert.equal(patched.incident.status, "INVESTIGATING");
+
   const metricsRes = await app.inject({
     method: "GET",
     url: "/api/admin/dlq/metrics",
