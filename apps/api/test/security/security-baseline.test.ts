@@ -214,7 +214,7 @@ test("Security Baseline: SSRF Protection blocks loopback, private ranges & cloud
   }
 });
 
-test("Security Baseline: Code Sandbox AST inspection blocks dangerous globals & escapes", () => {
+test("Security Baseline: Code Sandbox AST inspection blocks dangerous globals & escapes", async () => {
   const attacks = [
     "process.exit(1)",
     "require('fs').readFileSync('/etc/passwd')",
@@ -230,7 +230,7 @@ test("Security Baseline: Code Sandbox AST inspection blocks dangerous globals & 
   }
 
   // Safe JavaScript execution works as expected
-  const safeResult = executeCodeInSandbox("const x = 10 + 20; return { sum: x };", {});
+  const safeResult = await executeCodeInSandbox("const x = 10 + 20; return { sum: x };", {});
   assert.deepEqual(safeResult.result, { sum: 30 });
 });
 
