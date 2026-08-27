@@ -523,7 +523,7 @@ const PROVIDERS = [
   { value: "Zulip API", label: "Zulip API" }
 ];
 
-export type CredentialBucket =
+type CredentialBucket =
   | "api_key"
   | "bearer_token"
   | "basic_auth"
@@ -534,7 +534,7 @@ export type CredentialBucket =
   | "mcp_oauth2"
   | "aws_iam";
 
-export function getProviderBucket(providerName: string): CredentialBucket {
+function getProviderBucket(providerName: string): CredentialBucket {
   const p = (providerName || "").trim();
   const lower = p.toLowerCase();
 
