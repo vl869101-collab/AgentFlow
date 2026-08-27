@@ -226,7 +226,7 @@ test("TASK-05: Background scheduled worker proactively scans and refreshes expir
   }
 });
 
-test("TASK-05: OAuth refresh marks credential as EXPIRED when refresh fails (400/401)", async () => {
+test("TASK-05: OAuth refresh marks credential as EXPIRED and logs audit event when refresh fails (400/401)", async () => {
   const org = await prisma.organization.create({ data: { name: "OAuth Org 4", slug: "oauth-org-4" } });
 
   const originalFetch = globalThis.fetch;
@@ -262,6 +262,271 @@ test("TASK-05: OAuth refresh marks credential as EXPIRED when refresh fails (400
 
     const updated = await prisma.credential.findFirst({ where: { id: cred.id } });
     assert.equal(updated.status, "EXPIRED");
+
+    // Verify audit log recorded failure
+    const logs = await prisma.auditLog.findMany({ where: { orgId: org.id } });
+    assert.ok(logs.some((l: any) => l.action === "credential.oauth_refresh_failed"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("TASK-05: Provider Mocks — Google OAuth2 token refresh", async () => {
+  const org = await prisma.organization.create({ data: { name: "Google Org", slug: "google-org" } });
+  const originalFetch = globalThis.fetch;
+
+  let requestUrl = "";
+  let requestBody = "";
+  globalThis.fetch = async (url: any, init?: any) => {
+    requestUrl = String(url);
+    requestBody = String(init?.body || "");
+    return new Response(
+      JSON.stringify({
+        access_token: "ya29.google-mock-access-token-12345",
+        expires_in: 3600,
+        scope: "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.readonly",
+        token_type: "Bearer",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  };
+
+  try {
+    const encrypted = encryptVaultData("oauth2_managed", {
+      accessToken: "expired-google-token",
+      refreshToken: "google-valid-refresh-token-xyz",
+      clientId: "google-client-id-123",
+      clientSecret: "google-client-secret-456",
+      expiresAt: new Date(Date.now() - 10000).toISOString(),
+    });
+
+    const cred = await prisma.credential.create({
+      data: {
+        name: "Google Workspace Cred",
+        type: "oauth2",
+        provider: "google",
+        bucket: "oauth2_managed",
+        data: encrypted,
+        orgId: org.id,
+        status: "ACTIVE",
+      },
+    });
+
+    const res = await refreshOAuth2Credential(cred.id, org.id, true);
+    assert.equal(res.success, true);
+    assert.equal(res.accessToken, "ya29.google-mock-access-token-12345");
+    assert.equal(requestUrl, "https://oauth2.googleapis.com/token");
+    assert.ok(requestBody.includes("grant_type=refresh_token"));
+    assert.ok(requestBody.includes("refresh_token=google-valid-refresh-token-xyz"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("TASK-05: Provider Mocks — Microsoft Azure / Entra OAuth2 token refresh & rotation", async () => {
+  const org = await prisma.organization.create({ data: { name: "MS Org", slug: "ms-org" } });
+  const originalFetch = globalThis.fetch;
+
+  let requestUrl = "";
+  globalThis.fetch = async (url: any) => {
+    requestUrl = String(url);
+    return new Response(
+      JSON.stringify({
+        access_token: "ms-new-access-token-abcdef",
+        refresh_token: "ms-rotated-refresh-token-fedcba",
+        expires_in: 7200,
+        token_type: "Bearer",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  };
+
+  try {
+    const encrypted = encryptVaultData("oauth2_managed", {
+      accessToken: "old-ms-token",
+      refreshToken: "ms-initial-refresh-token",
+      clientId: "ms-client-id-777",
+      clientSecret: "ms-client-secret-888",
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    const cred = await prisma.credential.create({
+      data: {
+        name: "Microsoft 365 Cred",
+        type: "oauth2",
+        provider: "microsoft",
+        bucket: "oauth2_managed",
+        data: encrypted,
+        orgId: org.id,
+        status: "ACTIVE",
+      },
+    });
+
+    const res = await refreshOAuth2Credential(cred.id, org.id, true);
+    assert.equal(res.success, true);
+    assert.equal(res.accessToken, "ms-new-access-token-abcdef");
+    assert.equal(res.refreshToken, "ms-rotated-refresh-token-fedcba");
+    assert.equal(requestUrl, "https://login.microsoftonline.com/common/oauth2/v2.0/token");
+
+    // Verify token rotation persisted in Vault AES-256-GCM
+    const updated = await prisma.credential.findFirst({ where: { id: cred.id } });
+    const decrypted = decryptVaultData("oauth2_managed", updated.data);
+    assert.equal(decrypted.accessToken, "ms-new-access-token-abcdef");
+    assert.equal(decrypted.refreshToken, "ms-rotated-refresh-token-fedcba");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("TASK-05: Provider Mocks — Slack OAuth2 access token refresh", async () => {
+  const org = await prisma.organization.create({ data: { name: "Slack Org", slug: "slack-org" } });
+  const originalFetch = globalThis.fetch;
+
+  let requestUrl = "";
+  globalThis.fetch = async (url: any) => {
+    requestUrl = String(url);
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        access_token: "xoxp-slack-new-access-token-5555",
+        refresh_token: "xoxr-slack-rotated-refresh-token-4444",
+        expires_in: 43200,
+        token_type: "Bearer",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  };
+
+  try {
+    const encrypted = encryptVaultData("oauth2_managed", {
+      accessToken: "xoxp-old-token",
+      refreshToken: "xoxr-old-refresh-token",
+      clientId: "slack-client-id",
+      clientSecret: "slack-client-secret",
+      expiresAt: new Date(Date.now() - 5000).toISOString(),
+    });
+
+    const cred = await prisma.credential.create({
+      data: {
+        name: "Slack Integration Cred",
+        type: "oauth2",
+        provider: "slack",
+        bucket: "oauth2_managed",
+        data: encrypted,
+        orgId: org.id,
+        status: "ACTIVE",
+      },
+    });
+
+    const res = await refreshOAuth2Credential(cred.id, org.id, true);
+    assert.equal(res.success, true);
+    assert.equal(res.accessToken, "xoxp-slack-new-access-token-5555");
+    assert.equal(res.refreshToken, "xoxr-slack-rotated-refresh-token-4444");
+    assert.equal(requestUrl, "https://slack.com/api/oauth.v2.access");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("TASK-05: Provider Mocks — GitHub App OAuth2 token refresh", async () => {
+  const org = await prisma.organization.create({ data: { name: "GitHub Org", slug: "github-org" } });
+  const originalFetch = globalThis.fetch;
+
+  let requestUrl = "";
+  let requestHeaders: any = {};
+  globalThis.fetch = async (url: any, init?: any) => {
+    requestUrl = String(url);
+    requestHeaders = init?.headers || {};
+    return new Response(
+      JSON.stringify({
+        access_token: "ghu_github_new_access_token_1111",
+        refresh_token: "ghr_github_new_refresh_token_2222",
+        expires_in: 28800,
+        token_type: "bearer",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  };
+
+  try {
+    const encrypted = encryptVaultData("oauth2_managed", {
+      accessToken: "ghu_old_token",
+      refreshToken: "ghr_old_refresh_token",
+      clientId: "github-client-id-001",
+      clientSecret: "github-client-secret-002",
+      expiresAt: new Date(Date.now() - 60000).toISOString(),
+    });
+
+    const cred = await prisma.credential.create({
+      data: {
+        name: "GitHub App Credential",
+        type: "oauth2",
+        provider: "github",
+        bucket: "oauth2_managed",
+        data: encrypted,
+        orgId: org.id,
+        status: "ACTIVE",
+      },
+    });
+
+    const res = await refreshOAuth2Credential(cred.id, org.id, true);
+    assert.equal(res.success, true);
+    assert.equal(res.accessToken, "ghu_github_new_access_token_1111");
+    assert.equal(res.refreshToken, "ghr_github_new_refresh_token_2222");
+    assert.equal(requestUrl, "https://github.com/login/oauth/access_token");
+    assert.equal(requestHeaders.Accept, "application/json");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("TASK-05: Provider Mocks — Salesforce OAuth2 token refresh", async () => {
+  const org = await prisma.organization.create({ data: { name: "SFDC Org", slug: "sfdc-org" } });
+  const originalFetch = globalThis.fetch;
+
+  let requestUrl = "";
+  let requestBody = "";
+  globalThis.fetch = async (url: any, init?: any) => {
+    requestUrl = String(url);
+    requestBody = String(init?.body || "");
+    return new Response(
+      JSON.stringify({
+        access_token: "sfdc_access_token_00D50000000IZ3E",
+        refresh_token: "sfdc_rotated_refresh_token_9999",
+        instance_url: "https://my-company.salesforce.com",
+        token_type: "Bearer",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  };
+
+  try {
+    const encrypted = encryptVaultData("oauth2_managed", {
+      accessToken: "sfdc_old_token",
+      refreshToken: "sfdc_initial_refresh_token",
+      clientId: "salesforce-connected-app-client-id",
+      clientSecret: "salesforce-client-secret",
+      expiresAt: new Date(Date.now() - 30000).toISOString(),
+    });
+
+    const cred = await prisma.credential.create({
+      data: {
+        name: "Salesforce CRM Credential",
+        type: "oauth2",
+        provider: "salesforce",
+        bucket: "oauth2_managed",
+        data: encrypted,
+        orgId: org.id,
+        status: "ACTIVE",
+      },
+    });
+
+    const res = await refreshOAuth2Credential(cred.id, org.id, true);
+    assert.equal(res.success, true);
+    assert.equal(res.accessToken, "sfdc_access_token_00D50000000IZ3E");
+    assert.equal(res.refreshToken, "sfdc_rotated_refresh_token_9999");
+    assert.equal(requestUrl, "https://login.salesforce.com/services/oauth2/token");
+    assert.ok(requestBody.includes("grant_type=refresh_token"));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -459,8 +724,15 @@ test("TASK-11: applyHttpAuthentication formats all 6 HTTP authentication schemes
   });
   assert.ok(apiKeyQuery.url.includes("api_key=key-query-999"));
 
-  // 4. Digest Auth
-  const digestHeader = computeDigestAuthHeader({
+  // 4. OAuth2 Token Injection
+  const oauth2Direct = await applyHttpAuthentication("https://api.example.com/data", "GET", {
+    type: "oauth2",
+    token: "oauth2-bearer-token-val",
+  });
+  assert.equal(oauth2Direct.headers.Authorization, "Bearer oauth2-bearer-token-val");
+
+  // 5. Digest Auth (MD5 and SHA-256 RFC 7616)
+  const digestMd5 = computeDigestAuthHeader({
     username: "Mufasa",
     password: "CircleOfLife",
     method: "GET",
@@ -470,18 +742,49 @@ test("TASK-11: applyHttpAuthentication formats all 6 HTTP authentication schemes
     qop: "auth",
     nc: "00000001",
     cnonce: "0a4f113b",
+    algorithm: "MD5",
   });
-  assert.ok(digestHeader.startsWith("Digest username=\"Mufasa\""));
-  assert.ok(digestHeader.includes("response="));
+  assert.ok(digestMd5.startsWith("Digest username=\"Mufasa\""));
+  assert.ok(digestMd5.includes("response="));
 
-  // 5. mTLS Client Certificate options
+  const digestSha256 = computeDigestAuthHeader({
+    username: "Mufasa",
+    password: "CircleOfLife",
+    method: "POST",
+    uri: "/api/secure-tx",
+    realm: "banking-realm",
+    nonce: "7ypf/xlj9xxdaann",
+    qop: "auth",
+    nc: "00000001",
+    cnonce: "f2/6qweu",
+    algorithm: "SHA-256",
+  });
+  assert.ok(digestSha256.startsWith("Digest username=\"Mufasa\""));
+  assert.ok(digestSha256.includes("algorithm=SHA-256"));
+  assert.ok(digestSha256.includes("response="));
+
+  const digestViaApply = await applyHttpAuthentication("https://api.example.com/dir/index.html", "GET", {
+    type: "digest",
+    digestUsername: "Mufasa",
+    digestPassword: "CircleOfLife",
+    realm: "testrealm@host.com",
+    nonce: "dcd98b7102dd2f0e8b11d0f600bfb0c093",
+    algorithm: "SHA-256",
+  });
+  assert.ok(digestViaApply.headers.Authorization.startsWith("Digest username=\"Mufasa\""));
+
+  // 6. mTLS Client Certificate options
   const mtls = await applyHttpAuthentication("https://api.finance.com/transfers", "POST", {
     type: "mtls",
     cert: "-----BEGIN CERTIFICATE-----\nMIIB...",
     key: "-----BEGIN PRIVATE KEY-----\nMIIE...",
+    ca: "-----BEGIN CERTIFICATE-----\nMIIC...",
+    passphrase: "secret-cert-pass",
   });
   assert.ok(mtls.tlsOptions?.cert);
   assert.ok(mtls.tlsOptions?.key);
+  assert.ok(mtls.tlsOptions?.ca);
+  assert.equal(mtls.tlsOptions?.passphrase, "secret-cert-pass");
 });
 
 // ══════════════════════════════════════════════════════════════════════

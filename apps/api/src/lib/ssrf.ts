@@ -181,6 +181,8 @@ export function validateUrl(rawUrl: string | URL): URL {
   return url;
 }
 
+export const assertSafeUrl = validateUrl;
+
 /**
  * Resolves DNS and validates all returned IP addresses against private and restricted ranges.
  */
