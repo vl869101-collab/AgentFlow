@@ -3,17 +3,16 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 const algorithm = "aes-256-gcm";
 const ivLength = 12;
 const authTagLength = 16;
-const keyHex = process.env.CREDENTIAL_ENCRYPTION_KEY;
-
-if (!keyHex) {
-  throw new Error("CREDENTIAL_ENCRYPTION_KEY is required to start the API");
+function getKey(): Buffer {
+  const keyHex = process.env.CREDENTIAL_ENCRYPTION_KEY;
+  if (!keyHex) {
+    throw new Error("CREDENTIAL_ENCRYPTION_KEY is required to start the API");
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
+    throw new Error("CREDENTIAL_ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hexadecimal characters");
+  }
+  return Buffer.from(keyHex, "hex");
 }
-
-if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
-  throw new Error("CREDENTIAL_ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hexadecimal characters");
-}
-
-const key = Buffer.from(keyHex, "hex");
 
 function decodeBase64(value: unknown, field: string): Buffer {
   if (typeof value !== "string" || value.length === 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
@@ -23,6 +22,7 @@ function decodeBase64(value: unknown, field: string): Buffer {
 }
 
 export function encryptCredential(plaintext: string): string {
+  const key = getKey();
   const iv = randomBytes(ivLength);
   const cipher = createCipheriv(algorithm, key, iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
@@ -56,6 +56,7 @@ export function decryptCredential(envelope: string): string {
   }
 
   try {
+    const key = getKey();
     const decipher = createDecipheriv(algorithm, key, iv);
     decipher.setAuthTag(authTag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
