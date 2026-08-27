@@ -20,13 +20,13 @@ const [
   { resetStore },
   { isBlockedIpOrHost, validateUrl, SsrFSecurityError },
   { executeCodeInSandbox, detectDangerousPatterns },
-  { encryptSecretField, decryptSecretField },
+  { encryptField, decryptField },
 ] = await Promise.all([
   import("../../src/server.js"),
   import("../../src/lib/store.js"),
   import("../../src/lib/ssrf.js"),
   import("../../src/services/nodes/code-sandbox.js"),
-  import("../../src/services/vault/crypto.js"),
+  import("../../src/services/vault/index.js"),
 ]);
 
 const app = await buildApp({ logger: false });
@@ -86,7 +86,8 @@ test("Security Baseline: Multi-tenant Org & Workspace isolation strictly prevent
     "/api/credentials",
     {
       name: "Org A Secret Key",
-      provider: "OpenAI API",
+      type: "api_key",
+      provider: "openai",
       data: { apiKey: "sk-secret-key-org-a-12345" },
     },
     tokenA,
@@ -141,30 +142,39 @@ test("Security Baseline: Multi-tenant Org & Workspace isolation strictly prevent
 
 test("Security Baseline: MCP RBAC & Granular Scope Enforcement", async () => {
   // Initialize MCP session
-  const initRes = await request("POST", "/mcp", {
-    jsonrpc: "2.0",
-    id: "sec-mcp-1",
-    method: "initialize",
-    params: {
-      protocolVersion: "2024-11-05",
-      capabilities: { tools: {} },
-      clientInfo: { name: "SecurityTestClient", version: "1.0.0" },
+  const initRes = await request(
+    "POST",
+    "/mcp/http",
+    {
+      jsonrpc: "2.0",
+      id: "sec-mcp-1",
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        clientInfo: { name: "SecurityTestClient", version: "1.0.0" },
+      },
     },
-  });
+    undefined,
+    { authorization: "Bearer af_secret_test_token" },
+  );
   assert.equal(initRes.response.statusCode, 200);
   const sessionId = initRes.response.headers["mcp-session-id"] as string;
 
   // List tools and ensure scopes are declared
   const listRes = await request(
     "POST",
-    "/mcp",
+    "/mcp/http",
     {
       jsonrpc: "2.0",
       id: "sec-mcp-2",
       method: "tools/list",
     },
     undefined,
-    { "mcp-session-id": sessionId },
+    {
+      authorization: "Bearer af_secret_test_token",
+      "mcp-session-id": sessionId,
+    },
   );
   assert.equal(listRes.response.statusCode, 200);
   assert.ok(Array.isArray(listRes.body.result?.tools));
@@ -211,7 +221,7 @@ test("Security Baseline: Code Sandbox AST inspection blocks dangerous globals & 
     "globalThis.constructor.constructor('return process')()",
     "Function('return process')()",
     "eval('process.env')",
-    "child_process.execSync('whoami')",
+    "require('child_process').execSync('whoami')",
   ];
 
   for (const code of attacks) {
@@ -226,19 +236,18 @@ test("Security Baseline: Code Sandbox AST inspection blocks dangerous globals & 
 });
 
 test("Security Baseline: Vault AES-256-GCM encryption at rest with authentication tag verification", () => {
-  const masterKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   const plaintext = "sk-live-confidential-api-key-999";
 
   // Encrypt
-  const encrypted = encryptSecretField(plaintext, masterKey);
+  const encrypted = encryptField(plaintext);
   assert.ok(encrypted.includes(":"), "Encrypted format should contain IV:Ciphertext:Tag");
 
   // Decrypt with correct key
-  const decrypted = decryptSecretField(encrypted, masterKey);
+  const decrypted = decryptField(encrypted);
   assert.equal(decrypted, plaintext);
 
   // Corrupted ciphertext should fail authentication tag validation
   const parts = encrypted.split(":");
   const corruptedCiphertext = `${parts[0]}:corruptedciphertext:${parts[2]}`;
-  assert.throws(() => decryptSecretField(corruptedCiphertext, masterKey));
+  assert.throws(() => decryptField(corruptedCiphertext));
 });
