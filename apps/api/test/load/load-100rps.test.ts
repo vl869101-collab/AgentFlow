@@ -233,5 +233,5 @@ test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA
   // Verify Telemetry Snapshot
   const statsRes = await request("GET", "/api/telemetry/stats");
   assert.equal(statsRes.response.statusCode, 200);
-  assert.ok(statsRes.body.totalRequests >= totalRequests);
+  assert.ok(statsRes.body.counters.httpRequests >= totalRequests);
 });
