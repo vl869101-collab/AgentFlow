@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "../lib/prisma.js";
 import { parsePagination } from "../lib/pagination.js";
 import { requireAuth, userIdFromRequest, orgIdFromRequest } from "../middleware/auth.js";
-import { getOrgUsageSummary, getOrgUsageBreakdown, recordUsageEvent } from "../services/metering.js";
+import { getOrgUsageSummary, getOrgUsageBreakdown, recordUsageEvent, verifyLedgerSignature } from "../services/metering.js";
 
 export async function usageRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
@@ -76,5 +76,25 @@ export async function usageRoutes(app: FastifyInstance) {
     });
 
     return records;
+  });
+
+  // Cryptographic verification endpoint for ledger non-tampering auditability
+  app.post("/verify", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = (request.body || {}) as { recordId?: string; record?: any };
+    let recordToVerify = body.record;
+    if (body.recordId && !recordToVerify) {
+      recordToVerify = await prisma.usageRecord.findUnique({ where: { id: body.recordId } });
+    }
+    if (!recordToVerify) {
+      return reply.code(400).send({ error: "Record not provided or not found", code: "RECORD_NOT_FOUND" });
+    }
+    const valid = verifyLedgerSignature(recordToVerify);
+    return {
+      valid,
+      recordId: recordToVerify.id,
+      timestamp: recordToVerify.metadata?.timestamp,
+      metricType: recordToVerify.metadata?.metricType || recordToVerify.type,
+      signature: recordToVerify.metadata?.signature,
+    };
   });
 }

@@ -146,7 +146,6 @@ test("TASK 28: BullBoard dashboard and queue monitoring endpoints", async () => 
 
 test("TASK 28: In-memory burst load simulation achieves p95 < 300ms and records telemetry", async () => {
   const token = await register("loadtest-user@example.com");
-  telemetry.reset();
 
   // Record 100 requests to measure latency under burst
   const endpoints = [
@@ -161,6 +160,7 @@ test("TASK 28: In-memory burst load simulation achieves p95 < 300ms and records 
   for (const ep of endpoints) {
     await request(ep.method, ep.url, undefined, ep.token);
   }
+  telemetry.reset();
 
   const durations: number[] = [];
   for (let i = 0; i < 100; i++) {

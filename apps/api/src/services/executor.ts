@@ -408,6 +408,7 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
     case "condition":
       return evaluateCondition(input, node.config);
     case "http":
+    case "httpRequest":
       return executeHttp(node.config, input, orgId);
     case "code": {
       const handler = new CodeNodeHandler();

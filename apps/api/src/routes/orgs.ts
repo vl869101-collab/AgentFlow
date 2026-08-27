@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
 import { createOrgSchema, inviteMemberSchema } from "@agentflow/shared";
-import { getOrgUsageSummary } from "../services/metering.js";
+import { getOrgUsageSummary, getOrgUsageBreakdown } from "../services/metering.js";
 import { limitsForPlan } from "../lib/plans.js";
 
 export async function orgRoutes(app: FastifyInstance) {
@@ -62,7 +62,7 @@ export async function orgRoutes(app: FastifyInstance) {
     return org;
   });
 
-  // Get Organization Usage & Metering Summary
+  // Get Organization Usage & Metering Summary (with optional workflow & period breakdown)
   app.get("/:id/usage", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
@@ -71,8 +71,29 @@ export async function orgRoutes(app: FastifyInstance) {
     });
     if (!membership) return reply.code(404).send({ error: "Organization not found", code: "NOT_FOUND" });
 
+    const query = request.query as {
+      startDate?: string;
+      endDate?: string;
+      workflowId?: string;
+      metricType?: string;
+      breakdown?: string;
+    };
+
     const summary = await getOrgUsageSummary(id);
     if (!summary) return reply.code(404).send({ error: "Usage summary not found", code: "NOT_FOUND" });
+
+    if (query.breakdown === "true" || query.workflowId || query.startDate || query.endDate || query.metricType) {
+      const breakdown = await getOrgUsageBreakdown(id, {
+        startDate: query.startDate,
+        endDate: query.endDate,
+        workflowId: query.workflowId,
+        metricType: query.metricType,
+      });
+      return {
+        ...summary,
+        breakdown,
+      };
+    }
 
     return summary;
   });

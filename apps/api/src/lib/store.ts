@@ -602,16 +602,22 @@ export const store = {
   },
 
   usageRecord: {
-    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
+    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number } = {}) {
       const result = findMany(usageRecords, where);
       if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
       return take === undefined ? result : result.slice(skip, skip + take);
+    },
+    async findUnique({ where }: { where: any }) {
+      return find(usageRecords, where);
+    },
+    async findFirst({ where }: { where: any }) {
+      return find(usageRecords, where);
     },
     async count({ where }: { where?: any } = {}) {
       return findMany(usageRecords, where).length;
     },
     async create({ data }: { data: any }) {
-      const record = { id: cuid(), ...data, createdAt: now() };
+      const record = { id: cuid(), ...data, createdAt: data.createdAt ?? now() };
       usageRecords.set(record.id, record);
       return record;
     },

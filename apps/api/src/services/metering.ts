@@ -64,11 +64,38 @@ export function getCurrentBillingMonthBounds(now = new Date()): { monthStart: Da
 /**
  * Generate cryptographic signature for tamper-proof ledger auditability.
  */
-function generateLedgerSignature(orgId: string, metricType: string, value: number, timestamp: string): string {
+export function generateLedgerSignature(orgId: string, metricType: string, value: number, timestamp: string): string {
   const secret = process.env.JWT_SECRET || "agentflow-ledger-signing-secret";
   return createHash("sha256")
     .update(`${orgId}:${metricType}:${value}:${timestamp}:${secret}`)
     .digest("hex");
+}
+
+/**
+ * Verify cryptographic signature of a ledger entry to guarantee non-tampering.
+ */
+export function verifyLedgerSignature(record: {
+  orgId: string;
+  type: string;
+  quantity?: number;
+  metadata?: any;
+}): boolean {
+  if (!record || !record.metadata || !record.metadata.signature) return false;
+  const meta = record.metadata;
+  const effectiveType = record.type || meta.metricType;
+  if (meta.metricType && record.type && meta.metricType !== record.type) {
+    return false;
+  }
+  if (meta.value !== undefined && record.quantity !== undefined && Number(meta.value) !== Number(record.quantity)) {
+    return false;
+  }
+  const expectedSig = generateLedgerSignature(
+    record.orgId,
+    effectiveType,
+    Number(record.quantity ?? meta.value ?? 1),
+    meta.timestamp || "",
+  );
+  return record.metadata.signature === expectedSig;
 }
 
 /**
@@ -114,14 +141,19 @@ export async function recordUsageEvent({
       },
     });
 
-    // Increment real-time aggregate in Redis if available
+    // Increment real-time aggregate in Redis if available (monthly and daily keys)
     const redis = getRedisClient();
     if (redis) {
       const { monthStart } = getCurrentBillingMonthBounds();
       const periodKey = monthStart.toISOString().slice(0, 7);
-      const redisKey = `metering:org:${orgId}:${periodKey}:${effectiveType}`;
-      await redis.incrby(redisKey, effectiveValue).catch(() => {});
-      await redis.expire(redisKey, 86400 * 35).catch(() => {});
+      const dayKey = timestamp.slice(0, 10);
+      const redisMonthlyKey = `metering:org:${orgId}:${periodKey}:${effectiveType}`;
+      const redisDailyKey = `metering:org:${orgId}:day:${dayKey}:${effectiveType}`;
+
+      await redis.incrby(redisMonthlyKey, effectiveValue).catch(() => {});
+      await redis.expire(redisMonthlyKey, 86400 * 35).catch(() => {});
+      await redis.incrby(redisDailyKey, effectiveValue).catch(() => {});
+      await redis.expire(redisDailyKey, 86400 * 60).catch(() => {});
     }
 
     return record;
@@ -253,14 +285,21 @@ export async function getOrgUsageBreakdown(
     where.type = options.metricType;
   }
 
-  const records = await prisma.usageRecord.findMany({
+  const rawRecords = await prisma.usageRecord.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    take: options.limit ?? 200,
+    take: options.limit ?? 500,
   });
 
-  const byWorkflow = new Map<string, { executions: number; durationMs: number; promptTokens: number; completionTokens: number }>();
-  const byDay = new Map<string, { executions: number; aiCalls: number; durationMs: number }>();
+  const records = options.workflowId
+    ? rawRecords.filter((r: any) => {
+        const meta = (r.metadata as Record<string, any>) || {};
+        return meta.workflowId === options.workflowId;
+      })
+    : rawRecords;
+
+  const byWorkflow = new Map<string, { executions: number; durationMs: number; promptTokens: number; completionTokens: number; totalTokens: number; storageBytes: number }>();
+  const byDay = new Map<string, { executions: number; aiCalls: number; durationMs: number; promptTokens: number; completionTokens: number; storageBytes: number }>();
 
   for (const r of records) {
     const meta = (r.metadata as Record<string, any>) || {};
@@ -270,22 +309,32 @@ export async function getOrgUsageBreakdown(
 
     // Group by workflow
     if (!byWorkflow.has(wfId)) {
-      byWorkflow.set(wfId, { executions: 0, durationMs: 0, promptTokens: 0, completionTokens: 0 });
+      byWorkflow.set(wfId, { executions: 0, durationMs: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, storageBytes: 0 });
     }
     const wfData = byWorkflow.get(wfId)!;
     if (r.type === "execution" || r.type === "execution_count") wfData.executions += qty;
     if (r.type === "execution_duration_ms") wfData.durationMs += qty;
-    if (r.type === "llm_prompt_tokens") wfData.promptTokens += qty;
-    if (r.type === "llm_completion_tokens") wfData.completionTokens += qty;
+    if (r.type === "llm_prompt_tokens") {
+      wfData.promptTokens += qty;
+      wfData.totalTokens += qty;
+    }
+    if (r.type === "llm_completion_tokens") {
+      wfData.completionTokens += qty;
+      wfData.totalTokens += qty;
+    }
+    if (r.type === "storage_bytes") wfData.storageBytes += qty;
 
     // Group by day
     if (!byDay.has(day)) {
-      byDay.set(day, { executions: 0, aiCalls: 0, durationMs: 0 });
+      byDay.set(day, { executions: 0, aiCalls: 0, durationMs: 0, promptTokens: 0, completionTokens: 0, storageBytes: 0 });
     }
     const dayData = byDay.get(day)!;
     if (r.type === "execution" || r.type === "execution_count") dayData.executions += qty;
     if (r.type === "ai_call") dayData.aiCalls += qty;
     if (r.type === "execution_duration_ms") dayData.durationMs += qty;
+    if (r.type === "llm_prompt_tokens") dayData.promptTokens += qty;
+    if (r.type === "llm_completion_tokens") dayData.completionTokens += qty;
+    if (r.type === "storage_bytes") dayData.storageBytes += qty;
   }
 
   return {
