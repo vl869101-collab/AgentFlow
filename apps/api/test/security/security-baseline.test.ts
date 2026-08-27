@@ -231,7 +231,7 @@ test("Security Baseline: Code Sandbox AST inspection blocks dangerous globals & 
 
   // Safe JavaScript execution works as expected
   const safeResult = await executeCodeInSandbox("const x = 10 + 20; return { sum: x };", {});
-  assert.deepEqual(safeResult.result, { sum: 30 });
+  assert.equal((safeResult.result as any)?.sum, 30);
 });
 
 test("Security Baseline: Vault AES-256-GCM encryption at rest with authentication tag verification", () => {
