@@ -206,7 +206,7 @@ export function verifyWebhookRequest(
     const sig = getHeader("x-hub-signature-256") || getHeader("x-hub-signature") || getHeader("x-signature-256");
     if (!sig) return { valid: false, provider: "github", error: "Missing GitHub signature header", code: "MISSING_SIGNATURE" };
     const valid = verifyGitHubSignature(secret, rawBody, sig);
-    return { valid, provider: "github", code: valid ? undefined : "INVALID_SIGNATURE" };
+    return { valid, provider: "github", code: valid ? undefined : "INVALID_SIGNATURE", error: valid ? undefined : "Invalid GitHub HMAC-SHA256 signature" };
   }
 
   // 2. Shopify
@@ -214,7 +214,7 @@ export function verifyWebhookRequest(
     const sig = getHeader("x-shopify-hmac-sha256");
     if (!sig) return { valid: false, provider: "shopify", error: "Missing Shopify signature header", code: "MISSING_SIGNATURE" };
     const valid = verifyShopifySignature(secret, rawBody, sig);
-    return { valid, provider: "shopify", code: valid ? undefined : "INVALID_SIGNATURE" };
+    return { valid, provider: "shopify", code: valid ? undefined : "INVALID_SIGNATURE", error: valid ? undefined : "Invalid Shopify HMAC-SHA256 signature" };
   }
 
   // 3. Stripe
@@ -249,5 +249,5 @@ export function verifyWebhookRequest(
 
   const alg = getHeader("x-signature-512") ? "sha512" : getHeader("x-signature-sha1") ? "sha1" : "sha256";
   const valid = verifyGenericSignature(secret, rawBody, genericSig, alg);
-  return { valid, provider: "generic", code: valid ? undefined : "INVALID_SIGNATURE" };
+  return { valid, provider: "generic", code: valid ? undefined : "INVALID_SIGNATURE", error: valid ? undefined : `Invalid ${alg.toUpperCase()} signature` };
 }
