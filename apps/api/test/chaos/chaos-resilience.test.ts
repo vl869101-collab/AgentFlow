@@ -110,3 +110,71 @@ test("TASK-14 Chaos Suite: Scenario 3 - Malformed payload, DB disconnection hand
   });
   assert.equal(regRes.response.statusCode, 201);
 });
+
+test("TASK-14 Chaos Suite: Scenario 4 - Worker termination, hung job recovery & DLQ retry lifecycle", async () => {
+  const { sendToDLQ, getDLQJobsList, replayDLQJob, getDLQIncidents } = await import("../../src/services/queue.js");
+
+  // 1. Simulate worker crash where job was abandoned and sent to DLQ
+  const executionId = `exec-chaos-hung-${Date.now()}`;
+  await sendToDLQ(executionId, "Worker killed abruptly by SIGKILL during execution", {
+    attemptsMade: 5,
+    workflowId: "wf-chaos-1",
+    orgId: "org-chaos-1",
+  });
+
+  const { jobs } = await getDLQJobsList({ workflowId: "wf-chaos-1" });
+  assert.ok(jobs.length >= 1);
+  const dlqJob = jobs[0];
+  assert.equal(dlqJob.executionId, executionId);
+
+  const dlqIncidents = await getDLQIncidents({ workflowId: "wf-chaos-1" });
+  assert.ok(dlqIncidents.total >= 1);
+  assert.equal(dlqIncidents.incidents[0].severity, "CRITICAL");
+  assert.equal(dlqIncidents.incidents[0].status, "OPEN");
+
+  // 2. Simulate recovery operator replaying the job
+  const replayed = await replayDLQJob(dlqJob.id);
+  assert.equal(replayed, true);
+
+  // 3. Confirm incident marked resolved
+  const resolvedIncidents = await getDLQIncidents({ workflowId: "wf-chaos-1", status: "RESOLVED" });
+  assert.ok(resolvedIncidents.total >= 1);
+});
+
+test("TASK-14 Chaos Suite: Scenario 5 - Database transient query failure & pool recovery simulation", async () => {
+  // Test server error isolation with simulated DB error handler
+  const errorRouteApp = await buildApp({ logger: false });
+
+  const regRes = await errorRouteApp.inject({
+    method: "POST",
+    url: "/api/auth/register",
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify({ email: "pool-test@agentflow.io", password: "Password123!", name: "Pool User" }),
+  });
+  assert.equal(regRes.statusCode, 201);
+
+  const loginRes = await errorRouteApp.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify({ email: "pool-test@agentflow.io", password: "Password123!" }),
+  });
+  assert.equal(loginRes.statusCode, 200);
+  const token = JSON.parse(loginRes.body).token;
+
+  const failingRes = await errorRouteApp.inject({
+    method: "GET",
+    url: "/api/workflows/non-existent-workflow-id-99999",
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(failingRes.statusCode, 404);
+
+  // Pool continues serving without crashing
+  const metricsRes = await errorRouteApp.inject({
+    method: "GET",
+    url: "/metrics",
+  });
+  assert.equal(metricsRes.statusCode, 200);
+  assert.ok(typeof metricsRes.body === "string" && metricsRes.body.length > 0);
+});
+

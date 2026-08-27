@@ -207,6 +207,7 @@ test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA
     durations.push(dt);
 
     if (res.response.statusCode >= 400 && res.response.statusCode !== 404) {
+      console.log("Load error on", ep.method, ep.url, "Status:", res.response.statusCode, "Body:", res.body);
       errorCount++;
     }
   }
