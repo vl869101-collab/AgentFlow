@@ -123,16 +123,22 @@ test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA
   assert.equal(hookRes.response.statusCode, 201);
 
   // Initialize MCP session for tool calls
-  const mcpInitRes = await request("POST", "/mcp", {
-    jsonrpc: "2.0",
-    id: "init-1",
-    method: "initialize",
-    params: {
-      protocolVersion: "2024-11-05",
-      capabilities: { tools: {} },
-      clientInfo: { name: "LoadBenchClient", version: "1.0.0" },
+  const mcpInitRes = await request(
+    "POST",
+    "/mcp/http",
+    {
+      jsonrpc: "2.0",
+      id: "init-1",
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        clientInfo: { name: "LoadBenchClient", version: "1.0.0" },
+      },
     },
-  });
+    undefined,
+    { authorization: "Bearer af_secret_test_token" },
+  );
   const mcpSessionId = mcpInitRes.response.headers["mcp-session-id"] as string;
 
   telemetry.reset();
@@ -163,7 +169,7 @@ test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA
     },
     {
       method: "POST" as const,
-      url: "/mcp",
+      url: "/mcp/http",
       weight: 10,
       preparePayload: (idx: number) => ({
         body: JSON.stringify({
@@ -171,7 +177,10 @@ test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA
           id: `mcp-${idx}`,
           method: "tools/list",
         }),
-        headers: mcpSessionId ? { "mcp-session-id": mcpSessionId } : {},
+        headers: {
+          authorization: "Bearer af_secret_test_token",
+          ...(mcpSessionId ? { "mcp-session-id": mcpSessionId } : {}),
+        },
       }),
     },
   ];
