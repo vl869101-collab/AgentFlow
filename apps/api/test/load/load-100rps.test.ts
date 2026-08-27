@@ -155,7 +155,7 @@ test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA
         return {
           body: payload,
           headers: {
-            "x-agentflow-signature": signature,
+            "x-webhook-signature": signature,
             "x-idempotency-key": `idem-load-${idx}-${Math.random()}`,
           },
         };
