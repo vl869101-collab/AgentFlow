@@ -6,6 +6,7 @@ import { checkQuota } from "../middleware/quota.js";
 import { createWorkflowExecution, runExecution } from "../services/executor.js";
 import { enqueueExecution } from "../services/queue.js";
 import { executeWorkflowSchema } from "@agentflow/shared";
+import { telemetry } from "../lib/otel.js";
 
 export async function executionRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
@@ -191,10 +192,12 @@ export async function executionRoutes(app: FastifyInstance) {
       duration: node.duration,
     }));
 
+    const otelSpans = telemetry.getSpansByExecutionId(id);
     return {
       executionId: id,
-      traceId: (execution as any).traceId || `trace-${id}`,
+      traceId: otelSpans[0]?.traceId || (execution as any).traceId || `trace-${id}`,
       spans: traces,
+      otelSpans,
       status: execution.status,
       startedAt: execution.startedAt,
       finishedAt: execution.finishedAt,

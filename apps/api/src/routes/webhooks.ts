@@ -223,10 +223,12 @@ export async function webhookRoutes(app: FastifyInstance) {
       });
     }
 
-    await prisma.usageRecord.create({ data: { type: "execution", quantity: 1, orgId: webhook.orgId, userId: null } });
+    const reqSpan = (request as any).span;
+    const parentContext = reqSpan ? { traceId: reqSpan.traceId, spanId: reqSpan.spanId, traceFlags: "01" } : undefined;
+    const traceparent = reqSpan ? telemetry.formatTraceParent(reqSpan) : undefined;
 
-    if (!(await enqueueExecution(execution.id))) {
-      void runExecution(execution.id).catch((error) => app.log.error(error, "Webhook execution failed"));
+    if (!(await enqueueExecution(execution.id, traceparent ? { traceparent } : {}))) {
+      void runExecution(execution.id, { parentContext }).catch((error) => app.log.error(error, "Webhook execution failed"));
     }
 
     return reply.status(202).send({ executionId: execution.id });

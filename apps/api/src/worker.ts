@@ -56,7 +56,13 @@ export const worker = new Worker(
     try {
       // The executor loads the workflow graph, executes every reachable node,
       // records node-level input/output/status and finalizes the execution.
-      const result = await runExecution(executionId);
+      const result = await runExecution(executionId, {
+        parentContext: {
+          traceId: workerSpan.traceId,
+          spanId: workerSpan.spanId,
+          traceFlags: "01",
+        },
+      });
       if (result.status === "FAILED") {
         throw new Error(result.error || "Workflow execution failed");
       }

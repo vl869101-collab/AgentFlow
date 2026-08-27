@@ -1,5 +1,6 @@
 import { Queue, type Job } from "bullmq";
 import { getEnv } from "../lib/env.js";
+import { telemetry } from "../lib/otel.js";
 
 let workflowQueue: Queue | undefined;
 let dlqQueue: Queue | undefined;
@@ -16,7 +17,22 @@ export interface DLQRecord {
   orgId?: string;
 }
 
+export interface DLQIncidentRecord {
+  id: string;
+  jobId: string;
+  executionId: string;
+  workflowId?: string;
+  orgId?: string;
+  error: string;
+  timestamp: string;
+  severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  status: "OPEN" | "INVESTIGATING" | "RESOLVED" | "PURGED";
+  resolvedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
 const inMemoryDLQ = new Map<string, DLQRecord>();
+const inMemoryIncidents = new Map<string, DLQIncidentRecord>();
 
 function getRedisConnection() {
   const redis = new URL(getEnv().REDIS_URL);
@@ -79,18 +95,35 @@ export const DEFAULT_DLQ_OPTIONS = {
 
 export async function sendToDLQ(executionId: string, error: string, metadata?: Record<string, unknown>): Promise<boolean> {
   const jobId = `dlq-${executionId}-${Date.now()}`;
+  const nowStr = new Date().toISOString();
   const record: DLQRecord = {
     id: jobId,
     executionId,
     error,
     metadata,
-    timestamp: new Date().toISOString(),
+    timestamp: nowStr,
     attemptsMade: (metadata?.attemptsMade as number) ?? 3,
     workflowId: metadata?.workflowId as string | undefined,
     orgId: metadata?.orgId as string | undefined,
   };
 
   inMemoryDLQ.set(jobId, record);
+
+  // Automatically record an incident in the incident history ledger
+  const incidentId = `inc-${jobId}`;
+  const incident: DLQIncidentRecord = {
+    id: incidentId,
+    jobId,
+    executionId,
+    workflowId: metadata?.workflowId as string | undefined,
+    orgId: metadata?.orgId as string | undefined,
+    error,
+    timestamp: nowStr,
+    severity: (metadata?.attemptsMade as number) >= 5 ? "CRITICAL" : "HIGH",
+    status: "OPEN",
+    metadata,
+  };
+  inMemoryIncidents.set(incidentId, incident);
 
   const dlq = getDLQQueue();
   if (dlq) {
@@ -108,7 +141,15 @@ export async function enqueueExecution(executionId: string, metadata: Record<str
   const queue = getWorkflowQueue();
   if (!queue) return false;
   try {
-    await queue.add("execute", { executionId, ...metadata }, { jobId: executionId, ...DEFAULT_JOB_OPTIONS });
+    const payload: Record<string, unknown> = { executionId, ...metadata };
+    if (!payload.traceparent && !payload.traceParent) {
+      payload.traceparent = telemetry.formatTraceParent({
+        traceId: telemetry.generateTraceId(),
+        spanId: telemetry.generateSpanId(),
+        traceFlags: "01",
+      });
+    }
+    await queue.add("execute", payload, { jobId: executionId, ...DEFAULT_JOB_OPTIONS });
     return true;
   } catch (error) {
     console.error("Unable to enqueue workflow execution", error);
@@ -119,6 +160,9 @@ export async function enqueueExecution(executionId: string, metadata: Record<str
 export async function getDLQJobsList(options: {
   workflowId?: string;
   orgId?: string;
+  startDate?: string;
+  endDate?: string;
+  search?: string;
   limit?: number;
   offset?: number;
 } = {}): Promise<{ jobs: DLQRecord[]; total: number }> {
@@ -129,7 +173,7 @@ export async function getDLQJobsList(options: {
   if (dlq) {
     try {
       const bullJobs = await dlq.getJobs(["waiting", "completed", "failed", "delayed", "active"], offset, offset + limit - 1);
-      const jobs: DLQRecord[] = bullJobs.map((j) => ({
+      let jobs: DLQRecord[] = bullJobs.map((j) => ({
         id: j.id ?? "",
         executionId: j.data?.executionId ?? "",
         error: j.data?.error ?? j.failedReason ?? "Unknown failure",
@@ -139,6 +183,16 @@ export async function getDLQJobsList(options: {
         workflowId: j.data?.workflowId,
         orgId: j.data?.orgId,
       }));
+      if (options.workflowId) jobs = jobs.filter((j) => j.workflowId === options.workflowId);
+      if (options.orgId) jobs = jobs.filter((j) => j.orgId === options.orgId);
+      if (options.startDate) {
+        const start = new Date(options.startDate).getTime();
+        jobs = jobs.filter((j) => new Date(j.timestamp).getTime() >= start);
+      }
+      if (options.endDate) {
+        const end = new Date(options.endDate).getTime();
+        jobs = jobs.filter((j) => new Date(j.timestamp).getTime() <= end);
+      }
       const total = await dlq.count();
       return { jobs, total };
     } catch {}
@@ -150,6 +204,18 @@ export async function getDLQJobsList(options: {
   }
   if (options.orgId) {
     records = records.filter((r) => r.orgId === options.orgId);
+  }
+  if (options.startDate) {
+    const start = new Date(options.startDate).getTime();
+    records = records.filter((r) => new Date(r.timestamp).getTime() >= start);
+  }
+  if (options.endDate) {
+    const end = new Date(options.endDate).getTime();
+    records = records.filter((r) => new Date(r.timestamp).getTime() <= end);
+  }
+  if (options.search) {
+    const query = options.search.toLowerCase();
+    records = records.filter((r) => r.error.toLowerCase().includes(query) || r.executionId.toLowerCase().includes(query));
   }
 
   const total = records.length;
@@ -180,12 +246,65 @@ export async function getDLQJobById(jobId: string): Promise<DLQRecord | null> {
   return inMemoryDLQ.get(jobId) ?? null;
 }
 
+export async function getDLQIncidents(options: {
+  workflowId?: string;
+  orgId?: string;
+  status?: string;
+  severity?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<{ incidents: DLQIncidentRecord[]; total: number }> {
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+  let records = Array.from(inMemoryIncidents.values());
+
+  if (options.workflowId) {
+    records = records.filter((r) => r.workflowId === options.workflowId);
+  }
+  if (options.orgId) {
+    records = records.filter((r) => r.orgId === options.orgId);
+  }
+  if (options.status) {
+    records = records.filter((r) => r.status === options.status);
+  }
+  if (options.severity) {
+    records = records.filter((r) => r.severity === options.severity);
+  }
+
+  records.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const total = records.length;
+  const incidents = records.slice(offset, offset + limit);
+  return { incidents, total };
+}
+
+export async function getDLQIncidentById(id: string): Promise<DLQIncidentRecord | null> {
+  return inMemoryIncidents.get(id) ?? null;
+}
+
+export async function updateDLQIncidentStatus(id: string, status: DLQIncidentRecord["status"]): Promise<DLQIncidentRecord | null> {
+  const inc = inMemoryIncidents.get(id);
+  if (!inc) return null;
+  inc.status = status;
+  if (status === "RESOLVED" || status === "PURGED") {
+    inc.resolvedAt = new Date().toISOString();
+  }
+  return inc;
+}
+
 export async function replayDLQJob(jobId: string): Promise<boolean> {
   const record = await getDLQJobById(jobId);
   if (!record) return false;
 
   // Re-enqueue execution
   await enqueueExecution(record.executionId, { replayedFromDLQ: true, dlqJobId: jobId });
+
+  // Update incident status
+  const incidentId = `inc-${jobId}`;
+  const inc = inMemoryIncidents.get(incidentId);
+  if (inc) {
+    inc.status = "RESOLVED";
+    inc.resolvedAt = new Date().toISOString();
+  }
 
   // Remove from DLQ
   inMemoryDLQ.delete(jobId);
@@ -222,6 +341,14 @@ export async function replayAllDLQ(): Promise<{ replayed: number; failed: number
 export async function purgeDLQ(): Promise<number> {
   const count = inMemoryDLQ.size;
   inMemoryDLQ.clear();
+
+  // Mark all open incidents as PURGED
+  for (const inc of inMemoryIncidents.values()) {
+    if (inc.status === "OPEN" || inc.status === "INVESTIGATING") {
+      inc.status = "PURGED";
+      inc.resolvedAt = new Date().toISOString();
+    }
+  }
 
   const dlq = getDLQQueue();
   if (dlq) {

@@ -5,6 +5,7 @@ import { telemetry } from "../lib/otel.js";
 import { httpCircuitBreaker } from "../lib/circuit-breaker.js";
 import { applyHttpAuthentication, type HttpAuthConfig } from "../lib/http-auth.js";
 import { ensureFreshOAuth2Token } from "./vault/oauth-refresh.js";
+import { recordUsageEvent } from "./metering.js";
 
 // Native handler (registered via the registry-pending process — Part 2)
 import { executeEvaluationTrigger } from "./nodes/evaluationTrigger.js";
@@ -681,7 +682,7 @@ async function updateExecution(id: string, data: JsonObject): Promise<ExecutionR
   return execution as ExecutionResult;
 }
 
-async function executeGraph(execution: any, workflow: any): Promise<unknown> {
+async function executeGraph(execution: any, workflow: any, parentSpan?: import("../lib/otel.js").Span): Promise<unknown> {
   const { nodes, edges } = workflowGraph(workflow);
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const outgoing = new Map<string, WorkflowEdge[]>();
@@ -757,14 +758,19 @@ async function executeGraph(execution: any, workflow: any): Promise<unknown> {
     });
     const nodeStartedAt = Date.now();
     const itemsCount = Array.isArray(nodeInput) ? nodeInput.length : nodeInput !== undefined && nodeInput !== null ? 1 : 0;
-    const nodeSpan = telemetry.startSpan(`agentflow.node.${node.type}`, {
-      "workflow.id": workflow.id,
-      "execution.id": execution.id,
-      "node.id": node.id,
-      "node.type": node.type,
-      "org.id": execution.orgId,
-      "items.count": itemsCount,
-    });
+    const parentContext = parentSpan
+      ? { traceId: parentSpan.traceId, spanId: parentSpan.spanId, traceFlags: "01" }
+      : undefined;
+
+    const nodeSpan = telemetry.startNodeSpan(
+      node.type,
+      node.id,
+      workflow.id,
+      execution.id,
+      execution.orgId,
+      { "items.count": itemsCount },
+      parentContext
+    );
 
     if (!active.has(nodeId)) {
       await prisma.nodeExecution.update({
@@ -953,7 +959,10 @@ export async function createWorkflowExecution(
   })) as ExecutionResult;
 }
 
-export async function runExecution(executionId: string): Promise<ExecutionResult> {
+export async function runExecution(
+  executionId: string,
+  options: { parentContext?: import("../lib/otel.js").TraceContext | null; traceparent?: string } = {}
+): Promise<ExecutionResult> {
   const execution = await prisma.workflowExecution.findUnique({ where: { id: executionId } });
   if (!execution) throw new Error("Execution not found");
   if (["SUCCESS", "FAILED", "CANCELLED"].includes(execution.status)) return execution as ExecutionResult;
@@ -964,19 +973,20 @@ export async function runExecution(executionId: string): Promise<ExecutionResult
   });
   if (!workflow) return updateExecution(executionId, { status: "FAILED", error: "Workflow not found", finishedAt: new Date() });
 
+  const parentContext = options.parentContext || telemetry.parseTraceParent(options.traceparent);
   const wfSpan = telemetry.startSpan(`workflow.execution ${workflow.name || workflow.id}`, {
     "workflow.id": workflow.id,
     "workflow.name": workflow.name,
     "execution.id": executionId,
     "execution.trigger": execution.trigger,
     "org.id": execution.orgId,
-  });
+  }, parentContext);
   telemetry.incActiveExecutions();
 
   const startedAt = new Date(execution.startedAt ?? Date.now());
   await updateExecution(executionId, { status: "RUNNING" });
   try {
-    const output = await withTimeout(executeGraph(execution, workflow), EXECUTION_TIMEOUT_MS, "Execution timed out");
+    const output = await withTimeout(executeGraph(execution, workflow, wfSpan), EXECUTION_TIMEOUT_MS, "Execution timed out");
     const duration = Date.now() - startedAt.getTime();
     wfSpan.setAttribute("execution.status", "SUCCESS");
     wfSpan.setAttribute("execution.duration_ms", duration);
@@ -984,6 +994,27 @@ export async function runExecution(executionId: string): Promise<ExecutionResult
     wfSpan.end();
     telemetry.decActiveExecutions();
     telemetry.recordWorkflowExecution("SUCCESS", execution.trigger, execution.orgId, duration);
+
+    // Record usage metering events (TASK-12)
+    if (execution.orgId) {
+      void recordUsageEvent({
+        orgId: execution.orgId,
+        userId: execution.userId ?? undefined,
+        workflowId: workflow.id,
+        executionId,
+        metricType: "execution_count",
+        value: 1,
+      }).catch(() => {});
+
+      void recordUsageEvent({
+        orgId: execution.orgId,
+        userId: execution.userId ?? undefined,
+        workflowId: workflow.id,
+        executionId,
+        metricType: "execution_duration_ms",
+        value: duration,
+      }).catch(() => {});
+    }
 
     return updateExecution(executionId, {
       status: "SUCCESS",
@@ -1009,6 +1040,27 @@ export async function runExecution(executionId: string): Promise<ExecutionResult
     wfSpan.end();
     telemetry.decActiveExecutions();
     telemetry.recordWorkflowExecution("FAILED", execution.trigger, execution.orgId, duration);
+
+    // Record usage metering events for failed execution (TASK-12)
+    if (execution.orgId) {
+      void recordUsageEvent({
+        orgId: execution.orgId,
+        userId: execution.userId ?? undefined,
+        workflowId: workflow.id,
+        executionId,
+        metricType: "execution_count",
+        value: 1,
+      }).catch(() => {});
+
+      void recordUsageEvent({
+        orgId: execution.orgId,
+        userId: execution.userId ?? undefined,
+        workflowId: workflow.id,
+        executionId,
+        metricType: "execution_duration_ms",
+        value: duration,
+      }).catch(() => {});
+    }
 
     const failedExecution = await updateExecution(executionId, {
       status: "FAILED",

@@ -58,8 +58,36 @@ export class Span {
     return this.data.spanId;
   }
 
+  get parentSpanId(): string | undefined {
+    return this.data.parentSpanId;
+  }
+
   get name(): string {
     return this.data.name;
+  }
+
+  get status(): { code: SpanStatusCode; description?: string } {
+    return this.data.status;
+  }
+
+  get attributes(): Record<string, string | number | boolean> {
+    return this.data.attributes;
+  }
+
+  get events(): Array<{ name: string; timestamp: number; attributes?: Record<string, unknown> }> {
+    return this.data.events;
+  }
+
+  get durationMs(): number | undefined {
+    return this.data.durationMs;
+  }
+
+  get startTime(): number {
+    return this.data.startTime;
+  }
+
+  get endTime(): number | undefined {
+    return this.data.endTime;
   }
 
   setAttribute(key: string, value: string | number | boolean): this {
@@ -159,17 +187,24 @@ class TelemetryManager {
     return { traceId, spanId, traceFlags };
   }
 
-  formatTraceParent(ctx: TraceContext): string {
-    return `00-${ctx.traceId}-${ctx.spanId}-${ctx.traceFlags || "01"}`;
+  formatTraceParent(ctx: TraceContext | Span): string {
+    const traceId = ctx instanceof Span ? ctx.traceId : ctx.traceId;
+    const spanId = ctx instanceof Span ? ctx.spanId : ctx.spanId;
+    const traceFlags = ctx instanceof Span ? "01" : ctx.traceFlags || "01";
+    return `00-${traceId}-${spanId}-${traceFlags}`;
   }
 
   injectTraceContext(carrier: Record<string, any>, context?: TraceContext | Span | null): Record<string, any> {
     if (!carrier) carrier = {};
-    if (!context) return carrier;
-
-    const ctx: TraceContext = context instanceof Span
-      ? { traceId: context.traceId, spanId: context.spanId, traceFlags: "01" }
-      : context;
+    const ctx: TraceContext = context
+      ? (context instanceof Span
+          ? { traceId: context.traceId, spanId: context.spanId, traceFlags: "01" }
+          : context)
+      : {
+          traceId: this.generateTraceId(),
+          spanId: this.generateSpanId(),
+          traceFlags: "01",
+        };
 
     if (ctx && ctx.traceId && ctx.spanId) {
       carrier["traceparent"] = this.formatTraceParent(ctx);
@@ -187,13 +222,15 @@ class TelemetryManager {
       carrier["Traceparent"] ||
       carrier["TRACEPARENT"] ||
       carrier["traceParent"] ||
-      carrier["x-traceparent"];
+      carrier["x-traceparent"] ||
+      (typeof (carrier as any).get === "function" ? (carrier as any).get("traceparent") || (carrier as any).get("Traceparent") : undefined);
 
     const traceState =
       carrier["tracestate"] ||
       carrier["Tracestate"] ||
       carrier["TRACESTATE"] ||
-      carrier["traceState"];
+      carrier["traceState"] ||
+      (typeof (carrier as any).get === "function" ? (carrier as any).get("tracestate") || (carrier as any).get("Tracestate") : undefined);
 
     const parsed = this.parseTraceParent(typeof header === "string" ? header : undefined);
     if (parsed && typeof traceState === "string") {
