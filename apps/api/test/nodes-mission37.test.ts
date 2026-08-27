@@ -1,4 +1,7 @@
 process.env.ALLOW_MEMORY_DB = "1";
+process.env.CREDENTIAL_ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+process.env.JWT_SECRET = "test-jwt-secret-that-is-at-least-32-characters-long";
+delete process.env.DATABASE_URL;
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

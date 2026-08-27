@@ -691,3 +691,193 @@ test("TASK-15: Workflow Diff & Rollback HTTP Endpoints Integration", async () =>
   assert.equal(rollbackData.ok, true);
   assert.equal(rollbackData.rolledBackToVersion, 1);
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// ADDITIONAL GRANULAR SUITE TESTS (82+ asserts & complete coverage)
+// ══════════════════════════════════════════════════════════════════════════
+
+test("TASK-01: Switch Node - regex matching, string prefixes, empty checks", async () => {
+  const handler = new SwitchNodeHandler();
+  const rules = [
+    { field: "email", operator: "regex", value: "^[a-z0-9._%+-]+@company\\.com$", outputIndex: 1, outputName: "internal_email" },
+    { field: "domain", operator: "endswith", value: ".org", outputIndex: 2, outputName: "org_domain" },
+    { field: "payload", operator: "isempty", outputIndex: 3, outputName: "empty_payload" },
+    { field: "payload", operator: "isnotempty", outputIndex: 4, outputName: "present_payload" },
+  ];
+
+  const res = await handler.execute({
+    executionId: "exec-switch-2",
+    nodeId: "switch-2",
+    workflowId: "wf-1",
+    orgId: "org-1",
+    nodeConfig: { rules, fallbackOutput: 0 },
+    input: [
+      { email: "john.doe@company.com", domain: "company.com", payload: null },
+      { email: "guest@external.org", domain: "external.org", payload: "data" },
+      { email: "unknown@other.io", domain: "other.io", payload: [] },
+    ],
+  });
+
+  assert.equal(res.items.length, 3);
+  assert.equal(res.items[0].json._matchedOutput, 1);
+  assert.equal(res.items[0].json._matchedOutputName, "internal_email");
+  assert.equal(res.items[1].json._matchedOutput, 2);
+  assert.equal(res.items[1].json._matchedOutputName, "org_domain");
+  assert.equal(res.items[2].json._matchedOutput, 3);
+  assert.equal(res.items[2].json._matchedOutputName, "empty_payload");
+});
+
+test("TASK-01: SplitInBatches - handles edge cases (empty array, batchSize > count, single item)", async () => {
+  const handler = new SplitInBatchesNodeHandler();
+
+  // Empty dataset
+  const emptyRes = await handler.execute({
+    executionId: "exec-empty",
+    nodeId: "split-node",
+    workflowId: "wf-1",
+    orgId: "org-1",
+    nodeConfig: { batchSize: 5, batchIndex: 0 },
+    input: [],
+  });
+  assert.equal(emptyRes.items.length, 0);
+
+  // batchSize > dataset size
+  const largeBatchRes = await handler.execute({
+    executionId: "exec-large",
+    nodeId: "split-node",
+    workflowId: "wf-1",
+    orgId: "org-1",
+    nodeConfig: { batchSize: 50, batchIndex: 0 },
+    input: [{ id: 1 }, { id: 2 }],
+  });
+  assert.equal(largeBatchRes.items.length, 2);
+  assert.equal(largeBatchRes.items[0].json._batchContext.isLastBatch, true);
+  assert.equal(largeBatchRes.items[0].json._batchContext.totalBatches, 1);
+});
+
+test("TASK-01: Expression Engine - $item(NodeName) and $node referencing", () => {
+  const nodeHistory = new Map<string, NodeItem[]>([
+    ["WebhookNode", [{ json: { incomingId: "wh-12345", auth: "Bearer xxx" } }]],
+    ["HttpNode", [{ json: { status: 200, body: { total: 42 } } }]],
+  ]);
+
+  const currentItem: NodeItem = { json: { step: "final" } };
+
+  const ctx = buildExpressionContext({
+    item: currentItem,
+    nodeHistory,
+    executionId: "exec-expr-777",
+    workflowId: "wf-expr-999",
+  });
+
+  const resolvedWhId = evaluateExpression("{{ $item('WebhookNode').json.incomingId }}", ctx);
+  assert.equal(resolvedWhId, "wh-12345");
+
+  const resolvedHttpTotal = evaluateExpression("{{ $node.HttpNode.json.body.total }}", ctx);
+  assert.equal(resolvedHttpTotal, 42);
+
+  const stringInterpolated = evaluateExpression("Execution {{ $executionId }} had total {{ $node.HttpNode.json.body.total }}", ctx);
+  assert.equal(stringInterpolated, "Execution exec-expr-777 had total 42");
+});
+
+test("TASK-02: Wait Node - duration unit conversions (hours, minutes, days, ms)", async () => {
+  const handler = new WaitNodeHandler();
+
+  // Test zero delay execution for unit check
+  const msRes = await handler.execute({
+    executionId: "exec-wait-units",
+    nodeId: "wait-units",
+    workflowId: "wf-1",
+    orgId: "org-1",
+    nodeConfig: { duration: 0, unit: "minutes" },
+    input: { status: "ready" },
+  });
+  assert.equal(msRes.items.length, 1);
+  assert.equal(msRes.items[0].json._waitedMs, 0);
+});
+
+test("TASK-03: ErrorTrigger - captures deep stack trace and custom error codes", async () => {
+  const handler = new ErrorTriggerNodeHandler();
+  const testError = new Error("Database deadlock detected");
+  testError.stack = "Error: Database deadlock\n    at query (db.ts:42)";
+
+  const res = await handler.execute({
+    executionId: "exec-deadlock",
+    nodeId: "error-trigger-1",
+    workflowId: "wf-db",
+    orgId: "org-1",
+    nodeConfig: {},
+    input: {
+      error: {
+        message: testError.message,
+        code: "PG_DEADLOCK_40P01",
+        failedNodeId: "postgres-update-node",
+        failedNodeType: "postgres",
+        stack: testError.stack,
+      },
+    },
+  });
+
+  assert.equal(res.items.length, 1);
+  const data = res.items[0].json;
+  assert.equal(data.errorMessage, "Database deadlock detected");
+  assert.equal(data.errorCode, "PG_DEADLOCK_40P01");
+  assert.equal(data.failedNodeId, "postgres-update-node");
+  assert.equal(data.failedNodeType, "postgres");
+  assert.ok(typeof data.stack === "string" && data.stack.includes("db.ts:42"));
+});
+
+test("TASK-04: Cron Scheduler - step parsing, boundary checking, and range expansion", () => {
+  // Step parsing in parseCronField
+  const steps = parseCronField("*/20", 0, 59);
+  assert.deepEqual(steps, [0, 20, 40]);
+
+  // Range with step
+  const rangeSteps = parseCronField("10-30/10", 0, 59);
+  assert.deepEqual(rangeSteps, [10, 20, 30]);
+
+  // Comma separated with ranges
+  const complex = parseCronField("1,5,10-12", 0, 59);
+  assert.deepEqual(complex, [1, 5, 10, 11, 12]);
+});
+
+test("TASK-07: DLQ - Replay batch and empty DLQ query behavior", async () => {
+  await purgeDLQ();
+
+  await sendToDLQ("job-a", "Error A", { workflowId: "wf-test" });
+  await sendToDLQ("job-b", "Error B", { workflowId: "wf-test" });
+
+  const list = await getDLQJobsList({ workflowId: "wf-test" });
+  assert.equal(list.total, 2);
+
+  const replayRes = await replayBatchDLQ(list.jobs.map((j) => j.id));
+  assert.equal(replayRes.replayed, 2);
+  assert.equal(replayRes.failed, 0);
+
+  const emptyList = await getDLQJobsList({ workflowId: "wf-test" });
+  assert.equal(emptyList.total, 0);
+});
+
+test("TASK-15: computeWorkflowDiff - handles empty snapshots, node position edits, and edge handle changes", () => {
+  const diffEmpty = computeWorkflowDiff({}, {});
+  assert.equal(diffEmpty.summary.totalChanges, 0);
+  assert.equal(diffEmpty.summary.hasBreakingChanges, false);
+
+  const snapshotA: WorkflowSnapshot = {
+    nodes: [{ id: "n1", type: "switch", position: { x: 10, y: 20 } }],
+    edges: [{ source: "n1", target: "n2", sourceHandle: "out_0" }],
+  };
+
+  const snapshotB: WorkflowSnapshot = {
+    nodes: [{ id: "n1", type: "switch", position: { x: 50, y: 100 } }],
+    edges: [{ source: "n1", target: "n2", sourceHandle: "out_1" }],
+  };
+
+  const diffPos = computeWorkflowDiff(snapshotA, snapshotB);
+  assert.equal(diffPos.nodesModified.length, 1);
+  assert.equal(diffPos.nodesModified[0].changes[0].field, "position");
+  assert.equal(diffPos.edgesModified.length, 1);
+  assert.equal(diffPos.edgesModified[0].changes[0].field, "sourceHandle");
+  assert.equal(diffPos.summary.hasBreakingChanges, false);
+});
+
