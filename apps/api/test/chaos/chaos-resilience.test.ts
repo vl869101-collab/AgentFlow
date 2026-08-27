@@ -68,9 +68,9 @@ test("TASK-14 Chaos Suite: Scenario 2 - Queue resilience, pause/resume under fai
   // 1. Verify queue stats and health
   const statsRes = await request("GET", "/admin/queues/stats");
   assert.equal(statsRes.response.statusCode, 200);
-  assert.ok("waiting" in statsRes.body);
-  assert.ok("active" in statsRes.body);
-  assert.ok("failed" in statsRes.body);
+  assert.ok("queues" in statsRes.body);
+  assert.ok("workflows" in statsRes.body.queues);
+  assert.ok("dlq" in statsRes.body.queues);
 
   // 2. Simulate queue pause under system distress
   const pauseRes = await request("POST", "/admin/queues/api/workflows/pause");
@@ -85,12 +85,12 @@ test("TASK-14 Chaos Suite: Scenario 2 - Queue resilience, pause/resume under fai
   // 4. Test DLQ retry-all operation
   const retryRes = await request("POST", "/admin/queues/api/workflows/retry-all");
   assert.equal(retryRes.response.statusCode, 200);
-  assert.equal(retryRes.body.retried, true);
+  assert.equal(retryRes.body.ok, true);
 
   // 5. Test queue clean operation
   const cleanRes = await request("POST", "/admin/queues/api/workflows/clean");
   assert.equal(cleanRes.response.statusCode, 200);
-  assert.equal(cleanRes.body.cleaned, true);
+  assert.equal(cleanRes.body.ok, true);
 });
 
 test("TASK-14 Chaos Suite: Scenario 3 - Malformed payload, DB disconnection handling & recovery", async () => {
