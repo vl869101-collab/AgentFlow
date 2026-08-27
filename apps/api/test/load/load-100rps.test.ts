@@ -47,16 +47,24 @@ async function request(method: HttpMethod, url: string, body?: unknown, token?: 
 
 test.beforeEach(() => resetStore());
 
-test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA & error rate < 0.1%", async () => {
-  // 1. Setup authenticated user and workflow
+async function registerAndLogin(email: string, password = "SecurePassword2026!") {
   const regRes = await request("POST", "/api/auth/register", {
-    email: "loadtest-100rps@agentflow.io",
-    password: "SecurePassword2026!",
-    name: "Load Test User",
+    email,
+    password,
+    name: email.split("@")[0],
   });
   assert.equal(regRes.response.statusCode, 201);
-  const token = regRes.body.token as string;
-  const orgId = regRes.body.user.orgId as string;
+  const loginRes = await request("POST", "/api/auth/login", {
+    email,
+    password,
+  });
+  assert.equal(loginRes.response.statusCode, 200);
+  return { token: loginRes.body.token as string, user: loginRes.body.user };
+}
+
+test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA & error rate < 0.1%", async () => {
+  // 1. Setup authenticated user and workflow
+  const { token } = await registerAndLogin("loadtest-100rps@agentflow.io");
 
   // Create test workflow with complex nodes
   const wfRes = await request(
@@ -73,8 +81,8 @@ test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA
 
   // Update canvas with Switch + Transform nodes
   await request(
-    "PUT",
-    `/api/workflows/${workflowId}/canvas`,
+    "PATCH",
+    `/api/workflows/${workflowId}`,
     {
       nodes: [
         {

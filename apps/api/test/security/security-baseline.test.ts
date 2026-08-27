@@ -53,24 +53,27 @@ async function request(method: HttpMethod, url: string, body?: unknown, token?: 
 
 test.beforeEach(() => resetStore());
 
+async function registerAndLogin(email: string, password = "Password123!") {
+  const regRes = await request("POST", "/api/auth/register", {
+    email,
+    password,
+    name: email.split("@")[0],
+  });
+  assert.equal(regRes.response.statusCode, 201);
+  const loginRes = await request("POST", "/api/auth/login", {
+    email,
+    password,
+  });
+  assert.equal(loginRes.response.statusCode, 200);
+  return { token: loginRes.body.token as string, user: loginRes.body.user };
+}
+
 test("Security Baseline: Multi-tenant Org & Workspace isolation strictly prevents cross-tenant data access", async () => {
   // Register User A (Org A)
-  const userARes = await request("POST", "/api/auth/register", {
-    email: "org-a-admin@example.com",
-    password: "Password123!",
-    name: "Org A Admin",
-  });
-  assert.equal(userARes.response.statusCode, 201);
-  const tokenA = userARes.body.token;
+  const { token: tokenA } = await registerAndLogin("org-a-admin@example.com");
 
   // Register User B (Org B)
-  const userBRes = await request("POST", "/api/auth/register", {
-    email: "org-b-admin@example.com",
-    password: "Password123!",
-    name: "Org B Admin",
-  });
-  assert.equal(userBRes.response.statusCode, 201);
-  const tokenB = userBRes.body.token;
+  const { token: tokenB } = await registerAndLogin("org-b-admin@example.com");
 
   // User A creates Workflow in Org A
   const wfARes = await request("POST", "/api/workflows", { name: "Org A Confidential Pipeline" }, tokenA);
