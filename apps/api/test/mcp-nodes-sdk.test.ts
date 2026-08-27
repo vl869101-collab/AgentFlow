@@ -25,6 +25,7 @@ const [
   { GoogleCalendarNodeHandler, executeGoogleCalendar },
   { GoogleDocsNodeHandler, executeGoogleDocs, substituteTemplateVariables },
   { McpClientNodeHandler, executeMcpClient },
+  { scopeMatches },
   { AgentFlowClient, createAgentFlowClient, AgentFlowApiError },
 ] = await Promise.all([
   import("../src/services/nodes/teams.js"),
@@ -32,6 +33,7 @@ const [
   import("../src/services/nodes/google-calendar.js"),
   import("../src/services/nodes/google-docs.js"),
   import("../src/services/nodes/mcp-client.js"),
+  import("../src/mcp/tools.js"),
   import("@agentflow/sdk"),
 ]);
 
@@ -198,6 +200,30 @@ test("TASK-08: MCP Granular RBAC enforces scopes and rejects unauthorized calls"
   assert.equal(execResult.status, "SUCCESS");
 });
 
+test("TASK-08: scopeMatches validates granular scopes, aliases and wildcards", () => {
+  // 1. Wildcard matching
+  assert.equal(scopeMatches(["*"], ["workflows:read", "executions:write"]), true);
+  assert.equal(scopeMatches(["admin"], ["vault:decrypt", "workflows:write"]), true);
+  assert.equal(scopeMatches(["tools:call"], ["any:tool:scope"]), true);
+
+  // 2. Domain prefix matching
+  assert.equal(scopeMatches(["workflows:*"], ["workflows:read"]), true);
+  assert.equal(scopeMatches(["workflows:*"], ["workflows:write"]), true);
+  assert.equal(scopeMatches(["workflows:*"], ["credentials:read"]), false);
+
+  // 3. TASK-08 canonical scope aliases
+  assert.equal(scopeMatches(["workflow:read"], ["workflows:read"]), true);
+  assert.equal(scopeMatches(["workflow:execute"], ["executions:write"]), true);
+  assert.equal(scopeMatches(["vault:decrypt"], ["credentials:read"]), true);
+  assert.equal(scopeMatches(["vault:write"], ["credentials:write"]), true);
+  assert.equal(scopeMatches(["admin:queues"], ["queues:read"]), true);
+
+  // 4. Missing required scopes
+  assert.equal(scopeMatches(["workflows:read"], ["executions:write"]), false);
+  assert.equal(scopeMatches(["credentials:read"], ["workflows:write"]), false);
+  assert.equal(scopeMatches([], ["workflows:read"]), false);
+});
+
 test("TASK-08: McpClientNodeHandler handles tool discovery and parameterized execution", async () => {
   const handler = new McpClientNodeHandler();
 
@@ -228,6 +254,60 @@ test("TASK-08: McpClientNodeHandler handles tool discovery and parameterized exe
   const callData = callResult.items[0].json as any;
   assert.equal(callData._status, "SUCCESS");
   assert.equal(callData._tool, "searchWorkflows");
+
+  // 3. listPrompts & getPrompt
+  const promptsList = await handler.execute({
+    executionId: "exec-client-3",
+    nodeId: "node-mcp-client-3",
+    workflowId: "wf-1",
+    orgId: "org-1",
+    nodeConfig: { operation: "listPrompts", serverUrl: "http://localhost:3000/api/mcp" },
+    input: {},
+  });
+  assert.equal(promptsList.items.length, 1);
+  const promptsData = promptsList.items[0].json as any;
+  assert.equal(promptsData._status, "SUCCESS");
+  assert.ok(Array.isArray(promptsData.prompts));
+
+  const promptGet = await handler.execute({
+    executionId: "exec-client-4",
+    nodeId: "node-mcp-client-4",
+    workflowId: "wf-1",
+    orgId: "org-1",
+    nodeConfig: { operation: "getPrompt", promptName: "build_workflow", serverUrl: "http://localhost:3000/api/mcp" },
+    input: {},
+  });
+  assert.equal(promptGet.items.length, 1);
+  const promptData = promptGet.items[0].json as any;
+  assert.equal(promptData._status, "SUCCESS");
+  assert.equal(promptData.prompt.name, "build_workflow");
+
+  // 4. listResources & readResource
+  const resList = await handler.execute({
+    executionId: "exec-client-5",
+    nodeId: "node-mcp-client-5",
+    workflowId: "wf-1",
+    orgId: "org-1",
+    nodeConfig: { operation: "listResources", serverUrl: "http://localhost:3000/api/mcp" },
+    input: {},
+  });
+  assert.equal(resList.items.length, 1);
+  const resListData = resList.items[0].json as any;
+  assert.equal(resListData._status, "SUCCESS");
+  assert.ok(Array.isArray(resListData.resources));
+
+  const resRead = await handler.execute({
+    executionId: "exec-client-6",
+    nodeId: "node-mcp-client-6",
+    workflowId: "wf-1",
+    orgId: "org-1",
+    nodeConfig: { operation: "readResource", uri: "agentflow://system/status", serverUrl: "http://localhost:3000/api/mcp" },
+    input: {},
+  });
+  assert.equal(resRead.items.length, 1);
+  const resReadData = resRead.items[0].json as any;
+  assert.equal(resReadData._status, "SUCCESS");
+  assert.ok(resReadData.content);
 });
 
 // ─────────────────────────────────────────────────────────────

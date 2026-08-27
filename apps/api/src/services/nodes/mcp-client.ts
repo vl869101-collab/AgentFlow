@@ -5,7 +5,8 @@ import { decryptCredential } from "../../lib/crypto.js";
 import { prisma } from "../../lib/prisma.js";
 
 export const mcpClientConfigSchema = z.object({
-  operation: z.enum(["callTool", "listTools", "listResources", "readResource", "listPrompts"]).default("callTool"),
+  operation: z.enum(["callTool", "listTools", "listResources", "readResource", "listPrompts", "getPrompt"]).default("callTool"),
+  transport: z.enum(["http", "sse", "stdio"]).default("http").optional(),
   serverUrl: z.string().url().optional(),
   endpoint: z.string().optional(),
   toolName: z.string().optional(),
@@ -109,7 +110,23 @@ export async function executeMcpClient(
         _serverUrl: serverUrl,
         prompts: [
           { name: "build_workflow", description: "Build workflow template" },
+          { name: "troubleshoot_execution", description: "Troubleshoot execution" },
         ],
+        _status: "SUCCESS",
+        mock: true,
+      };
+    }
+
+    if (operation === "getPrompt") {
+      const pName = validConfig.promptName ?? toolName ?? "build_workflow";
+      return {
+        _operation: "getPrompt",
+        _serverUrl: serverUrl,
+        prompt: {
+          name: pName,
+          description: `Prompt template for ${pName}`,
+          messages: [{ role: "user", content: { type: "text", text: `MCP prompt template: ${pName}` } }],
+        },
         _status: "SUCCESS",
         mock: true,
       };
@@ -151,6 +168,9 @@ export async function executeMcpClient(
   } else if (operation === "listPrompts") {
     method = "prompts/list";
     params = {};
+  } else if (operation === "getPrompt") {
+    method = "prompts/get";
+    params = { name: validConfig.promptName ?? toolName, arguments: args };
   }
 
   const rpcPayload = {

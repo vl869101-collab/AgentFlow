@@ -1993,6 +1993,60 @@ const HANDLERS: Record<string, (args: Record<string, unknown>, ctx: ToolContext)
   mock_ai_generate: async (args) => jsonResult({ text: `Mock AI: ${args.prompt}` }),
 };
 
+export function scopeMatches(userScopes: string[], requiredScopes: string[]): boolean {
+  if (!requiredScopes || requiredScopes.length === 0) return true;
+  if (!userScopes || userScopes.length === 0) return false;
+  if (userScopes.includes("*") || userScopes.includes("admin") || userScopes.includes("tools:call")) return true;
+
+  const normalizedUserScopes = new Set<string>();
+  for (const raw of userScopes) {
+    const s = raw.trim();
+    normalizedUserScopes.add(s);
+    // TASK-08 Aliases & normalization
+    if (s === "workflow:read" || s === "workflows:read") {
+      normalizedUserScopes.add("workflow:read");
+      normalizedUserScopes.add("workflows:read");
+    }
+    if (s === "workflow:write" || s === "workflows:write") {
+      normalizedUserScopes.add("workflow:write");
+      normalizedUserScopes.add("workflows:write");
+    }
+    if (s === "workflow:execute" || s === "workflows:execute" || s === "executions:write") {
+      normalizedUserScopes.add("workflow:execute");
+      normalizedUserScopes.add("workflows:execute");
+      normalizedUserScopes.add("executions:write");
+    }
+    if (s === "workflow:executions:read" || s === "executions:read") {
+      normalizedUserScopes.add("executions:read");
+      normalizedUserScopes.add("workflows:read");
+    }
+    if (s === "vault:decrypt" || s === "credentials:read") {
+      normalizedUserScopes.add("vault:decrypt");
+      normalizedUserScopes.add("credentials:read");
+    }
+    if (s === "vault:write" || s === "credentials:write") {
+      normalizedUserScopes.add("vault:write");
+      normalizedUserScopes.add("credentials:write");
+    }
+    if (s === "admin:queues") {
+      normalizedUserScopes.add("admin:queues");
+      normalizedUserScopes.add("queues:read");
+      normalizedUserScopes.add("queues:write");
+    }
+    if (s.endsWith(":*")) {
+      const prefix = s.slice(0, -2);
+      normalizedUserScopes.add(prefix);
+    }
+  }
+
+  return requiredScopes.some((req) => {
+    if (normalizedUserScopes.has(req)) return true;
+    const [domain] = req.split(":");
+    if (domain && (normalizedUserScopes.has(`${domain}:*`) || normalizedUserScopes.has(domain))) return true;
+    return false;
+  });
+}
+
 export async function callTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<McpToolResult> {
   const tool = MCP_TOOLS.find((t) => t.name === name);
   const handler = HANDLERS[name];
@@ -2004,11 +2058,10 @@ export async function callTool(name: string, args: Record<string, unknown>, ctx:
   }
 
   // 2. Enforce Scopes if provided in context
-  if (ctx.scopes && ctx.scopes.length > 0 && !ctx.scopes.includes("*") && !ctx.scopes.includes("admin")) {
+  if (ctx.scopes && ctx.scopes.length > 0) {
     const requiredScopes = tool?.scopes ?? [];
-    const hasScope = requiredScopes.length === 0 || requiredScopes.some((s) => ctx.scopes!.includes(s));
-    if (!hasScope) {
-      return errorResult(`Insufficient scope for tool '${name}'. Required: ${requiredScopes.join(", ")}`);
+    if (requiredScopes.length > 0 && !scopeMatches(ctx.scopes, requiredScopes)) {
+      return errorResult(`Insufficient scope for tool '${name}'. Required: ${requiredScopes.join(", ")} (code: -32003)`);
     }
   }
 
