@@ -1,6 +1,7 @@
 import { prisma } from "../../lib/prisma.js";
 import { decryptVaultData, encryptVaultData } from "./crypto.js";
 import { getProvider } from "./providers.js";
+import { recordAuditEvent } from "../audit-ledger.js";
 
 export interface RefreshResult {
   success: boolean;
@@ -65,7 +66,7 @@ export async function ensureFreshOAuth2Token(
   credentialId: string,
   orgId: string,
   bufferMs = 5 * 60 * 1000 // 5 minutes buffer
-): Promise<{ accessToken: string; expiresAt?: string; refreshed: boolean; tokenType: string }> {
+): Promise<{ accessToken: string; expiresAt?: string; refreshed: boolean; tokenType: string; refreshToken?: string }> {
   const credential = await prisma.credential.findFirst({
     where: { id: credentialId, orgId },
   });
@@ -79,6 +80,7 @@ export async function ensureFreshOAuth2Token(
   const currentToken = (decrypted.accessToken ?? decrypted.access_token ?? decrypted.token) as string | undefined;
   const expiresAtStr = (decrypted.expiresAt ?? decrypted.expires_at) as string | undefined;
   const tokenType = (decrypted.tokenType ?? decrypted.token_type ?? "Bearer") as string;
+  const currentRefreshToken = (decrypted.refreshToken ?? decrypted.refresh_token) as string | undefined;
 
   let needsRefresh = false;
   if (!currentToken) {
@@ -93,6 +95,7 @@ export async function ensureFreshOAuth2Token(
   if (!needsRefresh && currentToken) {
     return {
       accessToken: currentToken,
+      refreshToken: currentRefreshToken,
       expiresAt: expiresAtStr,
       refreshed: false,
       tokenType,
@@ -107,6 +110,7 @@ export async function ensureFreshOAuth2Token(
 
   return {
     accessToken: refreshRes.accessToken,
+    refreshToken: refreshRes.refreshToken,
     expiresAt: refreshRes.expiresAt,
     refreshed: true,
     tokenType: refreshRes.tokenType ?? "Bearer",
@@ -177,7 +181,6 @@ export async function refreshOAuth2Credential(
       Accept: "application/json",
     };
 
-    // If Slack, GitHub or Basic Auth client credentials header is preferred:
     if (clientId && clientSecret && provider === "github") {
       headers.Accept = "application/json";
     }
@@ -191,7 +194,7 @@ export async function refreshOAuth2Credential(
     if (!response.ok) {
       const errText = await response.text();
       // If token revoked or invalid grant, mark status as EXPIRED / REVOKED
-      if (response.status === 400 || response.status === 401) {
+      if (response.status === 400 || response.status === 401 || response.status === 403) {
         await prisma.credential.update({
           where: { id: credentialId },
           data: {
@@ -199,6 +202,18 @@ export async function refreshOAuth2Credential(
             updatedAt: new Date(),
           },
         });
+        // Record audit event and notify organization administrators
+        await recordAuditEvent({
+          orgId,
+          action: "credential.oauth_refresh_failed",
+          resource: "credential",
+          resourceId: credentialId,
+          metadata: {
+            provider,
+            status: "EXPIRED",
+            error: `HTTP ${response.status}: ${errText}`,
+          },
+        }).catch(() => null);
       }
       return {
         success: false,
@@ -218,6 +233,36 @@ export async function refreshOAuth2Credential(
         const parsedParams = new URLSearchParams(rawText);
         json = Object.fromEntries(parsedParams.entries());
       }
+    }
+
+    // Check for OAuth error responses wrapped inside HTTP 200 (e.g. Slack / some OAuth implementations)
+    if (json.ok === false || (json.error && !json.access_token && !json.accessToken)) {
+      const errorMsg = json.error_description || json.error || "OAuth provider rejected refresh request";
+      const isRevoked = /invalid_grant|invalid_token|revoked|token_expired/i.test(String(json.error));
+      if (isRevoked) {
+        await prisma.credential.update({
+          where: { id: credentialId },
+          data: {
+            status: "EXPIRED" as any,
+            updatedAt: new Date(),
+          },
+        });
+        await recordAuditEvent({
+          orgId,
+          action: "credential.oauth_refresh_failed",
+          resource: "credential",
+          resourceId: credentialId,
+          metadata: {
+            provider,
+            status: "EXPIRED",
+            error: String(errorMsg),
+          },
+        }).catch(() => null);
+      }
+      return {
+        success: false,
+        error: `OAuth2 refresh failed: ${errorMsg}`,
+      };
     }
 
     const newAccessToken = json.access_token ?? json.accessToken;
