@@ -177,15 +177,29 @@ export async function webhookRoutes(app: FastifyInstance) {
       `payload:${createHash("sha256").update(rawBody).digest("hex")}`;
     const redisKey = `webhook:idempotency:${webhook.id}:${idempotencyKey}`;
 
-    // Quota verification
+    // Quota & subscription verification
+    const subscription = await prisma.subscription.findFirst({
+      where: { orgId: webhook.orgId },
+      orderBy: { createdAt: "desc" },
+    });
+    if (subscription && ["past_due", "unpaid", "canceled"].includes(subscription.status)) {
+      reply.header("X-Subscription-Status", subscription.status);
+      reply.header("X-Quota-Blocked", "true");
+      return reply.code(402).send({
+        error: `Subscription payment is ${subscription.status}. Workflows are suspended. Please update payment method.`,
+        code: "PAYMENT_REQUIRED",
+        status: subscription.status,
+      });
+    }
+
     const organization = await prisma.organization.findUnique({ where: { id: webhook.orgId } });
     const limit = limitsForPlan(organization?.plan).executionsPerMonth;
     const usageRecords = await prisma.usageRecord.findMany({
       where: { orgId: webhook.orgId, type: "execution", createdAt: { gte: monthStart() } },
     });
     const used = usageRecords.reduce((total: number, record: { quantity?: number }) => total + Number(record.quantity ?? 0), 0);
-    if (used >= limit) {
-      return reply.code(429).send({ error: "Monthly execution quota exceeded", code: "QUOTA_EXCEEDED", used, limit });
+    if (!Number.isFinite(limit) ? false : used >= limit) {
+      return reply.code(402).send({ error: "Monthly execution quota exceeded", code: "QUOTA_EXCEEDED", used, limit });
     }
 
     const execution = await prisma.workflowExecution.create({

@@ -1,7 +1,8 @@
 import Stripe from "stripe";
 import { prisma } from "../lib/prisma.js";
 import { getEnv } from "../lib/env.js";
-import { limitsForPlan } from "../lib/plans.js";
+import { limitsForPlan, type PlanTier } from "../lib/plans.js";
+import { checkAndSetWebhookIdempotency } from "../lib/redis.js";
 
 export type StripeObject = Record<string, any>;
 
@@ -18,11 +19,11 @@ export function dateFromUnix(value: unknown): Date | null {
 /**
  * Maps a Stripe Price ID or metadata plan string to an AgentFlow Plan enum.
  */
-export function mapPriceToPlan(priceId?: string | null, metadataPlan?: string | null): "FREE" | "STARTER" | "BASIC" | "GROWTH" | "PRO" | "ENTERPRISE" {
+export function mapPriceToPlan(priceId?: string | null, metadataPlan?: string | null): PlanTier {
   if (metadataPlan) {
     const upper = metadataPlan.toUpperCase();
     if (["FREE", "STARTER", "BASIC", "GROWTH", "PRO", "ENTERPRISE"].includes(upper)) {
-      return upper as any;
+      return upper as PlanTier;
     }
   }
 
@@ -43,7 +44,7 @@ export function extractSubscriptionData(subscription: StripeObject) {
   const price = subscription.items?.data?.[0]?.price;
   const priceId = idOf(subscription.stripePriceId) ?? idOf(price);
   const metadata = subscription.metadata ?? {};
-  const plan = mapPriceToPlan(priceId, metadata.plan);
+  const plan = mapPriceToPlan(priceId, metadata.plan ?? metadata.planTier);
 
   return {
     stripeCustomerId: idOf(subscription.customer),
@@ -119,7 +120,7 @@ export async function syncSubscription(source: StripeObject): Promise<any> {
   const effectiveOrgId = orgId || existing?.orgId;
   if (effectiveOrgId) {
     const isPlanActive = ["active", "trialing"].includes(data.status);
-    const targetPlan = isPlanActive ? data.plan : "FREE";
+    const targetPlan: PlanTier = isPlanActive ? data.plan : "FREE";
 
     await prisma.organization.update({
       where: { id: effectiveOrgId },
@@ -127,15 +128,52 @@ export async function syncSubscription(source: StripeObject): Promise<any> {
         plan: targetPlan as any,
       },
     });
+
+    // Record audit log for subscription synchronization
+    await prisma.auditLog.create({
+      data: {
+        action: `billing.subscription_${data.status}`,
+        resource: "organization",
+        resourceId: effectiveOrgId,
+        metadata: {
+          subscriptionId: data.stripeSubscriptionId,
+          plan: targetPlan,
+          rawPlan: data.plan,
+          status: data.status,
+          currentPeriodEnd: data.currentPeriodEnd?.toISOString(),
+        },
+        userId: owner?.userId ?? existing?.userId ?? "system",
+        orgId: effectiveOrgId,
+      },
+    }).catch(() => {});
   }
 
   return subRecord;
 }
 
 /**
- * Handle Stripe webhook events idempotently.
+ * Handle Stripe webhook events idempotently with signed event validation and lifecycle sync.
  */
-export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<{ handled: boolean; type: string; details?: any }> {
+export async function handleStripeWebhookEvent(
+  event: Stripe.Event
+): Promise<{ handled: boolean; type: string; duplicate?: boolean; details?: any }> {
+  // 1. Enforce Webhook Idempotency (7-day retention)
+  if (event.id) {
+    const idempotency = await checkAndSetWebhookIdempotency(
+      `stripe:event:${event.id}`,
+      event.type,
+      86400 * 7
+    );
+    if (idempotency.isDuplicate) {
+      return {
+        handled: true,
+        type: event.type,
+        duplicate: true,
+        details: "Event already processed (idempotent replay)",
+      };
+    }
+  }
+
   const source = event.data.object as unknown as StripeObject;
 
   switch (event.type) {
@@ -151,6 +189,7 @@ export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<{ h
       return { handled: true, type: event.type };
     }
 
+    case "customer.subscription.created":
     case "customer.subscription.updated": {
       await syncSubscription(source);
       return { handled: true, type: event.type };
@@ -172,6 +211,17 @@ export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<{ h
               where: { id: existing.orgId },
               data: { plan: "FREE" },
             });
+
+            await prisma.auditLog.create({
+              data: {
+                action: "billing.subscription_canceled",
+                resource: "organization",
+                resourceId: existing.orgId,
+                metadata: { subscriptionId, previousPlan: "PRO", newPlan: "FREE" },
+                userId: existing.userId,
+                orgId: existing.orgId,
+              },
+            }).catch(() => {});
           }
         }
       }
@@ -187,6 +237,25 @@ export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<{ h
             where: { id: existing.id },
             data: { status: "active" },
           });
+
+          if (existing.orgId) {
+            const plan = mapPriceToPlan(existing.stripePriceId);
+            await prisma.organization.update({
+              where: { id: existing.orgId },
+              data: { plan: plan as any },
+            });
+
+            await prisma.auditLog.create({
+              data: {
+                action: "billing.payment_succeeded",
+                resource: "organization",
+                resourceId: existing.orgId,
+                metadata: { subscriptionId: subId, invoiceId: idOf(source.id) },
+                userId: existing.userId,
+                orgId: existing.orgId,
+              },
+            }).catch(() => {});
+          }
         }
       }
       return { handled: true, type: event.type };
@@ -201,6 +270,23 @@ export async function handleStripeWebhookEvent(event: Stripe.Event): Promise<{ h
             where: { id: existing.id },
             data: { status: "past_due" },
           });
+
+          if (existing.orgId) {
+            await prisma.auditLog.create({
+              data: {
+                action: "billing.payment_failed",
+                resource: "organization",
+                resourceId: existing.orgId,
+                metadata: {
+                  subscriptionId: subId,
+                  invoiceId: idOf(source.id),
+                  warning: "Account past_due. Non-critical workflows suspended.",
+                },
+                userId: existing.userId,
+                orgId: existing.orgId,
+              },
+            }).catch(() => {});
+          }
         }
       }
       return { handled: true, type: event.type };

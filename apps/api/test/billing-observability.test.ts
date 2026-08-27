@@ -251,6 +251,162 @@ test("TASK-06: Quota middleware blocks execution with 402 when subscription is p
   assert.equal(body.code, "PAYMENT_REQUIRED");
 });
 
+test("TASK-06: Signed Stripe Webhook signature verification and invalid signature rejection", async () => {
+  const payload = JSON.stringify({ id: "evt_invalid_sig", type: "invoice.payment_succeeded", data: { object: {} } });
+
+  // Missing signature -> 400 MISSING_SIGNATURE
+  const resMissing = await app.inject({
+    method: "POST",
+    url: "/api/billing/webhook",
+    headers: { "content-type": "application/json" },
+    payload,
+  });
+  assert.equal(resMissing.statusCode, 400);
+  assert.equal(resMissing.json().code, "MISSING_SIGNATURE");
+
+  // Invalid signature -> 400 INVALID_SIGNATURE
+  const resInvalid = await app.inject({
+    method: "POST",
+    url: "/api/billing/webhook",
+    headers: { "content-type": "application/json", "stripe-signature": "t=12345,v1=invalid_hex_signature" },
+    payload,
+  });
+  assert.equal(resInvalid.statusCode, 400);
+  assert.equal(resInvalid.json().code, "INVALID_SIGNATURE");
+});
+
+test("TASK-06: Stripe Webhook idempotency ignores replayed event ID", async () => {
+  const user = await prisma.user.create({ data: { email: "idemp@example.com", passwordHash: "h", name: "Idemp User" } });
+  const org = await prisma.organization.create({ data: { name: "Idemp Org", slug: "idemp-org", plan: "FREE" } });
+  await prisma.organizationMember.create({ data: { orgId: org.id, userId: user.id, role: "OWNER" } });
+
+  const eventPayload = {
+    id: "evt_idempotency_unique_999",
+    object: "event",
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: "cs_idemp_999",
+        customer: "cus_idemp_999",
+        subscription: "sub_idemp_999",
+        client_reference_id: user.id,
+        metadata: { userId: user.id, orgId: org.id, plan: "PRO" },
+        items: { data: [{ price: { id: "price_pro_monthly" } }] },
+      },
+    },
+  };
+
+  const raw = JSON.stringify(eventPayload);
+  const sig = signStripePayload(raw);
+
+  // First delivery
+  const res1 = await app.inject({
+    method: "POST",
+    url: "/api/billing/webhook",
+    headers: { "content-type": "application/json", "stripe-signature": sig },
+    payload: raw,
+  });
+  assert.equal(res1.statusCode, 200);
+  assert.equal(res1.json().handled, true);
+  assert.equal(res1.json().duplicate, undefined);
+
+  // Second delivery (replay)
+  const res2 = await app.inject({
+    method: "POST",
+    url: "/api/billing/webhook",
+    headers: { "content-type": "application/json", "stripe-signature": sig },
+    payload: raw,
+  });
+  assert.equal(res2.statusCode, 200);
+  assert.equal(res2.json().handled, true);
+  assert.equal(res2.json().duplicate, true);
+});
+
+test("TASK-06: Monthly execution quota reached returns 402 with quota headers", async () => {
+  const org = await prisma.organization.create({ data: { name: "Quota Org", slug: "quota-org", plan: "FREE" } });
+  const user = await prisma.user.create({ data: { email: "quota@example.com", passwordHash: "h", name: "Quota User" } });
+  await prisma.organizationMember.create({ data: { orgId: org.id, userId: user.id, role: "OWNER" } });
+  const wf = await prisma.workflow.create({ data: { name: "Quota Flow", orgId: org.id, ownerId: user.id } });
+
+  // Simulate FREE tier 100 executions already used
+  const { monthStart } = getCurrentBillingMonthBounds();
+  await prisma.usageRecord.create({
+    data: { orgId: org.id, userId: user.id, type: "execution", quantity: 100, createdAt: monthStart },
+  });
+
+  const token = app.jwt.sign({ sub: user.id, orgId: org.id });
+  const res = await app.inject({
+    method: "POST",
+    url: `/api/workflows/${wf.id}/run`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+
+  assert.equal(res.statusCode, 402);
+  const json = res.json();
+  assert.equal(json.code, "QUOTA_EXCEEDED");
+  assert.equal(res.headers["x-quota-limit"], "100");
+  assert.equal(res.headers["x-quota-used"], "100");
+  assert.equal(res.headers["x-quota-remaining"], "0");
+  assert.equal(res.headers["x-plan-tier"], "FREE");
+});
+
+test("TASK-06: Concurrency limit reached returns 402 with concurrency headers", async () => {
+  const org = await prisma.organization.create({ data: { name: "Conc Org", slug: "conc-org", plan: "FREE" } });
+  const user = await prisma.user.create({ data: { email: "conc@example.com", passwordHash: "h", name: "Conc User" } });
+  await prisma.organizationMember.create({ data: { orgId: org.id, userId: user.id, role: "OWNER" } });
+  const wf = await prisma.workflow.create({ data: { name: "Conc Flow", orgId: org.id, ownerId: user.id } });
+
+  // FREE tier allows concurrency of 2. Create 2 RUNNING executions.
+  await prisma.workflowExecution.create({ data: { workflowId: wf.id, orgId: org.id, status: "RUNNING", trigger: "manual" } });
+  await prisma.workflowExecution.create({ data: { workflowId: wf.id, orgId: org.id, status: "RUNNING", trigger: "manual" } });
+
+  const token = app.jwt.sign({ sub: user.id, orgId: org.id });
+  const res = await app.inject({
+    method: "POST",
+    url: `/api/workflows/${wf.id}/run`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+
+  assert.equal(res.statusCode, 402);
+  const json = res.json();
+  assert.equal(json.code, "CONCURRENCY_LIMIT_EXCEEDED");
+  assert.equal(res.headers["x-concurrency-limit"], "2");
+  assert.equal(res.headers["x-concurrency-current"], "2");
+});
+
+test("TASK-06: Webhook trigger route blocks execution with 402 when subscription is past_due", async () => {
+  const org = await prisma.organization.create({ data: { name: "Webhook Susp Org", slug: "wh-susp-org", plan: "PRO" } });
+  const user = await prisma.user.create({ data: { email: "whsusp@example.com", passwordHash: "h", name: "WHSusp User" } });
+  await prisma.organizationMember.create({ data: { orgId: org.id, userId: user.id, role: "OWNER" } });
+  await prisma.subscription.create({
+    data: { stripeSubscriptionId: "sub_wh_susp", status: "past_due", userId: user.id, orgId: org.id },
+  });
+
+  const secret = "wh_test_secret_key_123";
+  const wf = await prisma.workflow.create({ data: { name: "Wh Susp Flow", orgId: org.id, ownerId: user.id } });
+  const webhook = await prisma.webhook.create({
+    data: { path: "wh-susp-path", workflowId: wf.id, orgId: org.id, secret, method: "POST" },
+  });
+
+  const payload = JSON.stringify({ ping: true });
+  const signature = createHmac("sha256", secret).update(payload).digest("hex");
+
+  const res = await app.inject({
+    method: "POST",
+    url: `/api/webhooks/trigger/${webhook.path}`,
+    headers: {
+      "content-type": "application/json",
+      "x-webhook-provider": "generic",
+      "x-webhook-signature": signature,
+    },
+    payload,
+  });
+
+  assert.equal(res.statusCode, 402);
+  assert.equal(res.json().code, "PAYMENT_REQUIRED");
+  assert.equal(res.headers["x-subscription-status"], "past_due");
+});
+
 // ═════════════════════════════════════════════════════════════════
 // TASK-10: OpenTelemetry Distributed Tracing Tests
 // ═════════════════════════════════════════════════════════════════

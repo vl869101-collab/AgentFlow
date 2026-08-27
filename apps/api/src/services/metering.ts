@@ -322,21 +322,43 @@ export async function checkExecutionQuota(request: FastifyRequest, reply: Fastif
 
   const orgId = membership.orgId;
   const organization = await prisma.organization.findUnique({ where: { id: orgId } });
-  const limit = limitsForPlan(organization?.plan).executionsPerMonth;
+  const planTier = String(organization?.plan || "FREE").toUpperCase();
+  const limits = limitsForPlan(planTier);
+  const limit = limits.executionsPerMonth;
   const { monthStart, monthEnd } = getCurrentBillingMonthBounds();
 
-  // Check subscription status
+  reply.header("X-Plan-Tier", planTier);
+
+  // Check subscription status (Graceful Suspension)
   const subscription = await prisma.subscription.findFirst({
     where: { orgId },
     orderBy: { createdAt: "desc" },
   });
-  if (subscription && ["past_due", "unpaid"].includes(subscription.status)) {
+  if (subscription && ["past_due", "unpaid", "canceled"].includes(subscription.status)) {
     reply.header("X-Subscription-Status", subscription.status);
+    reply.header("X-Quota-Blocked", "true");
     return reply.code(402).send({
-      error: "Subscription payment is past due or unpaid. Please update payment method.",
+      error: `Subscription payment is ${subscription.status}. Workflows are suspended. Please update payment method.`,
       code: "PAYMENT_REQUIRED",
       status: subscription.status,
     });
+  }
+
+  // Check running concurrency limit
+  if (Number.isFinite(limits.concurrency)) {
+    const runningCount = await prisma.workflowExecution.count({
+      where: { orgId, status: "RUNNING" },
+    });
+    if (runningCount >= limits.concurrency) {
+      reply.header("X-Concurrency-Limit", String(limits.concurrency));
+      reply.header("X-Concurrency-Current", String(runningCount));
+      return reply.code(402).send({
+        error: `Concurrency limit reached (${limits.concurrency} concurrent executions for plan ${planTier})`,
+        code: "CONCURRENCY_LIMIT_EXCEEDED",
+        limit: limits.concurrency,
+        current: runningCount,
+      });
+    }
   }
 
   const records = await prisma.usageRecord.findMany({
@@ -361,7 +383,7 @@ export async function checkExecutionQuota(request: FastifyRequest, reply: Fastif
   reply.header("X-Quota-Reset", monthEnd.toISOString());
 
   if (!isUnlimited && used >= limit) {
-    return reply.code(429).send({
+    return reply.code(402).send({
       error: "Monthly execution quota exceeded",
       code: "QUOTA_EXCEEDED",
       used,
