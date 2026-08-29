@@ -674,6 +674,16 @@ export const store = {
       auditLogs.set(entry.id, entry);
       return entry;
     },
+    async update({ where, data }: { where: any; data: any }) {
+      const entry = find(auditLogs, where);
+      if (!entry) throw new Error("Record not found");
+      Object.assign(entry, data);
+      return entry;
+    },
+    async delete({ where }: { where: any }) {
+      auditLogs.delete(where.id);
+      return { count: 1 };
+    },
   },
 
   $queryRaw: async () => [{ ok: 1 }],
