@@ -211,10 +211,11 @@
         "tags": [
           "System"
         ],
-        "summary": "Liveness and dependency check",
+        "summary": "Advanced system health check",
+        "description": "Returns health status and latency metrics for dependencies (PostgreSQL, Redis, BullMQ workflow & DLQ workers, deadlock detection, and memory consumption).",
         "responses": {
           "200": {
-            "description": "Service health (503 when degraded)",
+            "description": "System health report",
             "content": {
               "application/json": {
                 "schema": {
@@ -224,7 +225,8 @@
                       "type": "string",
                       "enum": [
                         "ok",
-                        "degraded"
+                        "degraded",
+                        "error"
                       ]
                     },
                     "timestamp": {
@@ -234,12 +236,158 @@
                     "checks": {
                       "type": "object",
                       "additionalProperties": {
-                        "type": "string",
-                        "enum": [
-                          "ok",
-                          "error",
-                          "in-memory"
-                        ]
+                        "type": "string"
+                      }
+                    },
+                    "latencyMs": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    },
+                    "metrics": {
+                      "type": "object",
+                      "properties": {
+                        "memory": {
+                          "type": "object",
+                          "properties": {
+                            "rssMb": {
+                              "type": "number"
+                            },
+                            "heapUsedMb": {
+                              "type": "number"
+                            },
+                            "heapTotalMb": {
+                              "type": "number"
+                            },
+                            "externalMb": {
+                              "type": "number"
+                            },
+                            "systemFreeMb": {
+                              "type": "number"
+                            },
+                            "systemTotalMb": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "rssMb",
+                            "heapUsedMb",
+                            "heapTotalMb",
+                            "externalMb",
+                            "systemFreeMb",
+                            "systemTotalMb"
+                          ]
+                        },
+                        "deadlockCheck": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "deadlock_detected",
+                                "unsupported"
+                              ]
+                            },
+                            "activeLocksCount": {
+                              "type": "number"
+                            },
+                            "waitingQueriesCount": {
+                              "type": "number"
+                            },
+                            "checkedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "checkedAt"
+                          ]
+                        },
+                        "workers": {
+                          "type": "object",
+                          "properties": {
+                            "workflowQueue": {
+                              "type": "object",
+                              "properties": {
+                                "active": {
+                                  "type": "number"
+                                },
+                                "waiting": {
+                                  "type": "number"
+                                },
+                                "failed": {
+                                  "type": "number"
+                                },
+                                "paused": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "active",
+                                "waiting",
+                                "failed",
+                                "paused"
+                              ]
+                            },
+                            "dlqQueue": {
+                              "type": "object",
+                              "properties": {
+                                "waiting": {
+                                  "type": "number"
+                                },
+                                "failed": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "waiting",
+                                "failed"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "workflowQueue",
+                            "dlqQueue"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "memory"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "timestamp",
+                    "checks"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "One or more critical dependencies failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "error"
+                      ]
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "checks": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
                       }
                     }
                   },
@@ -1271,6 +1419,11 @@
                             "splitInBatches",
                             "set_fields",
                             "respond_webhook",
+                            "teams",
+                            "whatsapp",
+                            "whatsappTrigger",
+                            "googleCalendar",
+                            "googleDocs",
                             "evaluationTrigger",
                             "emailReadImap"
                           ]
@@ -2638,6 +2791,11 @@
                                   "splitInBatches",
                                   "set_fields",
                                   "respond_webhook",
+                                  "teams",
+                                  "whatsapp",
+                                  "whatsappTrigger",
+                                  "googleCalendar",
+                                  "googleDocs",
                                   "evaluationTrigger",
                                   "emailReadImap"
                                 ]

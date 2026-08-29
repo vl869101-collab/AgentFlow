@@ -15,7 +15,8 @@
     "db:seed": "pnpm --filter @agentflow/database db:seed",
     "db:studio": "pnpm --filter @agentflow/database db:studio",
     "load:test": "node scripts/load-test.mjs",
-    "load:test:k6": "k6 run scripts/k6-load-test.js"
+    "load:test:k6": "k6 run scripts/k6-load-test.js",
+    "sdk:generate": "pnpm --filter @agentflow/sdk generate"
   },
   "devDependencies": {
     "turbo": "^2.4.0",

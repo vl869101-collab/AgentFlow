@@ -27,3 +27,20 @@ export {
   type components as OpenApiComponents,
   type operations as OpenApiOperations,
 } from "./generated/openapi.js";
+export {
+  extractOperations,
+  generateTypeScriptSource,
+  generatePythonModels,
+  generatePythonClient,
+  schemaTypeToTs,
+  schemaTypeToPython,
+  toPythonIdentifier,
+  operationId,
+} from "./generator/index.js";
+export type {
+  OpenApiDocument,
+  ExtractedOperation,
+  JsonSchema,
+  Operation,
+} from "./generator/index.js";
+
