@@ -10,3 +10,44 @@ dist
 coverage
 
 .vercel
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Agent & AI tool runtime directories / state
+.overclock-app/
+.agents/
+.gemini/
+.abacusai/
+.commandcode/
+.claude-code-import/
+.claude/
+strix_runs/
+
+# Accidental worker/script artifacts & shell leakage
+$null
+cookies.txt
+apps/api/debug-*.ts
+preview-o*
+install.cmd
+gap-report.md
+agentflow-security-audit*.md
+.pnpm-approved-builds.json
+briefs/
+Vídeo/
+Video/
+0
+1)
+30
+82
+510
+is
+Estender
+node
+controller.abort()
+maxBytes)
+maxRetries)
+(typeof
+`CLOSED`)
+
+
