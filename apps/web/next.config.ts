@@ -38,6 +38,7 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
   transpilePackages: ["@agentflow/shared"],
+  compress: true,
 
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: false },
@@ -45,7 +46,48 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
 
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    return [
+      {
+        source: "/(.*)",
+        headers: securityHeaders,
+      },
+      {
+        source: "/_next/static/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/_next/image/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+      {
+        source: "/fonts/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/static/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+    ];
   },
 
   // Turbopack workspace root configuration

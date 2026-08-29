@@ -1,8 +1,11 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-interface ApiOptions {
+export interface ApiOptions {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string>;
+  skipAuth?: boolean;
+  skipRefresh?: boolean;
 }
 
 export class ApiError extends Error {
@@ -12,28 +15,49 @@ export class ApiError extends Error {
   }
 }
 
-function getToken(): string | null {
+export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("agentflow_token");
+  try {
+    return localStorage.getItem("agentflow_token");
+  } catch {
+    return null;
+  }
 }
 
-function getRefreshToken(): string | null {
+export function getRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("agentflow_refresh_token");
+  try {
+    return localStorage.getItem("agentflow_refresh_token");
+  } catch {
+    return null;
+  }
 }
 
 export function setToken(token: string, refreshToken?: string) {
-  localStorage.setItem("agentflow_token", token);
-  if (refreshToken) localStorage.setItem("agentflow_refresh_token", refreshToken);
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem("agentflow_token", token);
+    if (refreshToken) localStorage.setItem("agentflow_refresh_token", refreshToken);
+  } catch {
+    // ignore storage write errors
+  }
 }
 
 export function clearToken() {
-  localStorage.removeItem("agentflow_token");
-  localStorage.removeItem("agentflow_refresh_token");
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem("agentflow_token");
+    localStorage.removeItem("agentflow_refresh_token");
+  } catch {
+    // ignore storage remove errors
+  }
 }
 
-let isRefreshing = false;
-let refreshPromise: Promise<string> | null = null;
+let activeRefreshPromise: Promise<string> | null = null;
+
+export function resetAuthLock(): void {
+  activeRefreshPromise = null;
+}
 
 async function parseErrorMessage(res: Response): Promise<string> {
   const text = await res.text().catch(() => "");
@@ -50,21 +74,27 @@ async function parseErrorMessage(res: Response): Promise<string> {
 
 // Auth endpoints must NOT go through the refresh-retry wrapper: a 401 from
 // /login means bad credentials, not an expired session.
-async function rawRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const { method = "GET", body } = options;
+export async function rawRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const { method = "GET", body, headers: customHeaders = {} } = options;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...customHeaders,
+  };
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 204) return undefined as T;
   if (!res.ok) throw new ApiError(res.status, await parseErrorMessage(res));
-  return res.json();
+  return (await res.json()) as T;
 }
 
-async function tryRefreshToken(): Promise<string> {
+async function executeRefreshToken(): Promise<string> {
   const refreshToken = getRefreshToken();
-  if (!refreshToken) throw new Error("No refresh token");
+  if (!refreshToken) {
+    throw new ApiError(401, "No refresh token available");
+  }
 
   const res = await fetch(`${API_BASE}/api/auth/refresh`, {
     method: "POST",
@@ -72,18 +102,67 @@ async function tryRefreshToken(): Promise<string> {
     body: JSON.stringify({ refreshToken }),
   });
 
-  if (!res.ok) throw new Error("Refresh failed");
+  if (!res.ok) {
+    const errorMsg = await parseErrorMessage(res);
+    throw new ApiError(res.status, errorMsg || "Failed to refresh token");
+  }
 
-  const data = await res.json();
+  const data = (await res.json()) as { token: string; refreshToken?: string };
+  if (!data || !data.token) {
+    throw new ApiError(500, "Invalid token refresh response");
+  }
+
   setToken(data.token, data.refreshToken);
   return data.token;
 }
 
+/**
+ * Concurrency-safe global token refresh interceptor.
+ * If multiple requests receive 401 concurrently, exactly one refresh request
+ * is dispatched and all waiting requests wait for and reuse the same fresh token.
+ */
+export async function refreshAuthToken(): Promise<string> {
+  if (activeRefreshPromise) {
+    return activeRefreshPromise;
+  }
+
+  activeRefreshPromise = (async () => {
+    try {
+      return await executeRefreshToken();
+    } catch (err) {
+      clearToken();
+      if (typeof window !== "undefined" && window.location && window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+      throw err instanceof ApiError ? err : new ApiError(401, "Session expired");
+    } finally {
+      activeRefreshPromise = null;
+    }
+  })();
+
+  return activeRefreshPromise;
+}
+
 async function requestWithRefresh<T>(path: string, options: ApiOptions = {}, attempt = 0): Promise<T> {
-  const { method = "GET", body } = options;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const {
+    method = "GET",
+    body,
+    headers: customHeaders = {},
+    skipAuth = false,
+    skipRefresh = false,
+  } = options;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...customHeaders,
+  };
+
+  if (!skipAuth) {
+    const token = getToken();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+  }
 
   const res = await fetch(`${API_BASE}${path}`, {
     method,
@@ -91,38 +170,36 @@ async function requestWithRefresh<T>(path: string, options: ApiOptions = {}, att
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  if (res.status === 401 && attempt === 0) {
+  if (res.status === 401 && !skipRefresh && attempt === 0) {
     try {
-      if (!isRefreshing) {
-        isRefreshing = true;
-        refreshPromise = tryRefreshToken();
-      }
-      const newToken = await refreshPromise;
+      const newToken = await refreshAuthToken();
       headers.Authorization = `Bearer ${newToken}`;
+
       const retryRes = await fetch(`${API_BASE}${path}`, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
       });
+
+      if (retryRes.status === 204) return undefined as T;
       if (!retryRes.ok) {
         throw new ApiError(retryRes.status, await parseErrorMessage(retryRes));
       }
-      return retryRes.json();
-    } catch {
-      clearToken();
-      if (typeof window !== "undefined") window.location.href = "/login";
+      return (await retryRes.json()) as T;
+    } catch (refreshErr) {
+      if (refreshErr instanceof ApiError) {
+        throw refreshErr;
+      }
       throw new ApiError(401, "Session expired");
-    } finally {
-      isRefreshing = false;
-      refreshPromise = null;
     }
   }
 
+  if (res.status === 204) return undefined as T;
   if (!res.ok) {
     throw new ApiError(res.status, await parseErrorMessage(res));
   }
 
-  return res.json();
+  return (await res.json()) as T;
 }
 
 export async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise<T> {
