@@ -1,6 +1,7 @@
 import { Queue, type Job } from "bullmq";
 import { getEnv } from "../lib/env.js";
 import { telemetry } from "../lib/otel.js";
+import { deadMansSwitch } from "./dead-mans-switch.js";
 
 let workflowQueue: Queue | undefined;
 let dlqQueue: Queue | undefined;
@@ -124,6 +125,13 @@ export async function sendToDLQ(executionId: string, error: string, metadata?: R
     metadata,
   };
   inMemoryIncidents.set(incidentId, incident);
+
+  // Check Dead Man's Switch and automatically trigger alerts on recurring failures
+  try {
+    await deadMansSwitch.recordFailureAndCheckAlert(incident);
+  } catch (alertErr) {
+    console.error("[DLQ] Error checking Dead Man's Switch alerts:", alertErr);
+  }
 
   const dlq = getDLQQueue();
   if (dlq) {

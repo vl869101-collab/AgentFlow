@@ -12,6 +12,7 @@ import {
   updateDLQIncidentStatus,
   type DLQIncidentRecord,
 } from "../services/queue.js";
+import { deadMansSwitch, type DeadMansSwitchConfig } from "../services/dead-mans-switch.js";
 
 export async function dlqRoutes(app: FastifyInstance) {
   // List failed jobs in Dead Letter Queue with filters & pagination
@@ -129,5 +130,51 @@ export async function dlqRoutes(app: FastifyInstance) {
   app.delete("/purge", async (_request: FastifyRequest, reply: FastifyReply) => {
     const purged = await purgeDLQ();
     return { ok: true, purged };
+  });
+
+  // Get Dead Man's Switch alert configuration
+  app.get("/alerts/config", async (_request: FastifyRequest, reply: FastifyReply) => {
+    return {
+      config: deadMansSwitch.getConfig(),
+    };
+  });
+
+  // Update Dead Man's Switch alert configuration
+  app.post("/alerts/config", async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = (request.body as Partial<DeadMansSwitchConfig>) ?? {};
+    deadMansSwitch.updateConfig(body);
+    return {
+      ok: true,
+      config: deadMansSwitch.getConfig(),
+    };
+  });
+
+  // Manually trigger a test alert via Dead Man's Switch
+  app.post("/alerts/test", async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = (request.body as { executionId?: string; error?: string }) ?? {};
+    const executionId = body.executionId || `test-exec-${Date.now()}`;
+    const errorMsg = body.error || "Manual Dead Man's Switch Test Alert";
+
+    const testIncident: DLQIncidentRecord = {
+      id: `test-inc-${Date.now()}`,
+      jobId: `test-job-${Date.now()}`,
+      executionId,
+      error: errorMsg,
+      timestamp: new Date().toISOString(),
+      severity: "HIGH",
+      status: "OPEN",
+    };
+
+    const discordPayload = deadMansSwitch.formatDiscordAlert(testIncident, 1);
+    const slackPayload = deadMansSwitch.formatSlackAlert(testIncident, 1);
+
+    return {
+      ok: true,
+      testIncident,
+      formattedAlerts: {
+        discord: discordPayload,
+        slack: slackPayload,
+      },
+    };
   });
 }

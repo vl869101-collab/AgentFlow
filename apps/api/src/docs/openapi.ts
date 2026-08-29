@@ -445,6 +445,64 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: "get",
+  path: "/health",
+  tags: ["System"],
+  summary: "Advanced system health check",
+  description:
+    "Returns health status and latency metrics for dependencies (PostgreSQL, Redis, BullMQ workflow & DLQ workers, deadlock detection, and memory consumption).",
+  responses: {
+    200: jsonResponse(
+      z.object({
+        status: z.enum(["ok", "degraded", "error"]),
+        timestamp: z.string().openapi({ format: "date-time" }),
+        checks: z.record(z.string()),
+        latencyMs: z.record(z.number()).optional(),
+        metrics: z
+          .object({
+            memory: z.object({
+              rssMb: z.number(),
+              heapUsedMb: z.number(),
+              heapTotalMb: z.number(),
+              externalMb: z.number(),
+              systemFreeMb: z.number(),
+              systemTotalMb: z.number(),
+            }),
+            deadlockCheck: z.object({
+              status: z.enum(["ok", "deadlock_detected", "unsupported"]),
+              activeLocksCount: z.number().optional(),
+              waitingQueriesCount: z.number().optional(),
+              checkedAt: z.string(),
+            }).optional(),
+            workers: z.object({
+              workflowQueue: z.object({
+                active: z.number(),
+                waiting: z.number(),
+                failed: z.number(),
+                paused: z.boolean(),
+              }),
+              dlqQueue: z.object({
+                waiting: z.number(),
+                failed: z.number(),
+              }),
+            }).optional(),
+          })
+          .optional(),
+      }),
+      "System health report"
+    ),
+    503: jsonResponse(
+      z.object({
+        status: z.literal("error"),
+        timestamp: z.string().openapi({ format: "date-time" }),
+        checks: z.record(z.string()),
+      }),
+      "One or more critical dependencies failed"
+    ),
+  },
+});
+
 // ═══════════════════════════════════════════
 // Paths — Auth
 // ═══════════════════════════════════════════
