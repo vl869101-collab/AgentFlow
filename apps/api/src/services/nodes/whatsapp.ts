@@ -137,6 +137,156 @@ export async function executeWhatsApp(
   return { operation: validated.operation, delivered: true, to, ...data, timestamp: new Date().toISOString() };
 }
 
+export interface WhatsAppStatusEvent {
+  messageId: string;
+  status: "sent" | "delivered" | "read" | "failed" | string;
+  timestamp: string;
+  recipientId: string;
+  conversation?: {
+    id?: string;
+    origin?: { type?: string };
+    expirationTimestamp?: string;
+  };
+  pricing?: {
+    pricingModel?: string;
+    billable?: boolean;
+    category?: string;
+  };
+  errors?: Array<{ code: number; title: string; message?: string; errorData?: Record<string, unknown> }>;
+  raw?: Record<string, unknown>;
+}
+
+export interface WhatsAppInboundMessage {
+  messageId: string;
+  from: string;
+  timestamp: string;
+  type: "text" | "image" | "document" | "audio" | "video" | "interactive" | "location" | "reaction" | string;
+  text?: string;
+  buttonPayload?: { id?: string; title?: string };
+  media?: { id?: string; mimeType?: string; sha256?: string; caption?: string };
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
+  reaction?: { messageId: string; emoji: string };
+  raw?: Record<string, unknown>;
+}
+
+export interface ParsedWhatsAppWebhook {
+  entryType: "status_update" | "inbound_message" | "mixed" | "unknown";
+  statuses: WhatsAppStatusEvent[];
+  messages: WhatsAppInboundMessage[];
+  phoneNumberId?: string;
+  displayPhoneNumber?: string;
+  raw: Record<string, unknown>;
+}
+
+/**
+ * Parses and normalizes incoming Meta / WhatsApp Cloud API webhook payloads.
+ * Supports DLR (Delivery Status Reports: sent, delivered, read, failed) & inbound messages.
+ */
+export function parseWhatsAppWebhookPayload(body: unknown): ParsedWhatsAppWebhook {
+  const root = (body && typeof body === "object" ? body : {}) as Record<string, any>;
+  const entries = Array.isArray(root.entry) ? root.entry : [];
+  const statuses: WhatsAppStatusEvent[] = [];
+  const messages: WhatsAppInboundMessage[] = [];
+  let phoneNumberId: string | undefined;
+  let displayPhoneNumber: string | undefined;
+
+  for (const entry of entries) {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    for (const change of changes) {
+      if (change?.field !== "messages") continue;
+      const val = change?.value;
+      if (!val || typeof val !== "object") continue;
+
+      if (val.metadata) {
+        phoneNumberId = val.metadata.phone_number_id ? String(val.metadata.phone_number_id) : phoneNumberId;
+        displayPhoneNumber = val.metadata.display_phone_number ? String(val.metadata.display_phone_number) : displayPhoneNumber;
+      }
+
+      // 1. Process Status Events (DLR: sent, delivered, read, failed)
+      if (Array.isArray(val.statuses)) {
+        for (const st of val.statuses) {
+          if (!st || typeof st !== "object") continue;
+          const statusEvent: WhatsAppStatusEvent = {
+            messageId: String(st.id ?? ""),
+            status: String(st.status ?? "unknown").toLowerCase(),
+            timestamp: st.timestamp ? new Date(Number(st.timestamp) * 1000).toISOString() : new Date().toISOString(),
+            recipientId: String(st.recipient_id ?? ""),
+            conversation: st.conversation ? {
+              id: st.conversation.id ? String(st.conversation.id) : undefined,
+              origin: st.conversation.origin,
+              expirationTimestamp: st.conversation.expiration_timestamp,
+            } : undefined,
+            pricing: st.pricing ? {
+              pricingModel: st.pricing.pricing_model,
+              billable: Boolean(st.pricing.billable),
+              category: st.pricing.category,
+            } : undefined,
+            errors: Array.isArray(st.errors) ? st.errors.map((e: any) => ({
+              code: Number(e.code ?? 0),
+              title: String(e.title ?? ""),
+              message: e.message ? String(e.message) : undefined,
+              errorData: e.error_data,
+            })) : undefined,
+            raw: st,
+          };
+          statuses.push(statusEvent);
+        }
+      }
+
+      // 2. Process Inbound Messages
+      if (Array.isArray(val.messages)) {
+        for (const msg of val.messages) {
+          if (!msg || typeof msg !== "object") continue;
+          const type = String(msg.type ?? "text");
+          const inbound: WhatsAppInboundMessage = {
+            messageId: String(msg.id ?? ""),
+            from: String(msg.from ?? ""),
+            timestamp: msg.timestamp ? new Date(Number(msg.timestamp) * 1000).toISOString() : new Date().toISOString(),
+            type,
+            text: msg.text?.body ? String(msg.text.body) : undefined,
+            buttonPayload: msg.interactive?.button_reply ? {
+              id: msg.interactive.button_reply.id,
+              title: msg.interactive.button_reply.title,
+            } : undefined,
+            media: msg[type]?.id ? {
+              id: String(msg[type].id),
+              mimeType: msg[type].mime_type,
+              sha256: msg[type].sha256,
+              caption: msg[type].caption,
+            } : undefined,
+            location: msg.location ? {
+              latitude: Number(msg.location.latitude ?? 0),
+              longitude: Number(msg.location.longitude ?? 0),
+              name: msg.location.name,
+              address: msg.location.address,
+            } : undefined,
+            reaction: msg.reaction ? {
+              messageId: String(msg.reaction.message_id ?? ""),
+              emoji: String(msg.reaction.emoji ?? ""),
+            } : undefined,
+            raw: msg,
+          };
+          messages.push(inbound);
+        }
+      }
+    }
+  }
+
+  let entryType: ParsedWhatsAppWebhook["entryType"] = "unknown";
+  if (statuses.length > 0 && messages.length > 0) entryType = "mixed";
+  else if (statuses.length > 0) entryType = "status_update";
+  else if (messages.length > 0) entryType = "inbound_message";
+
+  return {
+    entryType,
+    statuses,
+    messages,
+    phoneNumberId,
+    displayPhoneNumber,
+    raw: root,
+  };
+}
+
 export class WhatsAppNodeHandler implements NodeHandler {
   type = "whatsapp";
   category = "communications";

@@ -107,6 +107,11 @@ const workflowNodeTypeValues = [
   "splitInBatches",
   "set_fields",
   "respond_webhook",
+  "teams",
+  "whatsapp",
+  "whatsappTrigger",
+  "googleCalendar",
+  "googleDocs",
   "evaluationTrigger",
   "emailReadImap",
 ] as const;
@@ -406,6 +411,11 @@ export const NODE_TYPES = [
   { type: "slackTrigger", label: "Slack Trigger", icon: "Zap", color: "#4a154b" },
   { type: "telegramTrigger", label: "Telegram Trigger", icon: "Zap", color: "#229ed9" },
   { type: "cronTrigger", label: "Cron Trigger", icon: "Clock", color: "#8b5cf6" },
+  { type: "teams", label: "Microsoft Teams", icon: "MessageSquare", color: "#6264a7" },
+  { type: "whatsapp", label: "WhatsApp Cloud API", icon: "MessageCircle", color: "#25d366" },
+  { type: "whatsappTrigger", label: "WhatsApp Trigger", icon: "Zap", color: "#25d366" },
+  { type: "googleCalendar", label: "Google Calendar", icon: "Calendar", color: "#4285f4" },
+  { type: "googleDocs", label: "Google Docs", icon: "FileText", color: "#4285f4" },
 ] as const;
 
 // ═══════════════════════════════════════════

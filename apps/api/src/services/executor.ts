@@ -567,7 +567,8 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
         input,
       });
     }
-    case "whatsapp": {
+    case "whatsapp":
+    case "whatsappTrigger": {
       const handler = new WhatsAppNodeHandler();
       return handler.execute({
         executionId: "",

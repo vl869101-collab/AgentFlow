@@ -8,7 +8,8 @@ import { runExecution } from "../services/executor.js";
 import { enqueueExecution } from "../services/queue.js";
 import { limitsForPlan } from "../lib/plans.js";
 import { checkAndSetWebhookIdempotency } from "../lib/redis.js";
-import { verifyWebhookRequest } from "../services/webhook-verifier.js";
+import { verifyWebhookRequest, verifyMetaSignature } from "../services/webhook-verifier.js";
+import { parseWhatsAppWebhookPayload } from "../services/nodes/whatsapp.js";
 import { telemetry } from "../lib/otel.js";
 
 function executeTelegramTrigger(_config: any, body: any) {
@@ -296,5 +297,87 @@ export async function webhookRoutes(app: FastifyInstance) {
 
     if (!(await enqueueExecution(execution.id))) void runExecution(execution.id).catch((error) => app.log.error(error, "Slack trigger failed"));
     return reply.status(200).send({ ok: true, executionId: execution.id });
+  });
+
+  // ── WhatsApp Cloud API Webhook Handshake (GET) & DLR / Inbound (POST) ──
+  app.get("/whatsapp/*", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const params = request.params as { "*"?: string; path?: string };
+    const path = params["*"] ?? params.path ?? "";
+    const query = (request.query ?? {}) as Record<string, string | undefined>;
+
+    const mode = query["hub.mode"] || query.mode;
+    const verifyToken = query["hub.verify_token"] || query.verify_token;
+    const challenge = query["hub.challenge"] || query.challenge;
+
+    const webhook = await (prisma.webhook as any).findFirst({
+      where: { path, active: true },
+    });
+
+    if (!webhook) {
+      return reply.code(404).send({ error: "WhatsApp webhook not found", code: "NOT_FOUND" });
+    }
+
+    // Meta Webhook Verification Handshake
+    if (mode === "subscribe") {
+      if (webhook.secret && verifyToken !== webhook.secret && verifyToken !== process.env.WHATSAPP_VERIFY_TOKEN) {
+        return reply.code(403).send({ error: "Verification token mismatch", code: "FORBIDDEN" });
+      }
+      return reply.code(200).type("text/plain").send(challenge ?? "");
+    }
+
+    return reply.code(400).send({ error: "Invalid hub.mode parameter", code: "INVALID_MODE" });
+  });
+
+  app.post("/whatsapp/*", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const params = request.params as { "*"?: string; path?: string };
+    const path = params["*"] ?? params.path ?? "";
+    const webhook = await (prisma.webhook as any).findFirst({
+      where: { path, active: true },
+      include: { workflow: true },
+    });
+    if (!webhook || !webhook.workflowId) {
+      return reply.code(404).send({ error: "WhatsApp webhook not found", code: "NOT_FOUND" });
+    }
+
+    const rawBody =
+      (request as typeof request & { rawBody?: string }).rawBody ??
+      (typeof request.body === "string" ? request.body : JSON.stringify(request.body ?? null));
+
+    // Verify Meta HMAC-SHA256 signature if secret exists
+    if (webhook.secret) {
+      const signatureHeader =
+        (request.headers["x-hub-signature-256"] as string | undefined) ||
+        (request.headers["x-hub-signature"] as string | undefined) ||
+        (request.headers["x-signature-256"] as string | undefined);
+
+      if (!signatureHeader || !verifyMetaSignature(webhook.secret, rawBody, signatureHeader)) {
+        return reply.code(401).send({ error: "Invalid WhatsApp / Meta webhook signature", code: "INVALID_SIGNATURE" });
+      }
+    }
+
+    // Parse Meta WhatsApp Cloud API payload (DLR statuses + inbound messages)
+    const parsedPayload = parseWhatsAppWebhookPayload(request.body);
+
+    const execution = await prisma.workflowExecution.create({
+      data: {
+        workflowId: webhook.workflowId,
+        orgId: webhook.orgId,
+        status: "PENDING",
+        trigger: "whatsappTrigger",
+        input: parsedPayload as any,
+      },
+    });
+
+    if (!(await enqueueExecution(execution.id))) {
+      void runExecution(execution.id).catch((error) => app.log.error(error, "WhatsApp trigger execution failed"));
+    }
+
+    return reply.status(200).send({
+      ok: true,
+      executionId: execution.id,
+      entryType: parsedPayload.entryType,
+      statusCount: parsedPayload.statuses.length,
+      messageCount: parsedPayload.messages.length,
+    });
   });
 }

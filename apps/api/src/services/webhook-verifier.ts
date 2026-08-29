@@ -30,7 +30,7 @@ export function safeCompare(expected: string | Buffer, actual: string | Buffer):
 }
 
 /**
- * GitHub HMAC-SHA256 signature verification.
+ * GitHub / Meta / WhatsApp Cloud API HMAC-SHA256 signature verification.
  * Header: X-Hub-Signature-256 (format: sha256=<hex>)
  */
 export function verifyGitHubSignature(
@@ -46,6 +46,18 @@ export function verifyGitHubSignature(
 
   const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
   return safeCompare(expected.toLowerCase(), normalized.toLowerCase());
+}
+
+/**
+ * Meta / WhatsApp Cloud API HMAC-SHA256 signature alias.
+ * Header: X-Hub-Signature-256 (format: sha256=<hex>)
+ */
+export function verifyMetaSignature(
+  appSecret: string,
+  rawBody: string,
+  signatureHeader?: string
+): boolean {
+  return verifyGitHubSignature(appSecret, rawBody, signatureHeader);
 }
 
 /**
@@ -202,7 +214,15 @@ export function verifyWebhookRequest(
 
   const normalizedProvider = provider.toLowerCase().trim();
 
-  // 1. GitHub
+  // 1. WhatsApp / Meta Cloud API (checked before GitHub if explicitly specified)
+  if (normalizedProvider === "whatsapp" || normalizedProvider === "meta") {
+    const sig = getHeader("x-hub-signature-256") || getHeader("x-hub-signature") || getHeader("x-signature-256");
+    if (!sig) return { valid: false, provider: "whatsapp", error: "Missing WhatsApp / Meta X-Hub-Signature-256 header", code: "MISSING_SIGNATURE" };
+    const valid = verifyMetaSignature(secret, rawBody, sig);
+    return { valid, provider: "whatsapp", code: valid ? undefined : "INVALID_SIGNATURE", error: valid ? undefined : "Invalid Meta/WhatsApp HMAC-SHA256 signature" };
+  }
+
+  // 2. GitHub
   if (normalizedProvider === "github" || getHeader("x-github-event") || getHeader("x-hub-signature-256")) {
     const sig = getHeader("x-hub-signature-256") || getHeader("x-hub-signature") || getHeader("x-signature-256");
     if (!sig) return { valid: false, provider: "github", error: "Missing GitHub signature header", code: "MISSING_SIGNATURE" };
@@ -210,7 +230,7 @@ export function verifyWebhookRequest(
     return { valid, provider: "github", code: valid ? undefined : "INVALID_SIGNATURE", error: valid ? undefined : "Invalid GitHub HMAC-SHA256 signature" };
   }
 
-  // 2. Shopify
+  // 3. Shopify
   if (normalizedProvider === "shopify" || getHeader("x-shopify-hmac-sha256") || getHeader("x-shopify-topic")) {
     const sig = getHeader("x-shopify-hmac-sha256");
     if (!sig) return { valid: false, provider: "shopify", error: "Missing Shopify signature header", code: "MISSING_SIGNATURE" };
@@ -218,7 +238,7 @@ export function verifyWebhookRequest(
     return { valid, provider: "shopify", code: valid ? undefined : "INVALID_SIGNATURE", error: valid ? undefined : "Invalid Shopify HMAC-SHA256 signature" };
   }
 
-  // 3. Stripe
+  // 4. Stripe
   if (normalizedProvider === "stripe" || getHeader("stripe-signature")) {
     const sig = getHeader("stripe-signature");
     if (!sig) return { valid: false, provider: "stripe", error: "Missing Stripe-Signature header", code: "MISSING_SIGNATURE" };
@@ -226,7 +246,7 @@ export function verifyWebhookRequest(
     return { valid: res.valid, provider: "stripe", error: res.error, code: res.code, timestamp: res.timestamp };
   }
 
-  // 4. Slack
+  // 5. Slack
   if (normalizedProvider === "slack" || getHeader("x-slack-signature")) {
     const sig = getHeader("x-slack-signature");
     const ts = getHeader("x-slack-request-timestamp");
