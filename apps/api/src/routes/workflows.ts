@@ -6,10 +6,19 @@ import { orgIdFromRequest, requireAuth, userIdFromRequest } from "../middleware/
 import { checkQuota, checkWorkflowQuota } from "../middleware/quota.js";
 import { createWorkflowExecution, runExecution } from "../services/executor.js";
 import { enqueueExecution } from "../services/queue.js";
-import { createWorkflowSchema, saveWorkflowCanvasSchema, updateWorkflowSchema, importN8nWorkflow } from "@agentflow/shared";
+import {
+  createWorkflowSchema,
+  importN8nWorkflow,
+  rollbackWorkflowSchema,
+  saveWorkflowCanvasSchema,
+  updateWorkflowSchema,
+  workflowDiffQuerySchema,
+  workflowVersionParamsSchema,
+} from "@agentflow/shared";
 import { limitsForPlan } from "../lib/plans.js";
 import { computeWorkflowDiff, type WorkflowSnapshot } from "../services/workflow-diff.js";
 import { cronScheduler } from "../services/cron-scheduler.js";
+import { recordAuditEvent } from "../services/audit-ledger.js";
 
 type CanvasValue = Record<string, any>;
 
@@ -106,14 +115,14 @@ function canonicalCanvas(body: any) {
 
 async function saveCanvas(workflowId: string, body: any) {
   const canvas = canonicalCanvas(body);
-  await prisma.$transaction(async (tx: any) => {
+  const version = await prisma.$transaction(async (tx: any) => {
     await tx.workflowEdge.deleteMany({ where: { workflowId } });
     await tx.workflowNode.deleteMany({ where: { workflowId } });
     if (canvas.nodes.length) await tx.workflowNode.createMany({ data: canvas.nodes.map((node) => ({ ...node, workflowId })) });
     if (canvas.edges.length) await tx.workflowEdge.createMany({ data: canvas.edges.map((edge) => ({ ...edge, workflowId })) });
 
     const lastVersion = await tx.workflowVersion.findFirst({ where: { workflowId }, orderBy: { version: "desc" } });
-    await tx.workflowVersion.create({
+    return tx.workflowVersion.create({
       data: {
         workflowId,
         version: (lastVersion?.version ?? 0) + 1,
@@ -123,7 +132,7 @@ async function saveCanvas(workflowId: string, body: any) {
   });
   void cronScheduler.syncWorkflow(workflowId);
   void cronScheduler.publishSyncEvent({ action: "SYNC", workflowId });
-  return canvas;
+  return { ...canvas, version: version.version, versionId: version.id };
 }
 
 export async function workflowRoutes(app: FastifyInstance) {
@@ -205,6 +214,16 @@ export async function workflowRoutes(app: FastifyInstance) {
     const workflow = await prisma.workflow.create({
       data: { name: body.name, description: body.description, ownerId: userId, orgId },
     });
+    await recordAuditEvent({
+      orgId,
+      userId,
+      action: "workflow.created",
+      resource: "workflow",
+      resourceId: workflow.id,
+      metadata: { name: workflow.name, status: workflow.status },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+    });
     return reply.status(201).send(workflow);
   });
 
@@ -218,6 +237,7 @@ export async function workflowRoutes(app: FastifyInstance) {
 
     const metadata = updateWorkflowSchema.parse(raw);
     if (Object.keys(metadata).length) await prisma.workflow.update({ where: { id }, data: metadata });
+    let savedVersion: any;
     if (Array.isArray(raw.nodes) || Array.isArray(raw.edges)) {
       const existing = await prisma.workflow.findFirst({
         where: { id, orgId },
@@ -227,8 +247,21 @@ export async function workflowRoutes(app: FastifyInstance) {
         nodes: (existing?.nodes ?? []).map((node: any) => ({ id: node.id, type: node.type, label: node.label, config: node.config, position: node.position })),
         edges: (existing?.edges ?? []).map((edge: any) => ({ id: edge.id, sourceNodeId: edge.sourceNodeId, targetNodeId: edge.targetNodeId, sourceHandle: edge.sourceHandle, targetHandle: edge.targetHandle, label: edge.label, condition: edge.condition })),
       };
-      await saveCanvas(id, { nodes: raw.nodes ?? existingCanvas.nodes, edges: raw.edges ?? existingCanvas.edges });
+      savedVersion = await saveCanvas(id, { nodes: raw.nodes ?? existingCanvas.nodes, edges: raw.edges ?? existingCanvas.edges });
     }
+    await recordAuditEvent({
+      orgId,
+      userId: userIdFromRequest(request),
+      action: savedVersion ? "workflow.version.created" : "workflow.updated",
+      resource: "workflow",
+      resourceId: id,
+      metadata: {
+        changedFields: Object.keys(metadata),
+        ...(savedVersion ? { version: savedVersion.version } : {}),
+      },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+    });
     const updated = await prisma.workflow.findFirst({ where: { id, orgId }, include: { nodes: true, edges: true } });
     void cronScheduler.syncWorkflow(id);
     void cronScheduler.publishSyncEvent({ action: "SYNC", workflowId: id });
@@ -243,8 +276,20 @@ export async function workflowRoutes(app: FastifyInstance) {
     const orgId = await activeOrgId(request);
     if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
 
+    const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
+    if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
     const result = await prisma.workflow.deleteMany({ where: { id, orgId } });
     if (result.count === 0) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+    await recordAuditEvent({
+      orgId,
+      userId: userIdFromRequest(request),
+      action: "workflow.deleted",
+      resource: "workflow",
+      resourceId: id,
+      metadata: { name: workflow.name },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+    });
     void cronScheduler.unregisterWorkflow(id);
     void cronScheduler.publishSyncEvent({ action: "UNREGISTER", workflowId: id });
     return { ok: true };
@@ -258,6 +303,16 @@ export async function workflowRoutes(app: FastifyInstance) {
     const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
     if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
     const canvas = await saveCanvas(id, request.body);
+    await recordAuditEvent({
+      orgId,
+      userId: userIdFromRequest(request),
+      action: "workflow.version.created",
+      resource: "workflow",
+      resourceId: id,
+      metadata: { version: canvas.version },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+    });
     return { ok: true, ...canvas };
   });
 
@@ -306,6 +361,17 @@ export async function workflowRoutes(app: FastifyInstance) {
       await saveCanvas(workflow.id, { nodes: result.nodes, edges: result.edges });
     }
 
+    await recordAuditEvent({
+      orgId,
+      userId,
+      action: "workflow.imported",
+      resource: "workflow",
+      resourceId: workflow.id,
+      metadata: { source: "n8n", warnings: result.warnings.length },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+    });
+
     const created = await prisma.workflow.findFirst({
       where: { id: workflow.id, orgId },
       include: { nodes: true, edges: true },
@@ -337,6 +403,28 @@ export async function workflowRoutes(app: FastifyInstance) {
     }));
   });
 
+  // Fetch one immutable snapshot without requiring clients to download the
+  // complete history when opening a visual comparison.
+  app.get("/:id/versions/:version", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { version } = workflowVersionParamsSchema.parse(request.params);
+    const orgId = await activeOrgId(request);
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
+    if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+    const record = await prisma.workflowVersion.findFirst({ where: { workflowId: id, version } });
+    if (!record) return reply.code(404).send({ error: `Version ${version} not found for this workflow`, code: "NOT_FOUND" });
+
+    return {
+      id: record.id,
+      workflowId: id,
+      version: record.version,
+      createdAt: record.createdAt,
+      snapshot: typeof record.snapshot === "string" ? JSON.parse(record.snapshot) : record.snapshot,
+    };
+  });
+
   // Calculate semantic diff between two versions
   app.get("/:id/diff", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -346,25 +434,19 @@ export async function workflowRoutes(app: FastifyInstance) {
     const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
     if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
 
-    const query = (request.query as Record<string, string>) ?? {};
-    const fromVersionNum = parseInt(query.fromVersion ?? query.v1 ?? "1", 10);
-    const toVersionNum = parseInt(query.toVersion ?? query.v2 ?? "2", 10);
+    const { fromVersion: fromVersionNum, toVersion: toVersionNum } = workflowDiffQuerySchema.parse(request.query ?? {});
 
     const [v1Record, v2Record] = await Promise.all([
       prisma.workflowVersion.findFirst({ where: { workflowId: id, version: fromVersionNum } }),
       prisma.workflowVersion.findFirst({ where: { workflowId: id, version: toVersionNum } }),
     ]);
 
-    if (!v1Record && !v2Record) {
+    if (!v1Record || !v2Record) {
       return reply.code(404).send({ error: "Specified workflow versions not found", code: "NOT_FOUND" });
     }
 
-    const v1Snapshot: WorkflowSnapshot = v1Record
-      ? (typeof v1Record.snapshot === "string" ? JSON.parse(v1Record.snapshot) : v1Record.snapshot)
-      : {};
-    const v2Snapshot: WorkflowSnapshot = v2Record
-      ? (typeof v2Record.snapshot === "string" ? JSON.parse(v2Record.snapshot) : v2Record.snapshot)
-      : {};
+    const v1Snapshot: WorkflowSnapshot = typeof v1Record.snapshot === "string" ? JSON.parse(v1Record.snapshot) : v1Record.snapshot;
+    const v2Snapshot: WorkflowSnapshot = typeof v2Record.snapshot === "string" ? JSON.parse(v2Record.snapshot) : v2Record.snapshot;
 
     const diff = computeWorkflowDiff(v1Snapshot, v2Snapshot);
     return {
@@ -384,12 +466,7 @@ export async function workflowRoutes(app: FastifyInstance) {
     const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
     if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
 
-    const body = (request.body as { targetVersion?: number; version?: number }) ?? {};
-    const targetVersionNum = body.targetVersion ?? body.version;
-
-    if (!targetVersionNum || typeof targetVersionNum !== "number") {
-      return reply.code(400).send({ error: "targetVersion (number) is required", code: "INVALID_INPUT" });
-    }
+    const { targetVersion: targetVersionNum } = rollbackWorkflowSchema.parse(request.body ?? {});
 
     const targetVersion = await prisma.workflowVersion.findFirst({
       where: { workflowId: id, version: targetVersionNum },
@@ -400,7 +477,18 @@ export async function workflowRoutes(app: FastifyInstance) {
     }
 
     const snapshot = typeof targetVersion.snapshot === "string" ? JSON.parse(targetVersion.snapshot) : targetVersion.snapshot;
-    await saveCanvas(id, snapshot);
+    const restored = await saveCanvas(id, snapshot);
+
+    await recordAuditEvent({
+      orgId,
+      userId: userIdFromRequest(request),
+      action: "workflow.rolled_back",
+      resource: "workflow",
+      resourceId: id,
+      metadata: { fromVersion: restored.version - 1, targetVersion: targetVersionNum, newVersion: restored.version },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+    });
 
     const updated = await prisma.workflow.findFirst({
       where: { id, orgId },

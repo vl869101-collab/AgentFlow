@@ -1,33 +1,37 @@
-import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem } from "./types.js";
-import { assertSafeUrl } from "../../lib/ssrf.js";
-import { decryptCredential } from "../../lib/crypto.js";
-import { prisma } from "../../lib/prisma.js";
+import { z } from "zod";
+import { safeFetch } from "../../lib/ssrf.js";
+import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem, wrapItems } from "./types.js";
+import { isNodeMockEnabled, mergeNodeInput, resolveVaultOAuthCredential } from "./oauth.js";
 
-export interface AdaptiveCardPayload {
-  type: "AdaptiveCard";
-  version: "1.5" | string;
-  $schema?: string;
-  body?: Array<Record<string, unknown>>;
-  actions?: Array<Record<string, unknown>>;
-  fallbackText?: string;
-  [key: string]: unknown;
-}
+const AdaptiveCardSchema = z.object({
+  type: z.literal("AdaptiveCard").default("AdaptiveCard"),
+  version: z.string().min(1).default("1.5"),
+  $schema: z.string().url().optional(),
+  body: z.array(z.record(z.unknown())).optional(),
+  actions: z.array(z.record(z.unknown())).optional(),
+  fallbackText: z.string().optional(),
+}).passthrough();
 
-export interface TeamsMessagePayload {
-  operation?: "sendMessage" | "sendAdaptiveCard" | "postWebhook" | "createChannelMessage" | "sendMention";
-  webhookUrl?: string;
-  channelId?: string;
-  teamId?: string;
-  message?: string;
-  text?: string;
-  title?: string;
-  themeColor?: string;
-  adaptiveCard?: AdaptiveCardPayload;
-  mentions?: Array<{ name: string; id: string; email?: string }>;
-  credentialId?: string;
-  mock?: boolean;
-  [key: string]: unknown;
-}
+export const TeamsInputSchema = z.object({
+  operation: z.enum(["sendMessage", "sendAdaptiveCard", "postWebhook", "createChannelMessage", "sendMention"]).default("sendMessage"),
+  webhookUrl: z.string().url().optional(),
+  channelId: z.string().min(1).optional(),
+  teamId: z.string().min(1).optional(),
+  message: z.string().optional(),
+  text: z.string().optional(),
+  title: z.string().optional(),
+  themeColor: z.string().regex(/^[0-9a-fA-F]{6}$/).optional(),
+  adaptiveCard: AdaptiveCardSchema.optional(),
+  facts: z.array(z.object({ title: z.string(), value: z.string() })).optional(),
+  buttons: z.array(z.object({ title: z.string().min(1), url: z.string().url().optional(), actionType: z.string().optional() })).optional(),
+  mentions: z.array(z.object({ name: z.string().min(1), id: z.string().min(1), email: z.string().email().optional() })).max(20).optional(),
+  credentialId: z.string().min(1).optional(),
+  mock: z.boolean().optional(),
+}).passthrough();
+
+export type TeamsInput = z.infer<typeof TeamsInputSchema>;
+export type AdaptiveCardPayload = z.infer<typeof AdaptiveCardSchema>;
+export type TeamsMessagePayload = TeamsInput;
 
 export function buildAdaptiveCard(options: {
   title?: string;
@@ -36,159 +40,102 @@ export function buildAdaptiveCard(options: {
   buttons?: Array<{ title: string; url?: string; actionType?: string }>;
 }): AdaptiveCardPayload {
   const body: Array<Record<string, unknown>> = [];
-
-  if (options.title) {
-    body.push({
-      type: "TextBlock",
-      size: "Medium",
-      weight: "Bolder",
-      text: options.title,
-      wrap: true,
-    });
-  }
-
-  if (options.text) {
-    body.push({
-      type: "TextBlock",
-      text: options.text,
-      wrap: true,
-    });
-  }
-
-  if (options.facts && options.facts.length > 0) {
-    body.push({
-      type: "FactSet",
-      facts: options.facts.map((f) => ({ title: f.title, value: f.value })),
-    });
-  }
-
-  const actions = (options.buttons ?? []).map((b) => ({
-    type: b.url ? "Action.OpenUrl" : "Action.Submit",
-    title: b.title,
-    ...(b.url ? { url: b.url } : {}),
+  if (options.title) body.push({ type: "TextBlock", size: "Medium", weight: "Bolder", text: options.title, wrap: true });
+  if (options.text) body.push({ type: "TextBlock", text: options.text, wrap: true });
+  if (options.facts?.length) body.push({ type: "FactSet", facts: options.facts });
+  const actions = (options.buttons ?? []).map((button) => ({
+    type: button.url ? "Action.OpenUrl" : button.actionType ?? "Action.Submit",
+    title: button.title,
+    ...(button.url ? { url: button.url } : {}),
   }));
-
   return {
     type: "AdaptiveCard",
     version: "1.5",
-    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
     body,
-    actions: actions.length > 0 ? actions : undefined,
+    ...(actions.length ? { actions } : {}),
   };
 }
 
-export async function executeTeams(
-  config: TeamsMessagePayload,
-  input: unknown = {},
-  orgId: string = ""
-): Promise<Record<string, unknown>> {
-  const operation = config.operation ?? "sendMessage";
-  const messageText = String(config.message ?? config.text ?? (input as any)?.message ?? (input as any)?.text ?? "");
-  const isMock =
-    config.mock === true ||
-    process.env.MOCK_SERVICES === "true" ||
-    process.env.EXEC_MOCK === "true" ||
-    process.env.NODE_ENV === "test";
-
-  // 1. Resolve Adaptive Card if operation is sendAdaptiveCard or card is provided
-  let card: AdaptiveCardPayload | undefined = config.adaptiveCard;
-  if (!card && operation === "sendAdaptiveCard") {
-    card = buildAdaptiveCard({
-      title: String(config.title ?? "AgentFlow Notification"),
-      text: messageText,
-      facts: Array.isArray(config.facts) ? (config.facts as any) : undefined,
-      buttons: Array.isArray(config.buttons) ? (config.buttons as any) : undefined,
-    });
-  }
-
-  if (card && (!card.type || !card.version)) {
-    card = {
-      $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-      ...card,
-      type: card.type || "AdaptiveCard",
-      version: card.version || "1.5",
-    };
-  }
-
-  // 2. Resolve target recipient / webhook URL
-  let webhookUrl = config.webhookUrl;
-  let token = "";
-
-  if (config.credentialId && orgId) {
-    try {
-      const cred = await prisma.credential.findFirst({
-        where: { id: config.credentialId, orgId },
-      });
-      if (cred) {
-        const data = JSON.parse(decryptCredential(cred.data));
-        webhookUrl = data.webhookUrl ?? webhookUrl;
-        token = data.accessToken ?? data.token ?? data.botToken ?? "";
-      }
-    } catch {
-      // ignore in test / offline mode
-    }
-  }
-
-  // 3. Execution (Mock or Live)
-  if (isMock || !webhookUrl) {
-    return {
-      operation,
-      delivered: true,
-      recipient: config.channelId ?? webhookUrl ?? "teams_default",
-      message: messageText,
-      adaptiveCard: card ?? null,
-      messageId: `teams_msg_${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      mock: true,
-    };
-  }
-
-  // Live incoming webhook or Graph API request
-  assertSafeUrl(webhookUrl);
-  let payload: Record<string, unknown>;
-
+function graphMessagePayload(input: TeamsInput, text: string, card?: AdaptiveCardPayload): Record<string, unknown> {
   if (card) {
-    payload = {
-      type: "message",
-      attachments: [
-        {
-          contentType: "application/vnd.microsoft.card.adaptive",
-          contentUrl: null,
-          content: card,
-        },
-      ],
-    };
-  } else {
-    payload = {
-      text: messageText,
-      title: config.title,
-      themeColor: config.themeColor ?? "0076D7",
+    return {
+      body: { contentType: "html", content: text || card.fallbackText || "Adaptive Card" },
+      attachments: [{ id: "1", contentType: "application/vnd.microsoft.card.adaptive", content: JSON.stringify(card) }],
     };
   }
+  if (input.operation === "sendMention" && input.mentions?.length) {
+    const mentions = input.mentions.map((mention, index) => ({
+      id: index,
+      mentionText: mention.name,
+      mentioned: { user: { id: mention.id, displayName: mention.name } },
+    }));
+    const tags = input.mentions.map((mention, index) => `<at id="${index}">${mention.name}</at>`).join(" ");
+    return { body: { contentType: "html", content: `${tags} ${text}`.trim() }, mentions };
+  }
+  return { body: { contentType: "html", content: text } };
+}
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+export async function executeTeams(
+  config: Record<string, unknown>,
+  input: unknown = {},
+  orgId = "",
+): Promise<Record<string, unknown>> {
+  const validated = TeamsInputSchema.parse(mergeNodeInput(config, input));
+  const operation = validated.operation;
+  const message = validated.message ?? validated.text ?? "";
+  const card = validated.adaptiveCard ?? (operation === "sendAdaptiveCard"
+    ? buildAdaptiveCard({ title: validated.title ?? "AgentFlow Notification", text: message, facts: validated.facts, buttons: validated.buttons })
+    : undefined);
+
+  if (isNodeMockEnabled(validated.mock)) {
+    return mockTeamsResult(validated, message, card);
   }
 
-  const res = await fetch(webhookUrl, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
+  if (validated.webhookUrl && (operation === "postWebhook" || !validated.channelId)) {
+    const payload = card
+      ? { type: "message", attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: card }] }
+      : { text: message, title: validated.title, themeColor: validated.themeColor ?? "0076D7" };
+    const response = await safeFetch(validated.webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`Microsoft Teams webhook error (${response.status}): ${await response.text()}`);
+    return { operation, delivered: true, recipient: validated.webhookUrl, message, adaptiveCard: card ?? null, status: "DELIVERED" };
+  }
+
+  const oauth = await resolveVaultOAuthCredential({
+    credentialId: validated.credentialId,
+    orgId,
+    providers: ["microsoft", "microsoft_graph", "microsoft_teams", "office365", "azure_ad"],
   });
-
-  if (!res.ok) {
-    throw new Error(`Microsoft Teams API error (${res.status}): ${await res.text()}`);
+  if (!oauth) return mockTeamsResult(validated, message, card);
+  if (!validated.teamId || !validated.channelId) {
+    throw new Error("teamId and channelId are required for Microsoft Graph Teams operations");
   }
 
+  const endpoint = `https://graph.microsoft.com/v1.0/teams/${encodeURIComponent(validated.teamId)}/channels/${encodeURIComponent(validated.channelId)}/messages`;
+  const response = await safeFetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `${oauth.tokenType} ${oauth.accessToken}` },
+    body: JSON.stringify(graphMessagePayload(validated, message, card)),
+  });
+  if (!response.ok) throw new Error(`Microsoft Graph Teams API error (${response.status}): ${await response.text()}`);
+  const data = await response.json() as Record<string, unknown>;
+  return { operation, delivered: true, recipient: validated.channelId, message, adaptiveCard: card ?? null, ...data };
+}
+
+function mockTeamsResult(input: TeamsInput, message: string, card?: AdaptiveCardPayload): Record<string, unknown> {
   return {
-    operation,
+    operation: input.operation,
     delivered: true,
-    recipient: config.channelId ?? webhookUrl,
-    message: messageText,
+    recipient: input.channelId ?? input.webhookUrl ?? "teams_default",
+    message,
     adaptiveCard: card ?? null,
-    status: "DELIVERED",
+    messageId: `teams_msg_${Date.now()}`,
     timestamp: new Date().toISOString(),
+    mock: true,
   };
 }
 
@@ -197,21 +144,10 @@ export class TeamsNodeHandler implements NodeHandler {
   category = "communications";
 
   async execute(ctx: NodeExecutionContext): Promise<NodeExecutionResult> {
-    const config = (ctx.nodeConfig ?? {}) as TeamsMessagePayload;
-    const input = ctx.input;
-
-    // Handle n8n batch array input or single item
-    const items = Array.isArray(input) ? input : [input];
     const results: NodeItem[] = [];
-    const logs: string[] = [];
-
-    for (const item of items) {
-      const itemData = (typeof item === "object" && item !== null && "json" in item ? (item as NodeItem).json : item) ?? {};
-      const res = await executeTeams(config, itemData, ctx.orgId);
-      results.push({ json: res });
-      logs.push(`Teams node: executed ${config.operation ?? "sendMessage"} successfully`);
+    for (const item of wrapItems(ctx.input)) {
+      results.push({ json: await executeTeams(ctx.nodeConfig, item.json, ctx.orgId) });
     }
-
-    return { items: results, logs };
+    return { items: results, logs: [`Teams node: processed ${results.length} item(s)`] };
   }
 }

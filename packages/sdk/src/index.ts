@@ -17,3 +17,13 @@ export { ExecutionsApi } from "./executions.js";
 export { CredentialsApi } from "./credentials.js";
 export { ApprovalsApi } from "./approvals.js";
 export { McpApi, type McpResource, type McpPrompt } from "./mcp.js";
+export {
+  componentSchemas,
+  operationManifest,
+  operationSchemas,
+  type OpenApiOperationId,
+  type OperationRequest,
+  type OperationResponse,
+  type components as OpenApiComponents,
+  type operations as OpenApiOperations,
+} from "./generated/openapi.js";

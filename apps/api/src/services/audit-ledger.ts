@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { auditEventSchema } from "@agentflow/shared";
 import { prisma } from "../lib/prisma.js";
 
 export const GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -20,7 +21,7 @@ export interface AuditLogRecord {
   orgId: string;
   userId: string;
   action: string;
-  resource: string | null;
+  resource: string;
   resourceId: string | null;
   metadata: any;
   hash: string;
@@ -28,6 +29,53 @@ export interface AuditLogRecord {
   ip?: string | null;
   userAgent?: string | null;
   createdAt: string | Date;
+}
+
+// ponytail: per-org process lock; use a database advisory lock when API replicas share one ledger.
+const ledgerTails = new Map<string, Promise<void>>();
+
+async function withOrganizationLedgerLock<T>(orgId: string, operation: () => Promise<T>): Promise<T> {
+  const previous = ledgerTails.get(orgId) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const tail = previous.catch(() => undefined).then(() => gate);
+  ledgerTails.set(orgId, tail);
+
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (ledgerTails.get(orgId) === tail) ledgerTails.delete(orgId);
+  }
+}
+
+function metadataWithoutLedgerFields(metadata?: Record<string, any> | null): Record<string, any> | null {
+  if (!metadata || Object.keys(metadata).length === 0) return null;
+  const clean = { ...metadata };
+  delete clean.__hash;
+  delete clean.__previousHash;
+  delete clean.hash;
+  delete clean.previousHash;
+  return Object.keys(clean).length > 0 ? clean : null;
+}
+
+function auditLogRecord(entry: any): AuditLogRecord {
+  const metadata = typeof entry.metadata === "string" ? JSON.parse(entry.metadata) : entry.metadata;
+  return {
+    id: entry.id,
+    orgId: entry.orgId,
+    userId: entry.userId,
+    action: entry.action,
+    resource: entry.resource ?? "system",
+    resourceId: entry.resourceId,
+    metadata,
+    hash: metadata?.__hash || metadata?.hash || entry.hash || GENESIS_HASH,
+    previousHash: metadata?.__previousHash || metadata?.previousHash || entry.previousHash || GENESIS_HASH,
+    ip: entry.ip,
+    userAgent: entry.userAgent,
+    createdAt: entry.createdAt,
+  };
 }
 
 export interface LedgerIntegrityResult {
@@ -58,9 +106,9 @@ export function canonicalJson(obj: any): string {
   if (obj === null || obj === undefined) return "";
   if (typeof obj !== "object") return JSON.stringify(obj);
   if (Array.isArray(obj)) {
-    return `[${obj.map(canonicalJson).join(",")}]`;
+    return `[${obj.map((value) => value === undefined ? "null" : canonicalJson(value)).join(",")}]`;
   }
-  const keys = Object.keys(obj).sort();
+  const keys = Object.keys(obj).filter((key) => obj[key] !== undefined).sort();
   const pairs = keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`);
   return `{${pairs.join(",")}}`;
 }
@@ -96,74 +144,68 @@ export function computeAuditHash(params: {
  * Records a new immutable audit ledger entry into the cryptographic hash chain.
  */
 export async function recordAuditEvent(input: AuditEventInput): Promise<AuditLogRecord> {
-  const timestamp = input.timestamp || new Date().toISOString();
-  const action = input.action;
-  const resource = input.resource || null;
-  const resourceId = input.resourceId || null;
-  const userId = input.userId || "system";
-  const orgId = input.orgId;
-  const metadata = input.metadata && Object.keys(input.metadata).length > 0 ? input.metadata : null;
+  if (!input.orgId) throw new Error("orgId is required for audit events");
+  const parsed = auditEventSchema.parse(input);
 
-  // Find latest entry for org to obtain previousHash
-  const latestEntry = await prisma.auditLog.findFirst({
-    where: { orgId },
-    orderBy: { createdAt: "desc" },
-  });
-
-  let previousHash = GENESIS_HASH;
-  if (latestEntry) {
-    const meta = typeof latestEntry.metadata === "string"
-      ? JSON.parse(latestEntry.metadata)
-      : (latestEntry.metadata as Record<string, any> | undefined);
-    
-    previousHash = meta?.__hash || meta?.hash || (latestEntry as any).hash || GENESIS_HASH;
-  }
-
-  const hash = computeAuditHash({
-    previousHash,
-    orgId,
-    userId,
-    action,
-    resource,
-    resourceId,
-    metadata,
-    timestamp,
-  });
-
-  const metadataWithHash = {
-    ...(metadata || {}),
-    __hash: hash,
-    __previousHash: previousHash,
-  };
-
-  const created = await prisma.auditLog.create({
-    data: {
-      action,
+  return withOrganizationLedgerLock(input.orgId, async () => {
+    const latestEntry = await prisma.auditLog.findFirst({
+      where: { orgId: input.orgId },
+      orderBy: { createdAt: "desc" },
+    });
+    const latestRecord = latestEntry ? auditLogRecord(latestEntry) : undefined;
+    const requestedTimestamp = new Date(input.timestamp ?? Date.now());
+    if (Number.isNaN(requestedTimestamp.getTime())) throw new Error("Invalid audit event timestamp");
+    const latestTimestamp = latestEntry ? new Date(latestEntry.createdAt).getTime() : Number.NEGATIVE_INFINITY;
+    const timestamp = new Date(Math.max(requestedTimestamp.getTime(), latestTimestamp + 1)).toISOString();
+    const previousHash = latestRecord?.hash ?? GENESIS_HASH;
+    const resource = parsed.resource ?? "system";
+    const resourceId = parsed.resourceId ?? null;
+    const userId = input.userId || "system";
+    const metadata = metadataWithoutLedgerFields(parsed.metadata);
+    const hash = computeAuditHash({
+      previousHash,
+      orgId: input.orgId,
+      userId,
+      action: parsed.action,
       resource,
       resourceId,
-      metadata: metadataWithHash,
-      ip: input.ip,
-      userAgent: input.userAgent,
-      userId,
-      orgId,
-      createdAt: new Date(timestamp),
-    },
-  });
+      metadata,
+      timestamp,
+    });
 
-  return {
-    id: created.id,
-    orgId: created.orgId,
-    userId: created.userId,
-    action: created.action,
-    resource: created.resource,
-    resourceId: created.resourceId,
-    metadata: created.metadata,
-    hash,
-    previousHash,
-    ip: created.ip,
-    userAgent: created.userAgent,
-    createdAt: created.createdAt,
-  };
+    const created = await prisma.auditLog.create({
+      data: {
+        action: parsed.action,
+        resource,
+        resourceId,
+        metadata: { ...(metadata || {}), __hash: hash, __previousHash: previousHash },
+        ip: input.ip,
+        userAgent: input.userAgent,
+        userId,
+        orgId: input.orgId,
+        createdAt: new Date(timestamp),
+      },
+    });
+
+    return auditLogRecord(created);
+  });
+}
+
+export async function listAuditLedger(
+  orgId: string,
+  options: { action?: string; resource?: string; skip?: number; take?: number } = {},
+): Promise<AuditLogRecord[]> {
+  const entries = await prisma.auditLog.findMany({
+    where: {
+      orgId,
+      ...(options.action ? { action: options.action } : {}),
+      ...(options.resource ? { resource: options.resource } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    skip: options.skip,
+    take: options.take,
+  });
+  return entries.map(auditLogRecord);
 }
 
 /**
@@ -219,14 +261,7 @@ export async function verifyAuditLedgerIntegrity(orgId: string): Promise<LedgerI
     const timestamp = entry.createdAt instanceof Date ? entry.createdAt.toISOString() : String(entry.createdAt);
     
     // Clean metadata excluding internal hash fields
-    const cleanMeta = meta ? { ...meta } : null;
-    if (cleanMeta) {
-      delete cleanMeta.__hash;
-      delete cleanMeta.__previousHash;
-      delete cleanMeta.hash;
-      delete cleanMeta.previousHash;
-    }
-    const metadataToHash = cleanMeta && Object.keys(cleanMeta).length > 0 ? cleanMeta : null;
+    const metadataToHash = metadataWithoutLedgerFields(meta);
 
     const recomputedHash = computeAuditHash({
       previousHash: storedPreviousHash,
@@ -283,23 +318,7 @@ export async function exportSignedAuditReport(
     orderBy: { createdAt: "asc" },
   });
 
-  const formattedEntries: AuditLogRecord[] = entries.map((e: any) => {
-    const meta = typeof e.metadata === "string" ? JSON.parse(e.metadata) : e.metadata;
-    return {
-      id: e.id,
-      orgId: e.orgId,
-      userId: e.userId,
-      action: e.action,
-      resource: e.resource,
-      resourceId: e.resourceId,
-      metadata: meta,
-      hash: meta?.__hash || meta?.hash || GENESIS_HASH,
-      previousHash: meta?.__previousHash || meta?.previousHash || GENESIS_HASH,
-      ip: e.ip,
-      userAgent: e.userAgent,
-      createdAt: e.createdAt,
-    };
-  });
+  const formattedEntries: AuditLogRecord[] = entries.map(auditLogRecord);
 
   const generatedAt = new Date().toISOString();
   const signingSecret = process.env.JWT_SECRET || process.env.CREDENTIAL_ENCRYPTION_KEY || "agentflow-audit-secret";

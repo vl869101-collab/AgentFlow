@@ -1,20 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
+import { auditEventSchema, auditExportQuerySchema, auditListQuerySchema } from "@agentflow/shared";
 import { prisma } from "../lib/prisma.js";
 import { orgIdFromRequest, requireAuth, userIdFromRequest } from "../middleware/auth.js";
 import { parsePagination } from "../lib/pagination.js";
 import {
   exportSignedAuditReport,
+  listAuditLedger,
   recordAuditEvent,
   verifyAuditLedgerIntegrity,
 } from "../services/audit-ledger.js";
-
-const recordEventSchema = z.object({
-  action: z.string().min(1),
-  resource: z.string().optional(),
-  resourceId: z.string().optional(),
-  metadata: z.record(z.any()).optional(),
-});
 
 export async function auditRoutes(app: FastifyInstance) {
   async function resolveOrgId(request: Parameters<typeof userIdFromRequest>[0]): Promise<string | undefined> {
@@ -37,18 +31,8 @@ export async function auditRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });
       }
 
-      const query = request.query as { action?: string; resource?: string };
-      const where: Record<string, any> = { orgId };
-      if (query.action) where.action = query.action;
-      if (query.resource) where.resource = query.resource;
-
-      const logs = await prisma.auditLog.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        ...parsePagination(request, reply),
-      });
-
-      return logs;
+      const query = auditListQuerySchema.parse(request.query ?? {});
+      return listAuditLedger(orgId, { ...query, ...parsePagination(request, reply) });
     }
   );
 
@@ -77,7 +61,7 @@ export async function auditRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });
       }
 
-      const query = request.query as { from?: string; to?: string };
+      const query = auditExportQuerySchema.parse(request.query ?? {});
       const from = query.from ? new Date(query.from) : undefined;
       const to = query.to ? new Date(query.to) : undefined;
 
@@ -97,7 +81,7 @@ export async function auditRoutes(app: FastifyInstance) {
       }
 
       const userId = userIdFromRequest(request);
-      const body = recordEventSchema.parse(request.body);
+      const body = auditEventSchema.parse(request.body);
 
       const entry = await recordAuditEvent({
         orgId,

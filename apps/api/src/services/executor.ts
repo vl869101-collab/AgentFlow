@@ -6,6 +6,7 @@ import { httpCircuitBreaker } from "../lib/circuit-breaker.js";
 import { applyHttpAuthentication, type HttpAuthConfig } from "../lib/http-auth.js";
 import { ensureFreshOAuth2Token } from "./vault/oauth-refresh.js";
 import { recordUsageEvent } from "./metering.js";
+import { recordAuditEvent } from "./audit-ledger.js";
 
 // Native handler (registered via the registry-pending process — Part 2)
 import { executeEvaluationTrigger } from "./nodes/evaluationTrigger.js";
@@ -683,6 +684,28 @@ async function updateExecution(id: string, data: JsonObject): Promise<ExecutionR
   return execution as ExecutionResult;
 }
 
+async function recordExecutionAudit(
+  execution: { id: string; orgId?: string; userId?: string | null; workflowId: string; trigger?: string },
+  action: string,
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
+  if (!execution.orgId) return;
+  await recordAuditEvent({
+    orgId: execution.orgId,
+    userId: execution.userId,
+    action,
+    resource: "execution",
+    resourceId: execution.id,
+    metadata: {
+      workflowId: execution.workflowId,
+      trigger: execution.trigger ?? "api",
+      ...metadata,
+    },
+  }).catch((error) => {
+    console.error(`[audit-ledger] Failed to append ${action} for execution ${execution.id}:`, error);
+  });
+}
+
 async function executeGraph(execution: any, workflow: any, parentSpan?: import("../lib/otel.js").Span): Promise<unknown> {
   const { nodes, edges } = workflowGraph(workflow);
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -947,7 +970,7 @@ export async function createWorkflowExecution(
   });
   if (!workflow) throw new Error("Workflow not found");
   if (getEnv().EXEC_CODE_DISABLED && containsCodeNode(workflow)) throw new CodeExecutionDisabledError();
-  return (await prisma.workflowExecution.create({
+  const created = (await prisma.workflowExecution.create({
     data: {
       workflowId,
       orgId: workflow.orgId,
@@ -958,6 +981,8 @@ export async function createWorkflowExecution(
       startedAt: new Date(),
     },
   })) as ExecutionResult;
+  await recordExecutionAudit(created as any, "execution.created", { status: "PENDING" });
+  return created;
 }
 
 export async function runExecution(
@@ -972,7 +997,11 @@ export async function runExecution(
     where: { id: execution.workflowId },
     include: { nodes: true, edges: true, versions: { orderBy: { version: "desc" }, take: 1 } },
   });
-  if (!workflow) return updateExecution(executionId, { status: "FAILED", error: "Workflow not found", finishedAt: new Date() });
+  if (!workflow) {
+    const failed = await updateExecution(executionId, { status: "FAILED", error: "Workflow not found", finishedAt: new Date() });
+    await recordExecutionAudit(failed as any, "execution.failed", { status: "FAILED", reason: "workflow_not_found" });
+    return failed;
+  }
 
   const parentContext = options.parentContext || telemetry.parseTraceParent(options.traceparent);
   const wfSpan = telemetry.startSpan(`workflow.execution ${workflow.name || workflow.id}`, {
@@ -986,6 +1015,7 @@ export async function runExecution(
 
   const startedAt = new Date(execution.startedAt ?? Date.now());
   await updateExecution(executionId, { status: "RUNNING" });
+  await recordExecutionAudit(execution, "execution.started", { status: "RUNNING" });
   try {
     const output = await withTimeout(executeGraph(execution, workflow, wfSpan), EXECUTION_TIMEOUT_MS, "Execution timed out");
     const duration = Date.now() - startedAt.getTime();
@@ -1017,12 +1047,14 @@ export async function runExecution(
       }).catch(() => {});
     }
 
-    return updateExecution(executionId, {
+    const completed = await updateExecution(executionId, {
       status: "SUCCESS",
       output: output === undefined ? null : output,
       finishedAt: new Date(),
       duration,
     });
+    await recordExecutionAudit(completed as any, "execution.succeeded", { status: "SUCCESS", duration });
+    return completed;
   } catch (error) {
     const duration = Date.now() - startedAt.getTime();
     const current = await prisma.workflowExecution.findUnique({ where: { id: executionId } });
@@ -1032,6 +1064,7 @@ export async function runExecution(
       wfSpan.end();
       telemetry.decActiveExecutions();
       telemetry.recordWorkflowExecution("CANCELLED", execution.trigger, execution.orgId, duration);
+      await recordExecutionAudit(current as any, "execution.cancelled", { status: "CANCELLED", duration });
       return current as ExecutionResult;
     }
     wfSpan.setAttribute("execution.status", "FAILED");
@@ -1069,6 +1102,7 @@ export async function runExecution(
       finishedAt: new Date(),
       duration,
     });
+    await recordExecutionAudit(failedExecution as any, "execution.failed", { status: "FAILED", duration });
 
     // Trigger errorWorkflow if configured in settings or version snapshot
     try {

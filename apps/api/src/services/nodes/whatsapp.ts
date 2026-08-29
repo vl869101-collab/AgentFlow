@@ -1,195 +1,140 @@
-import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem } from "./types.js";
-import { decryptCredential } from "../../lib/crypto.js";
-import { prisma } from "../../lib/prisma.js";
+import { z } from "zod";
+import { safeFetch } from "../../lib/ssrf.js";
+import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem, wrapItems } from "./types.js";
+import { isNodeMockEnabled, mergeNodeInput, resolveVaultOAuthCredential } from "./oauth.js";
 
-export interface WhatsAppTemplatePayload {
-  name: string;
-  language: { code: string };
-  components?: Array<{
-    type: "header" | "body" | "button";
-    sub_type?: string;
-    index?: number;
-    parameters?: Array<{
-      type: "text" | "currency" | "date_time" | "image" | "document" | "video";
-      text?: string;
-      [key: string]: unknown;
-    }>;
-  }>;
+const PhoneSchema = z.string().trim().regex(/^\+?[1-9]\d{7,14}$/, "WhatsApp recipient must be an E.164 phone number");
+const TemplateSchema = z.object({
+  name: z.string().min(1),
+  language: z.object({ code: z.string().min(2) }).default({ code: "en_US" }),
+  components: z.array(z.object({
+    type: z.enum(["header", "body", "button"]),
+    sub_type: z.string().optional(),
+    index: z.number().int().nonnegative().optional(),
+    parameters: z.array(z.object({
+      type: z.enum(["text", "currency", "date_time", "image", "document", "video"]),
+      text: z.string().optional(),
+    }).passthrough()).optional(),
+  })).optional(),
+});
+const MediaSchema = z.object({
+  type: z.enum(["image", "document", "audio", "video", "sticker"]),
+  link: z.string().url().optional(),
+  id: z.string().min(1).optional(),
+  caption: z.string().optional(),
+  filename: z.string().optional(),
+}).refine((media) => Boolean(media.link || media.id), { message: "WhatsApp media requires link or id" });
+
+export const WhatsAppInputSchema = z.object({
+  operation: z.enum(["sendMessage", "sendTemplate", "sendMedia", "sendInteractiveButtons", "sendLocation", "sendReaction"]).default("sendMessage"),
+  phoneNumberId: z.string().min(1).optional(),
+  to: PhoneSchema.optional(),
+  recipient: PhoneSchema.optional(),
+  message: z.string().optional(),
+  text: z.string().optional(),
+  previewUrl: z.boolean().optional().default(false),
+  template: TemplateSchema.optional(),
+  media: MediaSchema.optional(),
+  buttons: z.array(z.object({
+    type: z.literal("reply"),
+    reply: z.object({ id: z.string().min(1).max(256), title: z.string().min(1).max(20) }),
+  })).min(1).max(3).optional(),
+  location: z.object({
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    name: z.string().optional(),
+    address: z.string().optional(),
+  }).optional(),
+  reaction: z.object({ message_id: z.string().min(1), emoji: z.string().min(1).max(16) }).optional(),
+  credentialId: z.string().min(1).optional(),
+  mock: z.boolean().optional(),
+}).passthrough().superRefine((value, ctx) => {
+  if (!value.to && !value.recipient) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["to"], message: "WhatsApp recipient is required" });
+  if (value.operation === "sendTemplate" && !value.template) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["template"], message: "template is required" });
+  if (value.operation === "sendMedia" && !value.media) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["media"], message: "media is required" });
+  if (value.operation === "sendInteractiveButtons" && !value.buttons) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["buttons"], message: "buttons are required" });
+  if (value.operation === "sendLocation" && !value.location) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["location"], message: "location is required" });
+  if (value.operation === "sendReaction" && !value.reaction) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["reaction"], message: "reaction is required" });
+});
+
+export type WhatsAppInput = z.infer<typeof WhatsAppInputSchema>;
+export type WhatsAppPayload = WhatsAppInput;
+export type WhatsAppTemplatePayload = z.infer<typeof TemplateSchema>;
+export type WhatsAppMediaPayload = z.infer<typeof MediaSchema>;
+export type WhatsAppInteractiveButton = NonNullable<WhatsAppInput["buttons"]>[number];
+
+function buildMetaPayload(input: WhatsAppInput, to: string): Record<string, unknown> {
+  const base: Record<string, unknown> = { messaging_product: "whatsapp", recipient_type: "individual", to: to.replace(/^\+/, "") };
+  const message = input.message ?? input.text ?? "";
+  switch (input.operation) {
+    case "sendTemplate": return { ...base, type: "template", template: input.template };
+    case "sendMedia": {
+      const media = input.media!;
+      return {
+        ...base,
+        type: media.type,
+        [media.type]: {
+          ...(media.link ? { link: media.link } : { id: media.id }),
+          ...(media.caption ? { caption: media.caption } : {}),
+          ...(media.filename ? { filename: media.filename } : {}),
+        },
+      };
+    }
+    case "sendInteractiveButtons":
+      return { ...base, type: "interactive", interactive: { type: "button", body: { text: message }, action: { buttons: input.buttons } } };
+    case "sendLocation": return { ...base, type: "location", location: input.location };
+    case "sendReaction": return { ...base, type: "reaction", reaction: input.reaction };
+    default: return { ...base, type: "text", text: { preview_url: input.previewUrl, body: message } };
+  }
 }
 
-export interface WhatsAppMediaPayload {
-  type: "image" | "document" | "audio" | "video" | "sticker";
-  link?: string;
-  id?: string;
-  caption?: string;
-  filename?: string;
-}
-
-export interface WhatsAppInteractiveButton {
-  type: "reply";
-  reply: {
-    id: string;
-    title: string;
+function mockWhatsAppResult(input: WhatsAppInput, to: string): Record<string, unknown> {
+  const messageId = `wamid.HBgM${Date.now()}`;
+  return {
+    operation: input.operation,
+    delivered: true,
+    to,
+    message: input.message ?? input.text ?? "",
+    template: input.template ?? null,
+    messaging_product: "whatsapp",
+    contacts: [{ input: to, wa_id: to.replace(/^\+/, "") }],
+    messages: [{ id: messageId, message_status: "accepted" }],
+    messageId,
+    timestamp: new Date().toISOString(),
+    mock: true,
   };
-}
-
-export interface WhatsAppPayload {
-  operation?: "sendMessage" | "sendTemplate" | "sendMedia" | "sendInteractiveButtons" | "sendLocation" | "sendReaction";
-  phoneNumberId?: string;
-  to?: string;
-  recipient?: string;
-  message?: string;
-  text?: string;
-  previewUrl?: boolean;
-  template?: WhatsAppTemplatePayload;
-  media?: WhatsAppMediaPayload;
-  buttons?: WhatsAppInteractiveButton[];
-  location?: { latitude: number; longitude: number; name?: string; address?: string };
-  reaction?: { message_id: string; emoji: string };
-  credentialId?: string;
-  systemUserToken?: string;
-  mock?: boolean;
-  [key: string]: unknown;
 }
 
 export async function executeWhatsApp(
-  config: WhatsAppPayload,
+  config: Record<string, unknown>,
   input: unknown = {},
-  orgId: string = ""
+  orgId = "",
 ): Promise<Record<string, unknown>> {
-  const operation = config.operation ?? "sendMessage";
-  const rawTo = String(config.to ?? config.recipient ?? (input as any)?.to ?? (input as any)?.recipient ?? "");
-  const to = rawTo.replace(/[^0-9+]/g, "");
-  const messageText = String(config.message ?? config.text ?? (input as any)?.message ?? (input as any)?.text ?? "");
-  const isMock =
-    config.mock === true ||
-    process.env.MOCK_SERVICES === "true" ||
-    process.env.EXEC_MOCK === "true" ||
-    process.env.NODE_ENV === "test";
+  const validated = WhatsAppInputSchema.parse(mergeNodeInput(config, input));
+  const to = validated.to ?? validated.recipient!;
+  if (isNodeMockEnabled(validated.mock)) return mockWhatsAppResult(validated, to);
 
-  // Resolve token and phone number ID
-  let token = config.systemUserToken ?? process.env.WHATSAPP_SYSTEM_USER_TOKEN ?? process.env.META_ACCESS_TOKEN ?? "";
-  let phoneNumberId = config.phoneNumberId ?? process.env.WHATSAPP_PHONE_NUMBER_ID ?? "100000000000000";
-
-  if (config.credentialId && orgId) {
-    try {
-      const cred = await prisma.credential.findFirst({
-        where: { id: config.credentialId, orgId },
-      });
-      if (cred) {
-        const data = JSON.parse(decryptCredential(cred.data));
-        token = data.accessToken ?? data.token ?? data.systemUserToken ?? token;
-        phoneNumberId = data.phoneNumberId ?? phoneNumberId;
-      }
-    } catch {
-      // offline / mock fallback
-    }
-  }
-
-  // Construct Meta Graph API payload
-  let metaPayload: Record<string, unknown> = {
-    messaging_product: "whatsapp",
-    recipient_type: "individual",
-    to,
-  };
-
-  switch (operation) {
-    case "sendTemplate": {
-      const template = config.template ?? {
-        name: "hello_world",
-        language: { code: "en_US" },
-      };
-      metaPayload.type = "template";
-      metaPayload.template = template;
-      break;
-    }
-    case "sendMedia": {
-      const media = config.media ?? { type: "image", link: "https://example.com/image.jpg" };
-      metaPayload.type = media.type;
-      metaPayload[media.type] = {
-        ...(media.link ? { link: media.link } : { id: media.id }),
-        ...(media.caption ? { caption: media.caption } : {}),
-        ...(media.filename ? { filename: media.filename } : {}),
-      };
-      break;
-    }
-    case "sendInteractiveButtons": {
-      const buttons = config.buttons ?? [
-        { type: "reply", reply: { id: "btn_1", title: "Confirm" } },
-        { type: "reply", reply: { id: "btn_2", title: "Cancel" } },
-      ];
-      metaPayload.type = "interactive";
-      metaPayload.interactive = {
-        type: "button",
-        body: { text: messageText || "Please choose an option:" },
-        action: { buttons },
-      };
-      break;
-    }
-    case "sendLocation": {
-      const loc = config.location ?? { latitude: -23.5505, longitude: -46.6333, name: "Office", address: "Av. Paulista" };
-      metaPayload.type = "location";
-      metaPayload.location = loc;
-      break;
-    }
-    case "sendReaction": {
-      const rx = config.reaction ?? { message_id: `wamid.HBgM${Date.now()}`, emoji: "👍" };
-      metaPayload.type = "reaction";
-      metaPayload.reaction = rx;
-      break;
-    }
-    case "sendMessage":
-    default: {
-      metaPayload.type = "text";
-      metaPayload.text = {
-        preview_url: Boolean(config.previewUrl),
-        body: messageText || "Hello from AgentFlow WhatsApp integration",
-      };
-      break;
-    }
-  }
-
-  // Mock execution
-  if (isMock || !token) {
-    const mockMessageId = `wamid.HBgM${Date.now()}`;
-    return {
-      operation,
-      delivered: true,
-      to,
-      message: messageText,
-      template: config.template ?? null,
-      messaging_product: "whatsapp",
-      contacts: [{ input: to, wa_id: to.replace("+", "") }],
-      messages: [{ id: mockMessageId, message_status: "accepted" }],
-      messageId: mockMessageId,
-      timestamp: new Date().toISOString(),
-      mock: true,
-    };
-  }
-
-  // Live Meta WhatsApp Cloud API v20.0
-  const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(metaPayload),
+  const oauth = await resolveVaultOAuthCredential({
+    credentialId: validated.credentialId,
+    orgId,
+    providers: ["whatsapp_business", "whatsapp", "meta", "meta_whatsapp"],
   });
+  const accessToken = oauth?.accessToken ?? process.env.WHATSAPP_SYSTEM_USER_TOKEN ?? process.env.META_ACCESS_TOKEN;
+  const vaultPhoneNumberId = oauth?.data.phoneNumberId ?? oauth?.data.phone_number_id;
+  const phoneNumberId = validated.phoneNumberId
+    ?? (vaultPhoneNumberId ? String(vaultPhoneNumberId) : undefined)
+    ?? process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (!accessToken) return mockWhatsAppResult(validated, to);
+  if (!phoneNumberId) throw new Error("phoneNumberId is required for WhatsApp Cloud API");
 
-  if (!res.ok) {
-    throw new Error(`WhatsApp Cloud API error (${res.status}): ${await res.text()}`);
-  }
-
-  const data = (await res.json()) as Record<string, unknown>;
-  return {
-    operation,
-    delivered: true,
-    to,
-    ...data,
-    timestamp: new Date().toISOString(),
-  };
+  const response = await safeFetch(`https://graph.facebook.com/v20.0/${encodeURIComponent(phoneNumberId)}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(buildMetaPayload(validated, to)),
+  });
+  if (!response.ok) throw new Error(`WhatsApp Cloud API error (${response.status}): ${await response.text()}`);
+  const data = await response.json() as Record<string, unknown>;
+  return { operation: validated.operation, delivered: true, to, ...data, timestamp: new Date().toISOString() };
 }
 
 export class WhatsAppNodeHandler implements NodeHandler {
@@ -197,20 +142,10 @@ export class WhatsAppNodeHandler implements NodeHandler {
   category = "communications";
 
   async execute(ctx: NodeExecutionContext): Promise<NodeExecutionResult> {
-    const config = (ctx.nodeConfig ?? {}) as WhatsAppPayload;
-    const input = ctx.input;
-
-    const items = Array.isArray(input) ? input : [input];
     const results: NodeItem[] = [];
-    const logs: string[] = [];
-
-    for (const item of items) {
-      const itemData = (typeof item === "object" && item !== null && "json" in item ? (item as NodeItem).json : item) ?? {};
-      const res = await executeWhatsApp(config, itemData, ctx.orgId);
-      results.push({ json: res });
-      logs.push(`WhatsApp Cloud API: sent ${config.operation ?? "sendMessage"} to ${res.to ?? config.to}`);
+    for (const item of wrapItems(ctx.input)) {
+      results.push({ json: await executeWhatsApp(ctx.nodeConfig, item.json, ctx.orgId) });
     }
-
-    return { items: results, logs };
+    return { items: results, logs: [`WhatsApp node: processed ${results.length} item(s)`] };
   }
 }

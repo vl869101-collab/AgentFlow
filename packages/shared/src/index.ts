@@ -148,6 +148,52 @@ export const saveWorkflowCanvasSchema = z.object({
   edges: z.array(edgeConfigSchema),
 });
 
+const workflowVersionNumberSchema = z.coerce.number().int().positive();
+
+export const workflowDiffQuerySchema = z.object({
+  fromVersion: workflowVersionNumberSchema.optional(),
+  toVersion: workflowVersionNumberSchema.optional(),
+  // Keep the original v1/v2 aliases for backwards compatibility.
+  v1: workflowVersionNumberSchema.optional(),
+  v2: workflowVersionNumberSchema.optional(),
+}).transform((query) => ({
+  fromVersion: query.fromVersion ?? query.v1 ?? 1,
+  toVersion: query.toVersion ?? query.v2 ?? 2,
+}));
+
+export const workflowVersionParamsSchema = z.object({
+  version: workflowVersionNumberSchema,
+});
+
+export const rollbackWorkflowSchema = z.object({
+  targetVersion: workflowVersionNumberSchema.optional(),
+  // Keep `version` as an accepted alias for older SDK consumers.
+  version: workflowVersionNumberSchema.optional(),
+}).refine((body) => body.targetVersion !== undefined || body.version !== undefined, {
+  message: "targetVersion is required",
+  path: ["targetVersion"],
+}).transform((body) => ({ targetVersion: body.targetVersion ?? body.version! }));
+
+export const auditEventSchema = z.object({
+  action: z.string().trim().min(1).max(120),
+  resource: z.string().trim().min(1).max(120).optional(),
+  resourceId: z.string().trim().min(1).max(200).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+export const auditListQuerySchema = z.object({
+  action: z.string().trim().min(1).max(120).optional(),
+  resource: z.string().trim().min(1).max(120).optional(),
+});
+
+export const auditExportQuerySchema = z.object({
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
+}).refine((query) => !query.from || !query.to || new Date(query.from) <= new Date(query.to), {
+  message: "from must be before or equal to to",
+  path: ["from"],
+});
+
 const generatedNodeSchema = z.object({
   id: z.string().min(1).max(200),
   type: workflowNodeTypeSchema,
@@ -357,6 +403,9 @@ export type InviteMemberInput = z.infer<typeof inviteMemberSchema>;
 export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
 export type UpdateWorkflowInput = z.infer<typeof updateWorkflowSchema>;
 export type SaveWorkflowCanvasInput = z.infer<typeof saveWorkflowCanvasSchema>;
+export type WorkflowDiffQuery = z.infer<typeof workflowDiffQuerySchema>;
+export type RollbackWorkflowInput = z.infer<typeof rollbackWorkflowSchema>;
+export type AuditEventInput = z.infer<typeof auditEventSchema>;
 export type NodeConfigInput = z.infer<typeof nodeConfigSchema>;
 export type EdgeConfigInput = z.infer<typeof edgeConfigSchema>;
 export type ExecuteWorkflowInput = z.infer<typeof executeWorkflowSchema>;
@@ -470,4 +519,3 @@ export interface ExecutionTrace {
   duration?: number | null;
   traces: NodeTrace[];
 }
-

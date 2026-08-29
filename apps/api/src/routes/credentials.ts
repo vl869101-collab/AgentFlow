@@ -5,14 +5,17 @@ import { orgIdFromRequest, requireAuth, userIdFromRequest } from "../middleware/
 import { createCredentialSchema } from "@agentflow/shared";
 import {
   BUCKET_DEFINITIONS,
+  decryptVaultEnvelope,
   decryptVaultData,
-  encryptVaultData,
+  encryptVaultEnvelope,
+  isVaultEnvelope,
+  kmsManager,
   listProviders,
   maskVaultData,
   mapCredentialToBucket,
   type CredentialBucket,
 } from "../services/vault/index.js";
-import { decryptCredential, encryptCredential } from "../lib/crypto.js";
+import { decryptCredential } from "../lib/crypto.js";
 
 export async function credentialRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
@@ -47,7 +50,10 @@ export async function credentialRoutes(app: FastifyInstance) {
         let rawObj: any = credential.data;
         if (typeof rawObj === "string") {
           try {
-            rawObj = JSON.parse(decryptCredential(rawObj));
+            const parsed = JSON.parse(rawObj);
+            rawObj = isVaultEnvelope(parsed)
+              ? decryptVaultEnvelope(parsed)
+              : JSON.parse(decryptCredential(rawObj));
           } catch {
             rawObj = JSON.parse(rawObj);
           }
@@ -102,16 +108,17 @@ export async function credentialRoutes(app: FastifyInstance) {
     const orgId = await currentOrgId(request);
     if (!orgId) return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });
 
-    // Normalize and encrypt sensitive fields per-field using Vault AES-256-GCM
+    // Envelope encryption: random AES-256-GCM DEK + versioned KMS-wrapped DEK.
     const { bucket, data: normalizedData } = mapCredentialToBucket(body.provider || body.type, body.data);
-    const encryptedDataObj = encryptVaultData(bucket, normalizedData);
+    const encryptedDataObj = encryptVaultEnvelope(normalizedData);
 
     const credential = await prisma.credential.create({
       data: {
         name: body.name,
         type: body.type || bucket,
         provider: body.provider,
-        data: encryptCredential(JSON.stringify(encryptedDataObj)),
+        data: JSON.stringify(encryptedDataObj),
+        keyVersion: encryptedDataObj.keyVersion,
         orgId,
       },
     });
@@ -131,10 +138,15 @@ export async function credentialRoutes(app: FastifyInstance) {
 
     let data: unknown;
     try {
-      const decryptedOuter = JSON.parse(decryptCredential(credential.data));
-      data = typeof decryptedOuter === "object" && decryptedOuter !== null
-        ? decryptVaultData(credential.type as CredentialBucket, decryptedOuter)
-        : decryptedOuter;
+      const parsed = JSON.parse(credential.data);
+      if (isVaultEnvelope(parsed)) {
+        data = decryptVaultEnvelope(parsed, kmsManager.getProvider());
+      } else {
+        const decryptedOuter = JSON.parse(decryptCredential(credential.data));
+        data = typeof decryptedOuter === "object" && decryptedOuter !== null
+          ? decryptVaultData(credential.type as CredentialBucket, decryptedOuter)
+          : decryptedOuter;
+      }
     } catch {
       return reply.code(500).send({ error: "Credential data is invalid or cannot be decrypted", code: "CREDENTIAL_DECRYPTION_FAILED" });
     }

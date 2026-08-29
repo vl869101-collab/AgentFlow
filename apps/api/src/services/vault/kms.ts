@@ -1,15 +1,23 @@
-import { randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { prisma } from "../../lib/prisma.js";
+import { decryptCredential } from "../../lib/crypto.js";
 import {
-  decryptField,
   decryptVaultData,
-  encryptField,
   encryptVaultData,
-  getCurrentKeyVersion,
-  isEncryptedField,
   registerEncryptionKeyVersion,
   setCurrentKeyVersion,
 } from "./crypto.js";
+import {
+  kmsWrappedKeySchema,
+  vaultEnvelopeSchema,
+  type KmsWrappedKey,
+  type VaultEnvelope,
+} from "./types.js";
+
+const ENVELOPE_ALGORITHM = "aes-256-gcm" as const;
+const ENVELOPE_IV_LENGTH = 12;
+const ENVELOPE_TAG_LENGTH = 16;
+const ENVELOPE_FORMAT = "agentflow-vault-envelope" as const;
 
 export interface KmsKeyMetadata {
   version: number;
@@ -27,15 +35,18 @@ export interface KmsProvider {
   rotateKey(newKeyHex?: string, newVersion?: number): { version: number; keyHex: string };
   getAllVersions(): number[];
   listKeys(): KmsKeyMetadata[];
+  wrapKey(dataKey: Buffer, version?: number): KmsWrappedKey;
+  unwrapKey(wrappedKey: KmsWrappedKey): Buffer;
 }
 
 export class LocalKmsProvider implements KmsProvider {
-  name = "local-env";
+  readonly name: string;
   private keys: Map<number, Buffer> = new Map();
   private currentVersion = 1;
   private metadata: Map<number, KmsKeyMetadata> = new Map();
 
-  constructor(initialKeyHex?: string) {
+  constructor(initialKeyHex?: string, providerName = "local-env") {
+    this.name = providerName;
     const defaultHex =
       initialKeyHex ||
       process.env.CREDENTIAL_ENCRYPTION_KEY ||
@@ -60,9 +71,6 @@ export class LocalKmsProvider implements KmsProvider {
     const v = version ?? this.currentVersion;
     const key = this.keys.get(v);
     if (!key) {
-      // If version 1 is requested and exists, fallback
-      const v1 = this.keys.get(1);
-      if (v1) return v1;
       throw new Error(`KMS key version ${v} not found`);
     }
     return key;
@@ -100,34 +108,71 @@ export class LocalKmsProvider implements KmsProvider {
   listKeys(): KmsKeyMetadata[] {
     return Array.from(this.metadata.values()).sort((a, b) => a.version - b.version);
   }
+
+  wrapKey(dataKey: Buffer, version?: number): KmsWrappedKey {
+    if (dataKey.length !== 32) throw new Error("Data encryption key must be exactly 32 bytes");
+    const keyVersion = version ?? this.currentVersion;
+    const kek = this.getKey(keyVersion);
+    const iv = randomBytes(ENVELOPE_IV_LENGTH);
+    const cipher = createCipheriv(ENVELOPE_ALGORITHM, kek, iv);
+    cipher.setAAD(wrappingAad(this.name, keyVersion));
+    const ciphertext = Buffer.concat([cipher.update(dataKey), cipher.final()]);
+
+    return {
+      provider: this.name,
+      keyVersion,
+      algorithm: ENVELOPE_ALGORITHM,
+      wrappingAlgorithm: ENVELOPE_ALGORITHM,
+      iv: iv.toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+      tag: cipher.getAuthTag().toString("base64"),
+    };
+  }
+
+  unwrapKey(input: KmsWrappedKey): Buffer {
+    const wrappedKey = kmsWrappedKeySchema.parse(input);
+    if (wrappedKey.provider !== this.name) {
+      throw new Error(`Wrapped key provider ${wrappedKey.provider} cannot be handled by ${this.name}`);
+    }
+    const iv = decodeEnvelopePart(wrappedKey.iv, "wrappedKey.iv", ENVELOPE_IV_LENGTH);
+    const ciphertext = decodeEnvelopePart(wrappedKey.ciphertext, "wrappedKey.ciphertext", 32);
+    const tag = decodeEnvelopePart(wrappedKey.tag, "wrappedKey.tag", ENVELOPE_TAG_LENGTH);
+    const decipher = createDecipheriv(ENVELOPE_ALGORITHM, this.getKey(wrappedKey.keyVersion), iv);
+    decipher.setAAD(wrappingAad(this.name, wrappedKey.keyVersion));
+    decipher.setAuthTag(tag);
+    try {
+      const dataKey = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      if (dataKey.length !== 32) throw new Error("Invalid unwrapped data encryption key length");
+      return dataKey;
+    } catch {
+      throw new Error("Unable to unwrap vault data encryption key");
+    }
+  }
 }
 
 export class AwsKmsProvider extends LocalKmsProvider {
-  override name = "aws-kms";
   readonly keyArn?: string;
 
   constructor(keyArn?: string, fallbackHex?: string) {
-    super(fallbackHex);
+    super(fallbackHex, "aws-kms");
     this.keyArn = keyArn || process.env.AWS_KMS_KEY_ARN;
   }
 }
 
 export class GcpKmsProvider extends LocalKmsProvider {
-  override name = "gcp-cloud-kms";
   readonly keyResourceName?: string;
 
   constructor(keyResourceName?: string, fallbackHex?: string) {
-    super(fallbackHex);
+    super(fallbackHex, "gcp-cloud-kms");
     this.keyResourceName = keyResourceName || process.env.GCP_KMS_KEY_NAME;
   }
 }
 
 export class HashiCorpVaultKmsProvider extends LocalKmsProvider {
-  override name = "hashicorp-vault";
   readonly transitPath?: string;
 
   constructor(transitPath?: string, fallbackHex?: string) {
-    super(fallbackHex);
+    super(fallbackHex, "hashicorp-vault");
     this.transitPath = transitPath || process.env.VAULT_TRANSIT_PATH;
   }
 }
@@ -185,14 +230,15 @@ export class KmsManager {
       }
 
       try {
-        const rawData =
-          typeof cred.data === "string" ? JSON.parse(cred.data) : (cred.data as Record<string, any>);
-        
-        // Decrypt with whatever version was stored in the envelope/cred
-        const decrypted = decryptVaultData(cred.bucket ?? "api_key", rawData);
-
-        // Re-encrypt with the target key version
-        const newlyEncrypted = encryptVaultData(cred.bucket ?? "api_key", decrypted, targetVersion);
+        const rawData = parseStoredCredentialData(cred.data);
+        const parsedEnvelope = vaultEnvelopeSchema.safeParse(rawData);
+        let newlyEncrypted: any;
+        if (parsedEnvelope.success) {
+          newlyEncrypted = rewrapVaultEnvelope(parsedEnvelope.data, this.provider, targetVersion);
+        } else {
+          const decrypted = decryptVaultData(cred.bucket ?? cred.type ?? "api_key", rawData, currentKv);
+          newlyEncrypted = encryptVaultData(cred.bucket ?? cred.type ?? "api_key", decrypted, targetVersion);
+        }
 
         await prisma.credential.update({
           where: { id: cred.id },
@@ -220,3 +266,127 @@ export class KmsManager {
 }
 
 export const kmsManager = new KmsManager();
+
+function wrappingAad(provider: string, keyVersion: number): Buffer {
+  return Buffer.from(`${ENVELOPE_FORMAT}:kek:${provider}:v${keyVersion}`, "utf8");
+}
+
+function payloadAad(): Buffer {
+  return Buffer.from(`${ENVELOPE_FORMAT}:payload:v1:${ENVELOPE_ALGORITHM}`, "utf8");
+}
+
+function decodeEnvelopePart(value: string, field: string, expectedLength?: number): Buffer {
+  const decoded = Buffer.from(value, "base64");
+  if (decoded.length === 0 || (expectedLength !== undefined && decoded.length !== expectedLength)) {
+    throw new Error(`Invalid vault envelope ${field}`);
+  }
+  return decoded;
+}
+
+function parseStoredCredentialData(value: unknown): Record<string, any> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, any>;
+  if (typeof value !== "string") throw new Error("Credential data is not a JSON object");
+
+  const parsed = JSON.parse(value) as unknown;
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    if (vaultEnvelopeSchema.safeParse(parsed).success || isEncryptedFieldObject(parsed)) {
+      if (!isEncryptedFieldObject(parsed)) return parsed as Record<string, any>;
+      // Legacy outer envelope from apps/api/src/lib/crypto.ts.
+      return JSON.parse(decryptCredential(value)) as Record<string, any>;
+    }
+    return parsed as Record<string, any>;
+  }
+  throw new Error("Credential data is not a JSON object");
+}
+
+function isEncryptedFieldObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.iv === "string" && typeof candidate.ct === "string" && typeof candidate.tag === "string";
+}
+
+export function isVaultEnvelope(value: unknown): value is VaultEnvelope {
+  return vaultEnvelopeSchema.safeParse(value).success;
+}
+
+export function encryptVaultEnvelope(
+  plaintext: Record<string, unknown>,
+  provider: KmsProvider = kmsManager.getProvider(),
+  keyVersion = provider.getCurrentKeyVersion(),
+): VaultEnvelope {
+  const dataKey = randomBytes(32);
+  try {
+    const iv = randomBytes(ENVELOPE_IV_LENGTH);
+    const cipher = createCipheriv(ENVELOPE_ALGORITHM, dataKey, iv);
+    cipher.setAAD(payloadAad());
+    const ciphertext = Buffer.concat([
+      cipher.update(JSON.stringify(plaintext), "utf8"),
+      cipher.final(),
+    ]);
+    const wrappedKey = provider.wrapKey(dataKey, keyVersion);
+
+    return vaultEnvelopeSchema.parse({
+      format: ENVELOPE_FORMAT,
+      version: 1,
+      keyVersion,
+      algorithm: ENVELOPE_ALGORITHM,
+      iv: iv.toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+      tag: cipher.getAuthTag().toString("base64"),
+      wrappedKey,
+      createdAt: new Date().toISOString(),
+    });
+  } finally {
+    dataKey.fill(0);
+  }
+}
+
+export function decryptVaultEnvelope(
+  input: unknown,
+  provider: KmsProvider = kmsManager.getProvider(),
+): Record<string, unknown> {
+  const envelope = vaultEnvelopeSchema.parse(input);
+  if (envelope.keyVersion !== envelope.wrappedKey.keyVersion) {
+    throw new Error("Vault envelope key version metadata mismatch");
+  }
+  const dataKey = provider.unwrapKey(envelope.wrappedKey);
+  try {
+    const iv = decodeEnvelopePart(envelope.iv, "iv", ENVELOPE_IV_LENGTH);
+    const tag = decodeEnvelopePart(envelope.tag, "tag", ENVELOPE_TAG_LENGTH);
+    const ciphertext = decodeEnvelopePart(envelope.ciphertext, "ciphertext");
+    const decipher = createDecipheriv(ENVELOPE_ALGORITHM, dataKey, iv);
+    decipher.setAAD(payloadAad());
+    decipher.setAuthTag(tag);
+    try {
+      const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+      const parsed = JSON.parse(plaintext) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Vault envelope plaintext is not an object");
+      }
+      return parsed as Record<string, unknown>;
+    } catch {
+      throw new Error("Unable to decrypt vault envelope");
+    }
+  } finally {
+    dataKey.fill(0);
+  }
+}
+
+/** Rewraps only the DEK; the payload ciphertext is never decrypted or rewritten. */
+export function rewrapVaultEnvelope(
+  input: unknown,
+  provider: KmsProvider = kmsManager.getProvider(),
+  targetVersion = provider.getCurrentKeyVersion(),
+): VaultEnvelope {
+  const envelope = vaultEnvelopeSchema.parse(input);
+  const dataKey = provider.unwrapKey(envelope.wrappedKey);
+  try {
+    return vaultEnvelopeSchema.parse({
+      ...envelope,
+      keyVersion: targetVersion,
+      wrappedKey: provider.wrapKey(dataKey, targetVersion),
+    });
+  } finally {
+    dataKey.fill(0);
+  }
+}

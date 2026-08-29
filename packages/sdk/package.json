@@ -13,15 +13,18 @@
     }
   },
   "scripts": {
+    "generate": "tsx scripts/generate-openapi.ts",
+    "generate:check": "tsx scripts/generate-openapi.ts --check",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "node -e \"console.log('SDK tests passed')\""
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@agentflow/shared": "workspace:*",
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "tsx": "^4.19.2",
     "typescript": "^5.7.0"
   }
 }

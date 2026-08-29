@@ -5,6 +5,13 @@ import { ExecutionsApi } from "./executions.js";
 import { CredentialsApi } from "./credentials.js";
 import { ApprovalsApi } from "./approvals.js";
 import { McpApi } from "./mcp.js";
+import {
+  operationManifest,
+  operationSchemas,
+  type OpenApiOperationId,
+  type OperationRequest,
+  type OperationResponse,
+} from "./generated/openapi.js";
 
 export class AgentFlowClient {
   private baseUrl: string;
@@ -130,6 +137,37 @@ export class AgentFlowClient {
     return this.request<{ status: string; timestamp: string }>("/health", {
       method: "GET",
       requiresAuth: false,
+    });
+  }
+
+  /** Calls any OpenAPI operation with generated request/response types and Zod request validation. */
+  async requestOperation<Id extends OpenApiOperationId>(
+    operationId: Id,
+    input: OperationRequest<Id>,
+  ): Promise<OperationResponse<Id>> {
+    const operation = operationManifest[operationId];
+    const request = operationSchemas[operationId].parse(input) as {
+      path: Record<string, unknown>;
+      query: Record<string, unknown>;
+      body?: unknown;
+    };
+    let path: string = operation.path;
+    for (const [name, value] of Object.entries(request.path)) {
+      path = path.replace(`{${name}}`, encodeURIComponent(String(value)));
+    }
+    const unresolved = /\{[^}]+\}/.exec(path);
+    if (unresolved) throw new Error(`Missing OpenAPI path parameter ${unresolved[0]}`);
+
+    const query = new URLSearchParams();
+    for (const [name, value] of Object.entries(request.query)) {
+      if (value !== undefined && value !== null) query.set(name, String(value));
+    }
+    const queryString = query.toString();
+
+    return this.request<OperationResponse<Id>>(`${path}${queryString ? `?${queryString}` : ""}`, {
+      method: operation.method,
+      body: request.body,
+      requiresAuth: operation.requiresAuth,
     });
   }
 

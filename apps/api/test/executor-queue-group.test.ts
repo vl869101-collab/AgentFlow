@@ -708,6 +708,16 @@ test("TASK-15: Workflow Diff & Rollback HTTP Endpoints Integration", async () =>
   const versions = JSON.parse(versionsRes.body);
   assert.ok(versions.length >= 2);
 
+  const snapshotRes = await app.inject({
+    method: "GET",
+    url: `/api/workflows/${wf.id}/versions/1`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(snapshotRes.statusCode, 200);
+  const snapshot = JSON.parse(snapshotRes.body);
+  assert.equal(snapshot.version, 1);
+  assert.equal(snapshot.snapshot.nodes[0].id, "n1");
+
   // 6. Test GET /diff
   const diffRes = await app.inject({
     method: "GET",
@@ -729,6 +739,20 @@ test("TASK-15: Workflow Diff & Rollback HTTP Endpoints Integration", async () =>
   const rollbackData = JSON.parse(rollbackRes.body);
   assert.equal(rollbackData.ok, true);
   assert.equal(rollbackData.rolledBackToVersion, 1);
+
+  const triggerRes = await app.inject({
+    method: "POST",
+    url: "/api/executions/trigger",
+    headers: { authorization: `Bearer ${token}` },
+    payload: { workflowId: wf.id },
+  });
+  assert.equal(triggerRes.statusCode, 202);
+
+  const auditActions = (await prisma.auditLog.findMany({ where: { orgId: wf.orgId } })).map((entry: any) => entry.action);
+  assert.ok(auditActions.includes("workflow.created"));
+  assert.ok(auditActions.includes("workflow.version.created"));
+  assert.ok(auditActions.includes("workflow.rolled_back"));
+  assert.ok(auditActions.includes("execution.created"));
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -919,4 +943,3 @@ test("TASK-15: computeWorkflowDiff - handles empty snapshots, node position edit
   assert.equal(diffPos.edgesModified[0].changes[0].field, "sourceHandle");
   assert.equal(diffPos.summary.hasBreakingChanges, false);
 });
-

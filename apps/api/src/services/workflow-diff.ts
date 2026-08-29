@@ -2,7 +2,7 @@ export interface WorkflowNodeSnapshot {
   id: string;
   type: string;
   label?: string;
-  config?: Record<string, any>;
+  config?: Record<string, unknown>;
   position?: { x: number; y: number };
   width?: number;
   height?: number;
@@ -25,7 +25,7 @@ export interface WorkflowSnapshot {
   edges?: WorkflowEdgeSnapshot[];
   name?: string;
   description?: string;
-  settings?: Record<string, any>;
+  settings?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -42,6 +42,7 @@ export interface NodeModificationDiff {
 }
 
 export interface EdgeModificationDiff {
+  edgeId?: string;
   source: string;
   target: string;
   changes: FieldDiff[];
@@ -106,11 +107,11 @@ function deepEqual(a: unknown, b: unknown): boolean {
       }
       return true;
     }
-    const keysA = Object.keys(a as Record<string, any>);
-    const keysB = Object.keys(b as Record<string, any>);
+    const keysA = Object.keys(a as Record<string, unknown>);
+    const keysB = Object.keys(b as Record<string, unknown>);
     if (keysA.length !== keysB.length) return false;
     for (const key of keysA) {
-      if (!deepEqual((a as Record<string, any>)[key], (b as Record<string, any>)[key])) {
+      if (!deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) {
         return false;
       }
     }
@@ -169,6 +170,12 @@ export function computeWorkflowDiff(
     if (!deepEqual(node.position, oldNode.position)) {
       changes.push({ field: "position", oldValue: oldNode.position, newValue: node.position });
     }
+    if (node.width !== oldNode.width) {
+      changes.push({ field: "width", oldValue: oldNode.width, newValue: node.width });
+    }
+    if (node.height !== oldNode.height) {
+      changes.push({ field: "height", oldValue: oldNode.height, newValue: node.height });
+    }
 
     if (changes.length > 0) {
       nodesModified.push({
@@ -180,7 +187,11 @@ export function computeWorkflowDiff(
   }
 
   // 3. Edges Added, Removed, Modified
-  const edgeKey = (e: WorkflowEdgeSnapshot) => `${e.source}->${e.target}`;
+  // Persisted edge ids are stable identity. Older snapshots fall back to their
+  // endpoints so handle changes remain modifications instead of remove/add.
+  const edgeKey = (e: WorkflowEdgeSnapshot) => e.id
+    ? `id:${e.id}`
+    : `path:${e.source}->${e.target}`;
   const v1EdgeMap = new Map<string, WorkflowEdgeSnapshot>();
   for (const e of v1Edges) v1EdgeMap.set(edgeKey(e), e);
 
@@ -211,6 +222,12 @@ export function computeWorkflowDiff(
     if (!oldEdge) continue;
 
     const changes: FieldDiff[] = [];
+    if (edge.source !== oldEdge.source) {
+      changes.push({ field: "source", oldValue: oldEdge.source, newValue: edge.source });
+    }
+    if (edge.target !== oldEdge.target) {
+      changes.push({ field: "target", oldValue: oldEdge.target, newValue: edge.target });
+    }
     if (edge.sourceHandle !== oldEdge.sourceHandle) {
       changes.push({ field: "sourceHandle", oldValue: oldEdge.sourceHandle, newValue: edge.sourceHandle });
     }
@@ -226,6 +243,7 @@ export function computeWorkflowDiff(
 
     if (changes.length > 0) {
       edgesModified.push({
+        edgeId: edge.id,
         source: edge.source,
         target: edge.target,
         changes,

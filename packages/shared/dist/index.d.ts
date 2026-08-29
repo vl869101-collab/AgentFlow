@@ -415,6 +415,100 @@ export declare const saveWorkflowCanvasSchema: z.ZodObject<{
         condition: z.ZodOptional<z.ZodUnknown>;
     }, z.ZodTypeAny, "passthrough">[];
 }>;
+export declare const workflowDiffQuerySchema: z.ZodEffects<z.ZodObject<{
+    fromVersion: z.ZodOptional<z.ZodNumber>;
+    toVersion: z.ZodOptional<z.ZodNumber>;
+    v1: z.ZodOptional<z.ZodNumber>;
+    v2: z.ZodOptional<z.ZodNumber>;
+}, "strip", z.ZodTypeAny, {
+    fromVersion?: number | undefined;
+    toVersion?: number | undefined;
+    v1?: number | undefined;
+    v2?: number | undefined;
+}, {
+    fromVersion?: number | undefined;
+    toVersion?: number | undefined;
+    v1?: number | undefined;
+    v2?: number | undefined;
+}>, {
+    fromVersion: number;
+    toVersion: number;
+}, {
+    fromVersion?: number | undefined;
+    toVersion?: number | undefined;
+    v1?: number | undefined;
+    v2?: number | undefined;
+}>;
+export declare const workflowVersionParamsSchema: z.ZodObject<{
+    version: z.ZodNumber;
+}, "strip", z.ZodTypeAny, {
+    version: number;
+}, {
+    version: number;
+}>;
+export declare const rollbackWorkflowSchema: z.ZodEffects<z.ZodEffects<z.ZodObject<{
+    targetVersion: z.ZodOptional<z.ZodNumber>;
+    version: z.ZodOptional<z.ZodNumber>;
+}, "strip", z.ZodTypeAny, {
+    version?: number | undefined;
+    targetVersion?: number | undefined;
+}, {
+    version?: number | undefined;
+    targetVersion?: number | undefined;
+}>, {
+    version?: number | undefined;
+    targetVersion?: number | undefined;
+}, {
+    version?: number | undefined;
+    targetVersion?: number | undefined;
+}>, {
+    targetVersion: number;
+}, {
+    version?: number | undefined;
+    targetVersion?: number | undefined;
+}>;
+export declare const auditEventSchema: z.ZodObject<{
+    action: z.ZodString;
+    resource: z.ZodOptional<z.ZodString>;
+    resourceId: z.ZodOptional<z.ZodString>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, "strip", z.ZodTypeAny, {
+    action: string;
+    resource?: string | undefined;
+    resourceId?: string | undefined;
+    metadata?: Record<string, unknown> | undefined;
+}, {
+    action: string;
+    resource?: string | undefined;
+    resourceId?: string | undefined;
+    metadata?: Record<string, unknown> | undefined;
+}>;
+export declare const auditListQuerySchema: z.ZodObject<{
+    action: z.ZodOptional<z.ZodString>;
+    resource: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    action?: string | undefined;
+    resource?: string | undefined;
+}, {
+    action?: string | undefined;
+    resource?: string | undefined;
+}>;
+export declare const auditExportQuerySchema: z.ZodEffects<z.ZodObject<{
+    from: z.ZodOptional<z.ZodString>;
+    to: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    from?: string | undefined;
+    to?: string | undefined;
+}, {
+    from?: string | undefined;
+    to?: string | undefined;
+}>, {
+    from?: string | undefined;
+    to?: string | undefined;
+}, {
+    from?: string | undefined;
+    to?: string | undefined;
+}>;
 export declare const generatedWorkflowSchema: z.ZodEffects<z.ZodObject<{
     name: z.ZodString;
     description: z.ZodString;
@@ -907,6 +1001,9 @@ export type InviteMemberInput = z.infer<typeof inviteMemberSchema>;
 export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
 export type UpdateWorkflowInput = z.infer<typeof updateWorkflowSchema>;
 export type SaveWorkflowCanvasInput = z.infer<typeof saveWorkflowCanvasSchema>;
+export type WorkflowDiffQuery = z.infer<typeof workflowDiffQuerySchema>;
+export type RollbackWorkflowInput = z.infer<typeof rollbackWorkflowSchema>;
+export type AuditEventInput = z.infer<typeof auditEventSchema>;
 export type NodeConfigInput = z.infer<typeof nodeConfigSchema>;
 export type EdgeConfigInput = z.infer<typeof edgeConfigSchema>;
 export type ExecuteWorkflowInput = z.infer<typeof executeWorkflowSchema>;

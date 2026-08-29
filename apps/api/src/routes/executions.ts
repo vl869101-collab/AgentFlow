@@ -7,6 +7,7 @@ import { createWorkflowExecution, runExecution } from "../services/executor.js";
 import { enqueueExecution } from "../services/queue.js";
 import { executeWorkflowSchema } from "@agentflow/shared";
 import { telemetry } from "../lib/otel.js";
+import { recordAuditEvent } from "../services/audit-ledger.js";
 
 export async function executionRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
@@ -210,11 +211,25 @@ export async function executionRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
     const orgId = orgIdFromRequest(request);
+    const where = orgId ? { id, orgId, status: { in: ["PENDING", "RUNNING"] } } : { id, userId, status: { in: ["PENDING", "RUNNING"] } };
+    const execution = await prisma.workflowExecution.findFirst({ where });
     const result = await prisma.workflowExecution.updateMany({
-      where: orgId ? { id, orgId, status: { in: ["PENDING", "RUNNING"] } } : { id, userId, status: { in: ["PENDING", "RUNNING"] } },
+      where,
       data: { status: "CANCELLED", finishedAt: new Date() },
     });
     if (result.count === 0) return reply.code(404).send({ error: "Execution not found or not cancellable", code: "NOT_CANCELLABLE" });
+    if (execution?.orgId) {
+      await recordAuditEvent({
+        orgId: execution.orgId,
+        userId,
+        action: "execution.cancel_requested",
+        resource: "execution",
+        resourceId: id,
+        metadata: { workflowId: execution.workflowId, previousStatus: execution.status },
+        ip: request.ip,
+        userAgent: request.headers["user-agent"] as string | undefined,
+      });
+    }
     return { ok: true };
   });
 

@@ -1,252 +1,178 @@
-import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem } from "./types.js";
-import { getValidGoogleToken } from "../../lib/google-oauth.js";
+import { z } from "zod";
+import { safeFetch } from "../../lib/ssrf.js";
+import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem, wrapItems } from "./types.js";
+import { isNodeMockEnabled, mergeNodeInput, resolveVaultOAuthCredential } from "./oauth.js";
 
-export interface GoogleCalendarAttendee {
-  email: string;
-  displayName?: string;
-  responseStatus?: "needsAction" | "declined" | "tentative" | "accepted";
+const EventDateSchema = z.union([
+  z.string().min(1),
+  z.object({ dateTime: z.string().min(1).optional(), date: z.string().min(1).optional(), timeZone: z.string().optional() })
+    .refine((value) => Boolean(value.dateTime || value.date), { message: "dateTime or date is required" }),
+]);
+
+export const GoogleCalendarInputSchema = z.object({
+  operation: z.enum(["createEvent", "listEvents", "getEvent", "updateEvent", "deleteEvent", "quickAdd"]).default("createEvent"),
+  calendarId: z.string().min(1).default("primary"),
+  eventId: z.string().min(1).optional(),
+  summary: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  location: z.string().optional(),
+  startTime: z.string().min(1).optional(),
+  start: EventDateSchema.optional(),
+  endTime: z.string().min(1).optional(),
+  end: EventDateSchema.optional(),
+  timeZone: z.string().min(1).default("UTC"),
+  attendees: z.array(z.union([
+    z.string().email(),
+    z.object({ email: z.string().email(), displayName: z.string().optional(), responseStatus: z.enum(["needsAction", "declined", "tentative", "accepted"]).optional() }),
+  ])).optional(),
+  addGoogleMeet: z.boolean().default(false),
+  conferenceData: z.record(z.unknown()).optional(),
+  reminders: z.object({
+    useDefault: z.boolean().optional(),
+    overrides: z.array(z.object({ method: z.enum(["email", "popup"]), minutes: z.number().int().nonnegative() })).max(5).optional(),
+  }).optional(),
+  timeMin: z.string().optional(),
+  timeMax: z.string().optional(),
+  maxResults: z.number().int().min(1).max(2500).default(50),
+  q: z.string().optional(),
+  query: z.string().optional(),
+  quickAddText: z.string().min(1).optional(),
+  credentialId: z.string().min(1).optional(),
+  mock: z.boolean().optional(),
+}).passthrough().superRefine((value, ctx) => {
+  if (["getEvent", "updateEvent", "deleteEvent"].includes(value.operation) && !value.eventId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["eventId"], message: `eventId is required for ${value.operation}` });
+  }
+  if (value.operation === "quickAdd" && !value.quickAddText && !value.summary && !value.title) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["quickAddText"], message: "quickAddText is required for quickAdd" });
+  }
+});
+
+export type GoogleCalendarInput = z.infer<typeof GoogleCalendarInputSchema>;
+export type GoogleCalendarEventPayload = GoogleCalendarInput;
+export type GoogleCalendarAttendee = Exclude<NonNullable<GoogleCalendarInput["attendees"]>[number], string>;
+
+function normalizeEventDate(value: GoogleCalendarInput["start"], fallback: string, timeZone: string): Record<string, string> {
+  if (typeof value === "string") return { dateTime: value, timeZone };
+  if (value?.date) return { date: value.date };
+  if (value?.dateTime) return { dateTime: value.dateTime, timeZone: value.timeZone ?? timeZone };
+  return { dateTime: fallback, timeZone };
 }
 
-export interface GoogleCalendarEventPayload {
-  operation?: "createEvent" | "listEvents" | "getEvent" | "updateEvent" | "deleteEvent" | "quickAdd";
-  calendarId?: string;
-  eventId?: string;
-  summary?: string;
-  title?: string;
-  description?: string;
-  location?: string;
-  startTime?: string;
-  start?: string | { dateTime?: string; date?: string; timeZone?: string };
-  endTime?: string;
-  end?: string | { dateTime?: string; date?: string; timeZone?: string };
-  timeZone?: string;
-  attendees?: Array<string | GoogleCalendarAttendee>;
-  addGoogleMeet?: boolean;
-  conferenceData?: Record<string, unknown>;
-  reminders?: { useDefault?: boolean; overrides?: Array<{ method: string; minutes: number }> };
-  timeMin?: string;
-  timeMax?: string;
-  maxResults?: number;
-  q?: string;
-  query?: string;
-  quickAddText?: string;
-  credentialId?: string;
-  mock?: boolean;
-  [key: string]: unknown;
+function validateChronology(start: Record<string, string>, end: Record<string, string>): void {
+  if (!start.dateTime || !end.dateTime) return;
+  const startMs = Date.parse(start.dateTime);
+  const endMs = Date.parse(end.dateTime);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) throw new Error("Calendar start and end must be valid ISO date-times");
+  if (endMs <= startMs) throw new Error("Calendar end must be later than start");
 }
 
-export async function executeGoogleCalendar(
-  config: GoogleCalendarEventPayload,
-  input: unknown = {},
-  orgId: string = ""
-): Promise<Record<string, unknown>> {
-  const operation = config.operation ?? "createEvent";
-  const calendarId = encodeURIComponent(config.calendarId ?? "primary");
-  const summary = String(
-    config.summary ??
-    config.title ??
-    (input as any)?.summary ??
-    (input as any)?.title ??
-    "New Calendar Event"
-  );
-  const timeZone = config.timeZone ?? "UTC";
-  const isMock =
-    config.mock === true ||
-    process.env.MOCK_SERVICES === "true" ||
-    process.env.EXEC_MOCK === "true" ||
-    process.env.NODE_ENV === "test";
-
-  // Parse start / end ISO timestamps
-  let startIso: string;
-  if (typeof config.start === "object" && config.start?.dateTime) {
-    startIso = config.start.dateTime;
-  } else if (typeof config.start === "string") {
-    startIso = config.start;
-  } else {
-    startIso = String(config.startTime ?? (input as any)?.startTime ?? new Date().toISOString());
-  }
-
-  let endIso: string;
-  if (typeof config.end === "object" && config.end?.dateTime) {
-    endIso = config.end.dateTime;
-  } else if (typeof config.end === "string") {
-    endIso = config.end;
-  } else {
-    endIso = String(
-      config.endTime ?? (input as any)?.endTime ?? new Date(new Date(startIso).getTime() + 3600000).toISOString()
-    );
-  }
-
-  // Format attendees
-  const attendeesList: GoogleCalendarAttendee[] = (config.attendees ?? []).map((att) =>
-    typeof att === "string" ? { email: att } : att
-  );
-
-  let token = "";
-  if (config.credentialId && orgId) {
-    try {
-      const auth = await getValidGoogleToken({ credentialId: config.credentialId, orgId });
-      token = auth.accessToken;
-    } catch {
-      // offline / mock mode fallback
-    }
-  }
-
-  // Mock execution
-  if (isMock || !token) {
-    const mockEventId = config.eventId ?? `event_${Date.now()}`;
-    const meetCode = `mock-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 6)}`;
-    const meetUrl = `https://meet.google.com/${meetCode}`;
-
-    if (operation === "listEvents") {
-      return {
-        operation,
-        kind: "calendar#events",
-        summary: "Primary Calendar",
-        items: [
-          {
-            id: `evt_sample_1`,
-            summary: "Sprint Planning",
-            start: { dateTime: new Date().toISOString(), timeZone },
-            end: { dateTime: new Date(Date.now() + 3600000).toISOString(), timeZone },
-            hangoutLink: meetUrl,
-            status: "confirmed",
-          },
-          {
-            id: `evt_sample_2`,
-            summary: "Product Architecture Review",
-            start: { dateTime: new Date(Date.now() + 86400000).toISOString(), timeZone },
-            end: { dateTime: new Date(Date.now() + 90000000).toISOString(), timeZone },
-            status: "confirmed",
-          },
-        ],
-        totalResults: 2,
-        mock: true,
-      };
-    }
-
-    if (operation === "getEvent") {
-      return {
-        operation,
-        id: mockEventId,
-        summary,
-        description: config.description ?? "Mock event details",
-        start: { dateTime: startIso, timeZone },
-        end: { dateTime: endIso, timeZone },
-        hangoutLink: meetUrl,
-        status: "confirmed",
-        mock: true,
-      };
-    }
-
-    if (operation === "deleteEvent") {
-      return {
-        operation,
-        id: mockEventId,
-        deleted: true,
-        calendarId: decodeURIComponent(calendarId),
-        timestamp: new Date().toISOString(),
-        mock: true,
-      };
-    }
-
+function mockCalendarResult(input: GoogleCalendarInput, start: Record<string, string>, end: Record<string, string>): Record<string, unknown> {
+  const eventId = input.eventId ?? `event_${Date.now()}`;
+  const summary = input.summary ?? input.title ?? "New Calendar Event";
+  const meetUrl = `https://meet.google.com/mock-${Math.random().toString(36).slice(2, 10)}`;
+  if (input.operation === "listEvents") {
     return {
-      operation,
-      id: mockEventId,
-      summary,
-      description: config.description ?? "",
-      location: config.location ?? "",
-      startTime: startIso,
-      endTime: endIso,
-      start: { dateTime: startIso, timeZone },
-      end: { dateTime: endIso, timeZone },
-      attendees: attendeesList,
-      htmlLink: `https://calendar.google.com/event?eid=${mockEventId}`,
-      hangoutLink: meetUrl,
-      conferenceData: {
-        entryPoints: [{ entryPointType: "video", uri: meetUrl, label: meetUrl }],
-        conferenceSolution: { key: { type: "hangoutsMeet" }, name: "Google Meet" },
-      },
-      status: "confirmed",
-      timestamp: new Date().toISOString(),
+      operation: input.operation,
+      kind: "calendar#events",
+      summary: "Primary Calendar",
+      items: [
+        { id: "evt_sample_1", summary: "Sprint Planning", start, end, status: "confirmed" },
+        { id: "evt_sample_2", summary: "Architecture Review", start, end, status: "confirmed" },
+      ],
+      totalResults: 2,
       mock: true,
     };
   }
+  if (input.operation === "deleteEvent") return { operation: input.operation, id: eventId, deleted: true, calendarId: input.calendarId, mock: true };
+  return {
+    operation: input.operation,
+    id: eventId,
+    summary,
+    description: input.description ?? "",
+    location: input.location ?? "",
+    startTime: start.dateTime ?? start.date,
+    endTime: end.dateTime ?? end.date,
+    start,
+    end,
+    attendees: (input.attendees ?? []).map((attendee) => typeof attendee === "string" ? { email: attendee } : attendee),
+    htmlLink: `https://calendar.google.com/event?eid=${eventId}`,
+    ...(input.addGoogleMeet ? { hangoutLink: meetUrl, conferenceData: { entryPoints: [{ entryPointType: "video", uri: meetUrl }] } } : {}),
+    status: "confirmed",
+    mock: true,
+  };
+}
 
-  // Live Google Calendar API v3
-  let endpoint = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`;
+export async function executeGoogleCalendar(
+  config: Record<string, unknown>,
+  input: unknown = {},
+  orgId = "",
+): Promise<Record<string, unknown>> {
+  const validated = GoogleCalendarInputSchema.parse(mergeNodeInput(config, input));
+  const startFallback = validated.startTime ?? new Date().toISOString();
+  const start = normalizeEventDate(validated.start, startFallback, validated.timeZone);
+  const endFallback = validated.endTime ?? new Date(Date.parse(start.dateTime ?? startFallback) + 3_600_000).toISOString();
+  const end = normalizeEventDate(validated.end, endFallback, validated.timeZone);
+  validateChronology(start, end);
+  if (isNodeMockEnabled(validated.mock)) return mockCalendarResult(validated, start, end);
+
+  const oauth = await resolveVaultOAuthCredential({
+    credentialId: validated.credentialId,
+    orgId,
+    providers: ["google", "google_workspace", "google_calendar"],
+  });
+  const accessToken = oauth?.accessToken ?? process.env.GOOGLE_ACCESS_TOKEN;
+  if (!accessToken) return mockCalendarResult(validated, start, end);
+
+  const calendarId = encodeURIComponent(validated.calendarId);
+  const baseUrl = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`;
+  const headers = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
+  let endpoint = baseUrl;
   let method = "POST";
   let body: Record<string, unknown> | undefined;
 
-  if (operation === "listEvents") {
-    const qParams = new URLSearchParams();
-    if (config.timeMin) qParams.set("timeMin", config.timeMin);
-    if (config.timeMax) qParams.set("timeMax", config.timeMax);
-    if (config.maxResults) qParams.set("maxResults", String(config.maxResults));
-    if (config.q ?? config.query) qParams.set("q", String(config.q ?? config.query));
-    qParams.set("singleEvents", "true");
-    qParams.set("orderBy", "startTime");
-    endpoint = `${endpoint}?${qParams.toString()}`;
+  if (validated.operation === "listEvents") {
+    const params = new URLSearchParams({ singleEvents: "true", orderBy: "startTime", maxResults: String(validated.maxResults) });
+    if (validated.timeMin) params.set("timeMin", validated.timeMin);
+    if (validated.timeMax) params.set("timeMax", validated.timeMax);
+    if (validated.q ?? validated.query) params.set("q", validated.q ?? validated.query ?? "");
+    endpoint = `${baseUrl}?${params}`;
     method = "GET";
-  } else if (operation === "getEvent") {
-    endpoint = `${endpoint}/${encodeURIComponent(config.eventId!)}`;
+  } else if (validated.operation === "quickAdd") {
+    const params = new URLSearchParams({ text: validated.quickAddText ?? validated.summary ?? validated.title ?? "" });
+    endpoint = `${baseUrl}/quickAdd?${params}`;
+  } else if (validated.operation === "getEvent") {
+    endpoint = `${baseUrl}/${encodeURIComponent(validated.eventId!)}`;
     method = "GET";
-  } else if (operation === "deleteEvent") {
-    endpoint = `${endpoint}/${encodeURIComponent(config.eventId!)}`;
+  } else if (validated.operation === "deleteEvent") {
+    endpoint = `${baseUrl}/${encodeURIComponent(validated.eventId!)}`;
     method = "DELETE";
-  } else if (operation === "updateEvent") {
-    endpoint = `${endpoint}/${encodeURIComponent(config.eventId!)}`;
-    method = "PATCH";
-    body = {
-      summary,
-      description: config.description,
-      location: config.location,
-      start: { dateTime: startIso, timeZone },
-      end: { dateTime: endIso, timeZone },
-      attendees: attendeesList.length > 0 ? attendeesList : undefined,
-    };
   } else {
-    // createEvent / quickAdd
+    if (validated.operation === "updateEvent") {
+      endpoint = `${baseUrl}/${encodeURIComponent(validated.eventId!)}`;
+      method = "PATCH";
+    }
+    const attendees = (validated.attendees ?? []).map((attendee) => typeof attendee === "string" ? { email: attendee } : attendee);
     body = {
-      summary,
-      description: config.description,
-      location: config.location,
-      start: { dateTime: startIso, timeZone },
-      end: { dateTime: endIso, timeZone },
-      attendees: attendeesList.length > 0 ? attendeesList : undefined,
-      conferenceData: config.addGoogleMeet !== false ? {
-        createRequest: {
-          requestId: `meet_${Date.now()}`,
-          conferenceSolutionKey: { type: "hangoutsMeet" },
-        },
-      } : undefined,
+      summary: validated.summary ?? validated.title ?? "New Calendar Event",
+      description: validated.description,
+      location: validated.location,
+      start,
+      end,
+      attendees: attendees.length ? attendees : undefined,
+      reminders: validated.reminders,
+      conferenceData: validated.conferenceData ?? (validated.addGoogleMeet ? {
+        createRequest: { requestId: `agentflow-${Date.now()}`, conferenceSolutionKey: { type: "hangoutsMeet" } },
+      } : undefined),
     };
-    endpoint = `${endpoint}?conferenceDataVersion=1`;
+    if (validated.addGoogleMeet || validated.conferenceData) endpoint += `${endpoint.includes("?") ? "&" : "?"}conferenceDataVersion=1`;
   }
 
-  const res = await fetch(endpoint, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  if (!res.ok) {
-    throw new Error(`Google Calendar API error (${res.status}): ${await res.text()}`);
-  }
-
-  if (method === "DELETE") {
-    return { operation, deleted: true, eventId: config.eventId };
-  }
-
-  const data = (await res.json()) as Record<string, unknown>;
-  return {
-    operation,
-    ...data,
-    timestamp: new Date().toISOString(),
-  };
+  const response = await safeFetch(endpoint, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (!response.ok) throw new Error(`Google Calendar API error (${response.status}): ${await response.text()}`);
+  if (method === "DELETE") return { operation: validated.operation, eventId: validated.eventId, deleted: true };
+  return { operation: validated.operation, ...(await response.json() as Record<string, unknown>) };
 }
 
 export class GoogleCalendarNodeHandler implements NodeHandler {
@@ -254,20 +180,10 @@ export class GoogleCalendarNodeHandler implements NodeHandler {
   category = "productivity";
 
   async execute(ctx: NodeExecutionContext): Promise<NodeExecutionResult> {
-    const config = (ctx.nodeConfig ?? {}) as GoogleCalendarEventPayload;
-    const input = ctx.input;
-
-    const items = Array.isArray(input) ? input : [input];
     const results: NodeItem[] = [];
-    const logs: string[] = [];
-
-    for (const item of items) {
-      const itemData = (typeof item === "object" && item !== null && "json" in item ? (item as NodeItem).json : item) ?? {};
-      const res = await executeGoogleCalendar(config, itemData, ctx.orgId);
-      results.push({ json: res });
-      logs.push(`Google Calendar: ${config.operation ?? "createEvent"} completed (${res.summary ?? res.id})`);
+    for (const item of wrapItems(ctx.input)) {
+      results.push({ json: await executeGoogleCalendar(ctx.nodeConfig, item.json, ctx.orgId) });
     }
-
-    return { items: results, logs };
+    return { items: results, logs: [`Google Calendar node: processed ${results.length} item(s)`] };
   }
 }

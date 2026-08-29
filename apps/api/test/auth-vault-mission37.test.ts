@@ -924,6 +924,21 @@ test("TASK-20: verifyAuditLedgerIntegrity validates complete unbroken chain", as
   assert.ok(integrity.latestHash);
 });
 
+test("TASK-20: concurrent audit appends preserve one hash chain", async () => {
+  const orgId = "org-concurrent-ledger";
+  const entries = await Promise.all(["started", "progress", "finished"].map((action) => recordAuditEvent({
+    orgId,
+    action: `execution.${action}`,
+    resource: "execution",
+    timestamp: "2026-08-26T20:00:00.000Z",
+  })));
+
+  assert.equal(new Set(entries.map((entry) => entry.hash)).size, 3);
+  const integrity = await verifyAuditLedgerIntegrity(orgId);
+  assert.equal(integrity.valid, true);
+  assert.equal(integrity.totalEntries, 3);
+});
+
 test("TASK-20: verifyAuditLedgerIntegrity immediately detects tampering or modified blocks", async () => {
   const orgId = "org-tampered-ledger";
 

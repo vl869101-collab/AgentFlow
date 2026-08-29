@@ -155,6 +155,48 @@ export interface Workflow {
   edges?: unknown;
 }
 
+export interface WorkflowVersionSnapshot {
+  nodes?: Array<Record<string, unknown>>;
+  edges?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface WorkflowVersion {
+  id: string;
+  workflowId?: string;
+  version: number;
+  createdAt: string;
+  snapshot: WorkflowVersionSnapshot;
+}
+
+export interface WorkflowFieldDiff {
+  field: string;
+  oldValue: unknown;
+  newValue: unknown;
+}
+
+export interface WorkflowDiff {
+  workflowId: string;
+  fromVersion: number;
+  toVersion: number;
+  nodesAdded: Array<Record<string, unknown>>;
+  nodesRemoved: Array<Record<string, unknown>>;
+  nodesModified: Array<{ nodeId: string; type: string; changes: WorkflowFieldDiff[] }>;
+  edgesAdded: Array<Record<string, unknown>>;
+  edgesRemoved: Array<Record<string, unknown>>;
+  edgesModified: Array<{ edgeId?: string; source: string; target: string; changes: WorkflowFieldDiff[] }>;
+  summary: {
+    totalChanges: number;
+    nodesAddedCount: number;
+    nodesRemovedCount: number;
+    nodesModifiedCount: number;
+    edgesAddedCount: number;
+    edgesRemovedCount: number;
+    edgesModifiedCount: number;
+    hasBreakingChanges: boolean;
+  };
+}
+
 export const workflows = {
   list: () => api<Workflow[]>("/api/workflows"),
   get: (id: string) => api<Workflow>(`/api/workflows/${id}`),
@@ -164,6 +206,15 @@ export const workflows = {
     api<Workflow>(`/api/workflows/${id}`, { method: "PATCH", body: data }),
   delete: (id: string) =>
     api<void>(`/api/workflows/${id}`, { method: "DELETE" }),
+  versions: (id: string) => api<WorkflowVersion[]>(`/api/workflows/${id}/versions`),
+  version: (id: string, version: number) => api<WorkflowVersion>(`/api/workflows/${id}/versions/${version}`),
+  diff: (id: string, fromVersion: number, toVersion: number) =>
+    api<WorkflowDiff>(`/api/workflows/${id}/diff?fromVersion=${fromVersion}&toVersion=${toVersion}`),
+  rollback: (id: string, targetVersion: number) =>
+    api<{ ok: true; rolledBackToVersion: number; newVersion: number; workflow: Workflow }>(`/api/workflows/${id}/rollback`, {
+      method: "POST",
+      body: { targetVersion },
+    }),
 };
 
 // Executions
