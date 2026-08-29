@@ -175,6 +175,29 @@ export interface WorkflowFieldDiff {
   newValue: unknown;
 }
 
+export interface VisualNodeDiffMarker {
+  nodeId: string;
+  status: "added" | "removed" | "modified" | "unchanged";
+  styleClass: string;
+  badgeLabel: string;
+  changedFields: string[];
+}
+
+export interface VisualEdgeDiffMarker {
+  edgeId?: string;
+  source: string;
+  target: string;
+  status: "added" | "removed" | "modified" | "unchanged";
+  styleClass: string;
+  strokeColor: string;
+  changedFields: string[];
+}
+
+export interface WorkflowVisualDiffMap {
+  nodes: Record<string, VisualNodeDiffMarker>;
+  edges: Record<string, VisualEdgeDiffMarker>;
+}
+
 export interface WorkflowDiff {
   workflowId: string;
   fromVersion: number;
@@ -185,6 +208,7 @@ export interface WorkflowDiff {
   edgesAdded: Array<Record<string, unknown>>;
   edgesRemoved: Array<Record<string, unknown>>;
   edgesModified: Array<{ edgeId?: string; source: string; target: string; changes: WorkflowFieldDiff[] }>;
+  visualMap?: WorkflowVisualDiffMap;
   summary: {
     totalChanges: number;
     nodesAddedCount: number;

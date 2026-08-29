@@ -1,5 +1,21 @@
 import { z } from "zod";
 export {
+  computeWorkflowDiff,
+  normalizeSnapshotNodes,
+  normalizeSnapshotEdges,
+  deepEqual,
+  type WorkflowNodeSnapshot,
+  type WorkflowEdgeSnapshot,
+  type WorkflowSnapshot,
+  type FieldDiff,
+  type NodeModificationDiff,
+  type EdgeModificationDiff,
+  type VisualNodeDiffMarker,
+  type VisualEdgeDiffMarker,
+  type WorkflowVisualDiffMap,
+  type WorkflowDiffResult,
+} from "./workflow-diff.js";
+export {
   importN8nWorkflow,
   createAgentFlowFromN8n,
   validateN8nWorkflow,
