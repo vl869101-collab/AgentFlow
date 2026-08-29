@@ -13,12 +13,20 @@ process.env.CREDENTIAL_ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef0123456
 process.env.JWT_SECRET = "test-jwt-secret-that-is-at-least-32-characters-long";
 process.env.MOCK_SERVICES = "true";
 
-const [{ buildApp }, { resetStore }, { sendToDLQ, getDLQIncidents }, { deadMansSwitch, DeadMansSwitchService }, { checkDeadlockStatus }] = await Promise.all([
+const [
+  { buildApp },
+  { resetStore },
+  { sendToDLQ, getDLQIncidents },
+  { deadMansSwitch, DeadMansSwitchService },
+  { checkDeadlockStatus, checkConnectionSaturation },
+  { buildApiDatasourceUrl, createApiPrismaClient },
+] = await Promise.all([
   import("../src/server.js"),
   import("../src/lib/store.js"),
   import("../src/services/queue.js"),
   import("../src/services/dead-mans-switch.js"),
   import("../src/routes/health.js"),
+  import("../src/lib/prisma.js"),
 ]);
 
 const app = await buildApp({ logger: false });
@@ -49,6 +57,7 @@ test("Healthcheck: /health returns advanced status, latency metrics, memory and 
   assert.ok(body.checks.dlqQueue);
   assert.ok(body.checks.memory);
   assert.ok(body.checks.deadlock);
+  assert.ok(body.checks.connectionSaturation);
 
   // Latency metrics
   assert.ok(body.latencyMs);
@@ -71,12 +80,43 @@ test("Healthcheck: /health returns advanced status, latency metrics, memory and 
   // Deadlock check
   assert.ok(body.metrics.deadlockCheck);
   assert.ok(["ok", "unsupported", "deadlock_detected"].includes(body.metrics.deadlockCheck.status));
+
+  // Connection saturation metrics
+  assert.ok(body.metrics.connectionSaturation);
+  assert.ok(["ok", "warning", "saturated", "unsupported"].includes(body.metrics.connectionSaturation.status));
 });
 
-test("Healthcheck: checkDeadlockStatus utility returns structured state", async () => {
+test("Healthcheck: checkDeadlockStatus and checkConnectionSaturation utility return structured state", async () => {
   const status = await checkDeadlockStatus();
   assert.ok(["ok", "unsupported", "deadlock_detected"].includes(status.status));
   assert.ok(typeof status.checkedAt === "string");
+
+  const saturation = await checkConnectionSaturation();
+  assert.ok(["ok", "warning", "saturated", "unsupported"].includes(saturation.status));
+  assert.ok(typeof saturation.checkedAt === "string");
+});
+
+test("Prisma Pool Policy: buildApiDatasourceUrl sets connection budget parameters properly", () => {
+  const url = "postgresql://postgres:postgres@localhost:5432/agentflow?schema=public";
+  const configured = buildApiDatasourceUrl(url, {
+    connectionLimit: 15,
+    poolTimeoutSeconds: 5,
+    connectTimeoutSeconds: 8,
+    applicationName: "agentflow-api-test",
+  });
+
+  assert.ok(configured);
+  assert.ok(configured.includes("connection_limit=15"));
+  assert.ok(configured.includes("pool_timeout=5"));
+  assert.ok(configured.includes("connect_timeout=8"));
+  assert.ok(configured.includes("application_name=agentflow-api-test"));
+
+  // Default parameters
+  const defaultUrl = buildApiDatasourceUrl(url);
+  assert.ok(defaultUrl?.includes("connection_limit=10"));
+  assert.ok(defaultUrl?.includes("pool_timeout=10"));
+  assert.ok(defaultUrl?.includes("connect_timeout=10"));
+  assert.ok(defaultUrl?.includes("application_name=agentflow-api"));
 });
 
 test("DeadMansSwitch: formats structured Discord embed and Slack blocks correctly", () => {

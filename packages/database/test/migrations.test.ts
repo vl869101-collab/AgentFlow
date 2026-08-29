@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { buildPrismaDatasourceUrl, createPrismaClient } from "../src/index";
 
 describe("Database Migrations Audit & Reversibility", () => {
   const migrationsDir = path.resolve(__dirname, "../prisma/migrations");
@@ -49,5 +50,20 @@ describe("Database Migrations Audit & Reversibility", () => {
     expect(downSql).toContain('DROP TABLE IF EXISTS "RefreshToken"');
     expect(downSql).toContain('DROP INDEX IF EXISTS "RefreshToken_jti_key"');
     expect(downSql).toContain('DROP INDEX IF EXISTS "RefreshToken_tokenHash_key"');
+  });
+
+  it("buildPrismaDatasourceUrl enforces Connection Budget and Pooling Policy", () => {
+    const raw = "postgresql://usr:pwd@localhost:5432/agentflow";
+    const built = buildPrismaDatasourceUrl(raw, {
+      connectionLimit: 12,
+      poolTimeoutSeconds: 15,
+      connectTimeoutSeconds: 10,
+      applicationName: "agentflow-test-runner",
+    });
+
+    expect(built).toContain("connection_limit=12");
+    expect(built).toContain("pool_timeout=15");
+    expect(built).toContain("connect_timeout=10");
+    expect(built).toContain("application_name=agentflow-test-runner");
   });
 });

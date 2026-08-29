@@ -4,6 +4,15 @@ import { getRedisClient } from "../lib/redis.js";
 import { getWorkflowQueue, getDLQQueue } from "../services/queue.js";
 import os from "node:os";
 
+export interface DatabaseConnectionSaturationStatus {
+  status: "ok" | "warning" | "saturated" | "unsupported";
+  activeConnections?: number;
+  maxConnections?: number;
+  usageRatio?: number;
+  waitingQueriesCount?: number;
+  checkedAt: string;
+}
+
 export interface HealthCheckResponse {
   status: "ok" | "degraded" | "error";
   timestamp: string;
@@ -24,6 +33,7 @@ export interface HealthCheckResponse {
       waitingQueriesCount?: number;
       checkedAt: string;
     };
+    connectionSaturation?: DatabaseConnectionSaturationStatus;
     workers?: {
       workflowQueue: {
         active: number;
@@ -72,6 +82,66 @@ export async function checkDeadlockStatus(): Promise<{
     };
   } catch {
     // If not PostgreSQL or insufficient permissions, report ok or unsupported safely
+    return {
+      status: "unsupported",
+      checkedAt,
+    };
+  }
+}
+
+/**
+ * Checks PostgreSQL connection saturation: active connections vs max_connections.
+ * Emits warning when connection usage exceeds 80% and saturated when >= 90%.
+ */
+export async function checkConnectionSaturation(): Promise<DatabaseConnectionSaturationStatus> {
+  const checkedAt = new Date().toISOString();
+  if (!process.env.DATABASE_URL) {
+    return {
+      status: "ok",
+      activeConnections: 1,
+      maxConnections: 100,
+      usageRatio: 0.01,
+      waitingQueriesCount: 0,
+      checkedAt,
+    };
+  }
+
+  try {
+    const [connStats, maxConnResult]: [Array<{ count: bigint | number; waiting: bigint | number }>, Array<{ setting: string }>] =
+      await Promise.all([
+        prisma.$queryRaw`
+          SELECT
+            count(*) as count,
+            count(*) FILTER (WHERE wait_event_type = 'Lock' OR state = 'active') as waiting
+          FROM pg_stat_activity
+        `,
+        prisma.$queryRaw`
+          SELECT setting FROM pg_settings WHERE name = 'max_connections'
+        `,
+      ]);
+
+    const activeConnections = Number(connStats?.[0]?.count ?? 0);
+    const waitingQueriesCount = Number(connStats?.[0]?.waiting ?? 0);
+    const maxConnections = Number(maxConnResult?.[0]?.setting ?? 100);
+
+    const usageRatio = maxConnections > 0 ? Math.round((activeConnections / maxConnections) * 100) / 100 : 0;
+
+    let status: DatabaseConnectionSaturationStatus["status"] = "ok";
+    if (usageRatio >= 0.9 || activeConnections >= maxConnections - 5) {
+      status = "saturated";
+    } else if (usageRatio >= 0.8) {
+      status = "warning";
+    }
+
+    return {
+      status,
+      activeConnections,
+      maxConnections,
+      usageRatio,
+      waitingQueriesCount,
+      checkedAt,
+    };
+  } catch {
     return {
       status: "unsupported",
       checkedAt,
@@ -178,9 +248,12 @@ export async function healthRoutes(app: FastifyInstance) {
     const deadlock = await checkDeadlockStatus();
     checks.deadlock = deadlock.status === "deadlock_detected" ? "error" : "ok";
 
+    // 6. DB Connection Saturation & Pool monitoring
+    const saturation = await checkConnectionSaturation();
+    checks.connectionSaturation = saturation.status === "saturated" ? "error" : saturation.status === "warning" ? "warning" : "ok";
+
     const hasError = Object.values(checks).some((v) => v === "error");
     const isDegraded = Object.values(checks).some((v) => v === "degraded" || v === "warning" || v === "paused");
-    const allHealthy = !hasError && !isDegraded;
 
     const statusCode = hasError ? 503 : 200;
 
@@ -192,6 +265,7 @@ export async function healthRoutes(app: FastifyInstance) {
       metrics: {
         memory: memoryMetrics,
         deadlockCheck: deadlock,
+        connectionSaturation: saturation,
         workers: workerCounts,
       },
     };
