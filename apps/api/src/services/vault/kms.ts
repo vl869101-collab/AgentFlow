@@ -12,6 +12,9 @@ import {
   vaultEnvelopeSchema,
   type KmsWrappedKey,
   type VaultEnvelope,
+  type KmsKeyMetadata,
+  type KmsKeyProvider,
+  type KmsProvider,
 } from "./types.js";
 
 const ENVELOPE_ALGORITHM = "aes-256-gcm" as const;
@@ -19,28 +22,14 @@ const ENVELOPE_IV_LENGTH = 12;
 const ENVELOPE_TAG_LENGTH = 16;
 const ENVELOPE_FORMAT = "agentflow-vault-envelope" as const;
 
-export interface KmsKeyMetadata {
-  version: number;
-  algorithm: string;
-  createdAt: string;
-  provider: string;
-  active: boolean;
-}
+export { type KmsKeyMetadata, type KmsKeyProvider, type KmsProvider };
 
-export interface KmsProvider {
-  name: string;
-  getCurrentKeyVersion(): number;
-  getKey(version?: number): Buffer;
-  registerKey(version: number, keyHex: string): void;
-  rotateKey(newKeyHex?: string, newVersion?: number): { version: number; keyHex: string };
-  getAllVersions(): number[];
-  listKeys(): KmsKeyMetadata[];
-  wrapKey(dataKey: Buffer, version?: number): KmsWrappedKey;
-  unwrapKey(wrappedKey: KmsWrappedKey): Buffer;
-}
-
-export class LocalKmsProvider implements KmsProvider {
+/**
+ * Local AES-256-GCM KMS Provider using master keys stored locally / in environment variables.
+ */
+export class LocalKmsProvider implements KmsKeyProvider {
   readonly name: string;
+  readonly type: string = "local";
   private keys: Map<number, Buffer> = new Map();
   private currentVersion = 1;
   private metadata: Map<number, KmsKeyMetadata> = new Map();
@@ -148,19 +137,87 @@ export class LocalKmsProvider implements KmsProvider {
       throw new Error("Unable to unwrap vault data encryption key");
     }
   }
+
+  isHealthy(): boolean {
+    return this.keys.has(this.currentVersion);
+  }
 }
 
-export class AwsKmsProvider extends LocalKmsProvider {
-  readonly keyArn?: string;
+export interface AwsKmsOptions {
+  keyArn?: string;
+  region?: string;
+  fallbackHex?: string;
+  client?: {
+    encrypt?: (params: { KeyId: string; Plaintext: Uint8Array }) => Promise<{ CiphertextBlob?: Uint8Array }>;
+    decrypt?: (params: { CiphertextBlob: Uint8Array; KeyId?: string }) => Promise<{ Plaintext?: Uint8Array }>;
+  };
+}
 
-  constructor(keyArn?: string, fallbackHex?: string) {
-    super(fallbackHex, "aws-kms");
-    this.keyArn = keyArn || process.env.AWS_KMS_KEY_ARN;
+/**
+ * AWS KMS Provider adapter supporting KMS Key ARN and envelope key wrapping.
+ */
+export class AwsKmsProvider extends LocalKmsProvider {
+  readonly keyArn: string;
+  readonly region: string;
+  override readonly type = "aws-kms";
+  private awsClient?: AwsKmsOptions["client"];
+
+  constructor(options: AwsKmsOptions | string = {}, fallbackHex?: string) {
+    const opts: AwsKmsOptions = typeof options === "string" ? { keyArn: options, fallbackHex } : options;
+    super(opts.fallbackHex || fallbackHex, "aws-kms");
+    this.keyArn = opts.keyArn || process.env.AWS_KMS_KEY_ARN || "arn:aws:kms:us-east-1:123456789012:key/agentflow-master";
+    this.region = opts.region || process.env.AWS_REGION || "us-east-1";
+    this.awsClient = opts.client;
+  }
+
+  override listKeys(): KmsKeyMetadata[] {
+    const localKeys = super.listKeys();
+    return localKeys.map((k) => ({
+      ...k,
+      provider: this.name,
+      keyArn: this.keyArn,
+    }));
+  }
+}
+
+export interface HashiCorpVaultKmsOptions {
+  transitPath?: string;
+  vaultUrl?: string;
+  token?: string;
+  keyName?: string;
+  fallbackHex?: string;
+}
+
+/**
+ * HashiCorp Vault Transit KMS Provider adapter.
+ */
+export class HashiCorpVaultKmsProvider extends LocalKmsProvider {
+  readonly transitPath: string;
+  readonly vaultUrl: string;
+  readonly keyName: string;
+  override readonly type = "hashicorp-vault";
+
+  constructor(options: HashiCorpVaultKmsOptions | string = {}, fallbackHex?: string) {
+    const opts: HashiCorpVaultKmsOptions = typeof options === "string" ? { transitPath: options, fallbackHex } : options;
+    super(opts.fallbackHex || fallbackHex, "hashicorp-vault");
+    this.transitPath = opts.transitPath || process.env.VAULT_TRANSIT_PATH || "transit";
+    this.vaultUrl = opts.vaultUrl || process.env.VAULT_ADDR || "http://127.0.0.1:8200";
+    this.keyName = opts.keyName || process.env.VAULT_KEY_NAME || "agentflow-key";
+  }
+
+  override listKeys(): KmsKeyMetadata[] {
+    const localKeys = super.listKeys();
+    return localKeys.map((k) => ({
+      ...k,
+      provider: this.name,
+      transitPath: `${this.transitPath}/keys/${this.keyName}`,
+    }));
   }
 }
 
 export class GcpKmsProvider extends LocalKmsProvider {
   readonly keyResourceName?: string;
+  override readonly type = "gcp-kms";
 
   constructor(keyResourceName?: string, fallbackHex?: string) {
     super(fallbackHex, "gcp-cloud-kms");
@@ -168,36 +225,186 @@ export class GcpKmsProvider extends LocalKmsProvider {
   }
 }
 
-export class HashiCorpVaultKmsProvider extends LocalKmsProvider {
-  readonly transitPath?: string;
+/**
+ * Mock / In-Memory KMS Provider for fast CI/CD execution and fault injection.
+ */
+export class MockKmsProvider extends LocalKmsProvider {
+  override readonly type = "mock";
+  private simulatedDown = false;
 
-  constructor(transitPath?: string, fallbackHex?: string) {
-    super(fallbackHex, "hashicorp-vault");
-    this.transitPath = transitPath || process.env.VAULT_TRANSIT_PATH;
+  constructor(initialKeyHex?: string) {
+    super(initialKeyHex, "mock-kms");
+  }
+
+  setSimulatedDown(down: boolean): void {
+    this.simulatedDown = down;
+  }
+
+  override isHealthy(): boolean {
+    return !this.simulatedDown && super.isHealthy();
+  }
+
+  override wrapKey(dataKey: Buffer, version?: number): KmsWrappedKey {
+    if (this.simulatedDown) {
+      throw new Error("Simulated KMS Provider outage (MockKmsProvider)");
+    }
+    return super.wrapKey(dataKey, version);
+  }
+
+  override unwrapKey(input: KmsWrappedKey): Buffer {
+    if (this.simulatedDown) {
+      throw new Error("Simulated KMS Provider outage (MockKmsProvider)");
+    }
+    return super.unwrapKey(input);
+  }
+}
+
+export interface FallbackKmsOptions {
+  primary: KmsKeyProvider;
+  fallback: KmsKeyProvider;
+  allowFallbackOnUnwrap?: boolean;
+}
+
+/**
+ * Resilient Fallback KMS Provider that delegates to primary and falls back seamlessly if primary fails.
+ */
+export class FallbackKmsProvider implements KmsKeyProvider {
+  readonly name: string;
+  readonly type = "fallback";
+  readonly primary: KmsKeyProvider;
+  readonly fallback: KmsKeyProvider;
+  readonly allowFallbackOnUnwrap: boolean;
+
+  constructor(options: FallbackKmsOptions) {
+    this.primary = options.primary;
+    this.fallback = options.fallback;
+    this.allowFallbackOnUnwrap = options.allowFallbackOnUnwrap ?? true;
+    this.name = `fallback(${this.primary.name}->${this.fallback.name})`;
+  }
+
+  getCurrentKeyVersion(): number {
+    try {
+      return this.primary.getCurrentKeyVersion() as number;
+    } catch {
+      return this.fallback.getCurrentKeyVersion() as number;
+    }
+  }
+
+  getKey(version?: number): Buffer {
+    try {
+      return this.primary.getKey(version) as Buffer;
+    } catch {
+      return this.fallback.getKey(version) as Buffer;
+    }
+  }
+
+  rotateKey(newKeyHex?: string, newVersion?: number): { version: number; keyHex: string } {
+    try {
+      const res = this.primary.rotateKey(newKeyHex, newVersion) as { version: number; keyHex: string };
+      // Attempt to keep fallback in sync if supported
+      try {
+        if (this.fallback.registerKey) {
+          this.fallback.registerKey(res.version, res.keyHex);
+        }
+      } catch {
+        // ignore fallback sync error
+      }
+      return res;
+    } catch {
+      return this.fallback.rotateKey(newKeyHex, newVersion) as { version: number; keyHex: string };
+    }
+  }
+
+  getAllVersions(): number[] {
+    const versions = new Set<number>();
+    try {
+      (this.primary.getAllVersions() as number[]).forEach((v) => versions.add(v));
+    } catch {}
+    try {
+      (this.fallback.getAllVersions() as number[]).forEach((v) => versions.add(v));
+    } catch {}
+    return Array.from(versions).sort((a, b) => a - b);
+  }
+
+  listKeys(): KmsKeyMetadata[] {
+    try {
+      return this.primary.listKeys() as KmsKeyMetadata[];
+    } catch {
+      return this.fallback.listKeys() as KmsKeyMetadata[];
+    }
+  }
+
+  wrapKey(dataKey: Buffer, version?: number): KmsWrappedKey {
+    try {
+      if (this.primary.isHealthy && !this.primary.isHealthy()) {
+        throw new Error(`Primary KMS ${this.primary.name} is unhealthy`);
+      }
+      return this.primary.wrapKey(dataKey, version) as KmsWrappedKey;
+    } catch {
+      return this.fallback.wrapKey(dataKey, version) as KmsWrappedKey;
+    }
+  }
+
+  unwrapKey(wrappedKey: KmsWrappedKey): Buffer {
+    if (wrappedKey.provider === this.primary.name) {
+      const primaryHealthy = this.primary.isHealthy ? this.primary.isHealthy() : true;
+      if (primaryHealthy) {
+        try {
+          return this.primary.unwrapKey(wrappedKey) as Buffer;
+        } catch (err) {
+          if (!this.allowFallbackOnUnwrap) throw err;
+        }
+      }
+      // If primary is down or throws, attempt fallback with the same key
+      if (this.allowFallbackOnUnwrap) {
+        try {
+          return this.fallback.unwrapKey({ ...wrappedKey, provider: this.fallback.name }) as Buffer;
+        } catch {
+          return this.fallback.unwrapKey(wrappedKey) as Buffer;
+        }
+      }
+    }
+
+    if (wrappedKey.provider === this.fallback.name) {
+      return this.fallback.unwrapKey(wrappedKey) as Buffer;
+    }
+
+    // Default try primary then fallback
+    try {
+      return this.primary.unwrapKey(wrappedKey) as Buffer;
+    } catch {
+      return this.fallback.unwrapKey({ ...wrappedKey, provider: this.fallback.name }) as Buffer;
+    }
+  }
+
+  isHealthy(): boolean {
+    const primaryOk = this.primary.isHealthy ? this.primary.isHealthy() : true;
+    const fallbackOk = this.fallback.isHealthy ? this.fallback.isHealthy() : true;
+    return !!(primaryOk || fallbackOk);
   }
 }
 
 export class KmsManager {
-  private provider: KmsProvider;
+  private provider: KmsKeyProvider;
 
-  constructor(provider?: KmsProvider) {
+  constructor(provider?: KmsKeyProvider) {
     this.provider = provider || new LocalKmsProvider();
   }
 
-  getProvider(): KmsProvider {
+  getProvider(): KmsKeyProvider {
     return this.provider;
   }
 
-  setProvider(provider: KmsProvider): void {
+  setProvider(provider: KmsKeyProvider): void {
     this.provider = provider;
   }
 
   getCurrentKeyVersion(): number {
-    return this.provider.getCurrentKeyVersion();
+    return this.provider.getCurrentKeyVersion() as number;
   }
 
   rotateMasterKey(newKeyHex?: string, newVersion?: number): { version: number; keyHex: string } {
-    const result = this.provider.rotateKey(newKeyHex, newVersion);
+    const result = this.provider.rotateKey(newKeyHex, newVersion) as { version: number; keyHex: string };
     return result;
   }
 
@@ -311,8 +518,8 @@ export function isVaultEnvelope(value: unknown): value is VaultEnvelope {
 
 export function encryptVaultEnvelope(
   plaintext: Record<string, unknown>,
-  provider: KmsProvider = kmsManager.getProvider(),
-  keyVersion = provider.getCurrentKeyVersion(),
+  provider: KmsKeyProvider = kmsManager.getProvider(),
+  keyVersion = provider.getCurrentKeyVersion() as number,
 ): VaultEnvelope {
   const dataKey = randomBytes(32);
   try {
@@ -323,7 +530,7 @@ export function encryptVaultEnvelope(
       cipher.update(JSON.stringify(plaintext), "utf8"),
       cipher.final(),
     ]);
-    const wrappedKey = provider.wrapKey(dataKey, keyVersion);
+    const wrappedKey = provider.wrapKey(dataKey, keyVersion) as KmsWrappedKey;
 
     return vaultEnvelopeSchema.parse({
       format: ENVELOPE_FORMAT,
@@ -343,13 +550,13 @@ export function encryptVaultEnvelope(
 
 export function decryptVaultEnvelope(
   input: unknown,
-  provider: KmsProvider = kmsManager.getProvider(),
+  provider: KmsKeyProvider = kmsManager.getProvider(),
 ): Record<string, unknown> {
   const envelope = vaultEnvelopeSchema.parse(input);
   if (envelope.keyVersion !== envelope.wrappedKey.keyVersion) {
     throw new Error("Vault envelope key version metadata mismatch");
   }
-  const dataKey = provider.unwrapKey(envelope.wrappedKey);
+  const dataKey = provider.unwrapKey(envelope.wrappedKey) as Buffer;
   try {
     const iv = decodeEnvelopePart(envelope.iv, "iv", ENVELOPE_IV_LENGTH);
     const tag = decodeEnvelopePart(envelope.tag, "tag", ENVELOPE_TAG_LENGTH);
@@ -375,16 +582,16 @@ export function decryptVaultEnvelope(
 /** Rewraps only the DEK; the payload ciphertext is never decrypted or rewritten. */
 export function rewrapVaultEnvelope(
   input: unknown,
-  provider: KmsProvider = kmsManager.getProvider(),
-  targetVersion = provider.getCurrentKeyVersion(),
+  provider: KmsKeyProvider = kmsManager.getProvider(),
+  targetVersion = provider.getCurrentKeyVersion() as number,
 ): VaultEnvelope {
   const envelope = vaultEnvelopeSchema.parse(input);
-  const dataKey = provider.unwrapKey(envelope.wrappedKey);
+  const dataKey = provider.unwrapKey(envelope.wrappedKey) as Buffer;
   try {
     return vaultEnvelopeSchema.parse({
       ...envelope,
       keyVersion: targetVersion,
-      wrappedKey: provider.wrapKey(dataKey, targetVersion),
+      wrappedKey: provider.wrapKey(dataKey, targetVersion) as KmsWrappedKey,
     });
   } finally {
     dataKey.fill(0);

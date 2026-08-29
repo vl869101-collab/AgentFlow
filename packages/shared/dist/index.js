@@ -1,6 +1,7 @@
 import { z } from "zod";
 export { computeWorkflowDiff, normalizeSnapshotNodes, normalizeSnapshotEdges, deepEqual, } from "./workflow-diff.js";
 export { importN8nWorkflow, createAgentFlowFromN8n, validateN8nWorkflow, N8N_SDK_CATALOG, } from "./n8n-import.js";
+export { kmsWrappedKeySchema, vaultEnvelopeSchema, } from "./kms.js";
 // ═══════════════════════════════════════════
 // Auth Schemas
 // ═══════════════════════════════════════════

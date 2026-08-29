@@ -29,6 +29,15 @@ export {
   type AgentFlowImportResult,
   type ImportOptions,
 } from "./n8n-import.js";
+export {
+  kmsWrappedKeySchema,
+  vaultEnvelopeSchema,
+  type KmsWrappedKey,
+  type VaultEnvelope,
+  type KmsKeyMetadata,
+  type KmsKeyProvider,
+  type KmsProvider,
+} from "./kms.js";
 
 // ═══════════════════════════════════════════
 // Auth Schemas
