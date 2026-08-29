@@ -2,5 +2,8 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm --filter @agentflow/shared build && pnpm --filter @agentflow/web build",
   "outputDirectory": ".next",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "https://agentflow-api-u2di.onrender.com"
+  }
 }
