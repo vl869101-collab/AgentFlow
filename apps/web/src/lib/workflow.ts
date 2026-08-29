@@ -1,4 +1,4 @@
-import { NODE_TYPES, type ExecutionStatus } from "@agentflow/shared";
+import { NODE_TYPES, type ExecutionStatus, type VisualNodeDiffMarker } from "@agentflow/shared";
 import type { Edge, Node, XYPosition } from "@xyflow/react";
 
 export type NodeTypeKey = (typeof NODE_TYPES)[number]["type"];
@@ -10,6 +10,7 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   description: string;
   status?: ExecutionStatus;
   config: Record<string, string | number | boolean>;
+  diffMarker?: VisualNodeDiffMarker;
 }
 
 export type WorkflowCanvasNode = Node<WorkflowNodeData, CanvasNodeKind>;

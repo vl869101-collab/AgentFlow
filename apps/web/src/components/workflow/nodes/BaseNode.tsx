@@ -23,9 +23,34 @@ const statusClasses: Record<string, string> = {
 export function BaseNode({ data, selected, kind, icon: Icon }: WorkflowNodeProps & { kind: CanvasNodeKind; icon: LucideIcon }) {
   const meta = getNodeMeta(data.type);
   const showBranchHandles = data.type === "condition";
+  const diffMarker = data.diffMarker;
 
   return (
-    <div className={cn("relative min-w-[200px] overflow-visible bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-xl border-l-2", meta.styles.borderColor, selected && "ring-2 ring-violet-400/70 ring-offset-2 ring-offset-zinc-950", "transition-all duration-200 hover:border-white/20")}>
+    <div
+      className={cn(
+        "relative min-w-[200px] overflow-visible bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-xl border-l-2",
+        meta.styles.borderColor,
+        selected && "ring-2 ring-violet-400/70 ring-offset-2 ring-offset-zinc-950",
+        diffMarker?.styleClass,
+        "transition-all duration-200 hover:border-white/20"
+      )}
+    >
+      {diffMarker ? (
+        <div
+          className={cn(
+            "absolute -top-2.5 right-2 z-10 flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wider shadow-lg",
+            diffMarker.status === "added" && "bg-emerald-500 text-zinc-950 border border-emerald-300 font-mono",
+            diffMarker.status === "removed" && "bg-rose-500 text-white border border-rose-300 font-mono",
+            diffMarker.status === "modified" && "bg-amber-500 text-zinc-950 border border-amber-300 font-mono",
+            diffMarker.status === "unchanged" && "bg-zinc-800 text-zinc-400 border border-zinc-700 font-mono"
+          )}
+        >
+          <span>{diffMarker.badgeLabel}</span>
+          {diffMarker.changedFields && diffMarker.changedFields.length > 0 && !diffMarker.changedFields.includes("all") ? (
+            <span className="opacity-85 text-[8px] font-sans font-medium">({diffMarker.changedFields.join(", ")})</span>
+          ) : null}
+        </div>
+      ) : null}
       {kind !== "trigger" ? <Handle type="target" position={Position.Left} className="!bg-zinc-500" /> : null}
       <div className="flex items-center gap-2 border-b border-white/10 p-3">
         <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg", meta.styles.iconBg)}><Icon className={cn("h-4 w-4", meta.styles.iconColor)} /></div>

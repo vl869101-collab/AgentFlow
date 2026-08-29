@@ -1,18 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { History, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Columns2, History, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { workflows, type WorkflowDiff, type WorkflowVersion } from "@/lib/api";
+import { WorkflowDiffModal } from "./WorkflowDiffModal";
 
-export function WorkflowVersionPanel({ workflowId }: { workflowId: string }) {
+export function WorkflowVersionPanel({ workflowId, workflowName }: { workflowId: string; workflowName?: string }) {
   const [open, setOpen] = useState(false);
+  const [visualModalOpen, setVisualModalOpen] = useState(false);
   const [versions, setVersions] = useState<WorkflowVersion[]>([]);
   const [fromVersion, setFromVersion] = useState(0);
   const [toVersion, setToVersion] = useState(0);
   const [diff, setDiff] = useState<WorkflowDiff>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const fromVersionData = useMemo(
+    () => versions.find((v) => v.version === fromVersion),
+    [versions, fromVersion]
+  );
+  const toVersionData = useMemo(
+    () => versions.find((v) => v.version === toVersion),
+    [versions, toVersion]
+  );
 
   async function showHistory() {
     setOpen(true);
@@ -55,8 +66,31 @@ export function WorkflowVersionPanel({ workflowId }: { workflowId: string }) {
         {loading && versions.length === 0 ? <p className="text-xs text-zinc-500">Loading snapshots…</p> : null}
         {!loading && versions.length < 2 ? <p className="rounded-lg border border-white/10 bg-white/[0.02] p-4 text-xs text-zinc-500">Save the workflow twice to create a comparison.</p> : null}
         {error ? <p className="mt-4 text-xs text-red-400">{error}</p> : null}
-        {diff ? <div className="mt-5 space-y-4"><div className="grid grid-cols-3 gap-2">{[["Added", diff.summary.nodesAddedCount + diff.summary.edgesAddedCount, "text-green-300"], ["Removed", diff.summary.nodesRemovedCount + diff.summary.edgesRemovedCount, "text-red-300"], ["Modified", diff.summary.nodesModifiedCount + diff.summary.edgesModifiedCount, "text-amber-300"]].map(([label, count, color]) => <div key={String(label)} className="rounded-lg border border-white/10 bg-white/[0.02] p-3"><p className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</p><p className={`mt-1 text-xl font-semibold ${color}`}>{count}</p></div>)}</div><div className="rounded-lg border border-white/10"><div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-zinc-300">v{diff.fromVersion} → v{diff.toVersion} · {diff.summary.totalChanges} changes</div><ul className="divide-y divide-white/5 text-xs text-zinc-400">{diff.nodesAdded.map((node) => <li key={`added-${String(node.id)}`} className="px-3 py-2"><span className="text-green-300">+ node</span> {String(node.label ?? node.id)}</li>)}{diff.nodesRemoved.map((node) => <li key={`removed-${String(node.id)}`} className="px-3 py-2"><span className="text-red-300">− node</span> {String(node.label ?? node.id)}</li>)}{diff.nodesModified.map((node) => <li key={`modified-${node.nodeId}`} className="px-3 py-2"><span className="text-amber-300">~ node</span> {node.nodeId}: {node.changes.map((change) => change.field).join(", ")}</li>)}{diff.edgesModified.map((edge, index) => <li key={edge.edgeId ?? `edge-${index}`} className="px-3 py-2"><span className="text-amber-300">~ edge</span> {edge.source} → {edge.target}: {edge.changes.map((change) => change.field).join(", ")}</li>)}</ul></div></div> : null}
+        {diff ? <div className="mt-5 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-zinc-300">Diff Overview</span>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+              onClick={() => setVisualModalOpen(true)}
+            >
+              <Columns2 className="mr-1.5 h-3.5 w-3.5" />
+              Side-by-Side Flow Diff
+            </Button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">{[["Added", diff.summary.nodesAddedCount + diff.summary.edgesAddedCount, "text-green-300"], ["Removed", diff.summary.nodesRemovedCount + diff.summary.edgesRemovedCount, "text-red-300"], ["Modified", diff.summary.nodesModifiedCount + diff.summary.edgesModifiedCount, "text-amber-300"]].map(([label, count, color]) => <div key={String(label)} className="rounded-lg border border-white/10 bg-white/[0.02] p-3"><p className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</p><p className={`mt-1 text-xl font-semibold ${color}`}>{count}</p></div>)}</div>
+          <div className="rounded-lg border border-white/10"><div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-zinc-300">v{diff.fromVersion} → v{diff.toVersion} · {diff.summary.totalChanges} changes</div><ul className="divide-y divide-white/5 text-xs text-zinc-400">{diff.nodesAdded.map((node) => <li key={`added-${String(node.id)}`} className="px-3 py-2"><span className="text-green-300">+ node</span> {String(node.label ?? node.id)}</li>)}{diff.nodesRemoved.map((node) => <li key={`removed-${String(node.id)}`} className="px-3 py-2"><span className="text-red-300">− node</span> {String(node.label ?? node.id)}</li>)}{diff.nodesModified.map((node) => <li key={`modified-${node.nodeId}`} className="px-3 py-2"><span className="text-amber-300">~ node</span> {node.nodeId}: {node.changes.map((change) => change.field).join(", ")}</li>)}{diff.edgesModified.map((edge, index) => <li key={edge.edgeId ?? `edge-${index}`} className="px-3 py-2"><span className="text-amber-300">~ edge</span> {edge.source} → {edge.target}: {edge.changes.map((change) => change.field).join(", ")}</li>)}</ul></div>
+        </div> : null}
       </aside>
     </div> : null}
+    <WorkflowDiffModal
+      open={visualModalOpen}
+      onClose={() => setVisualModalOpen(false)}
+      diff={diff}
+      fromVersionData={fromVersionData}
+      toVersionData={toVersionData}
+      workflowName={workflowName}
+    />
   </>;
 }
