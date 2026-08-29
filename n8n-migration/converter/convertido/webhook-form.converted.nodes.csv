@@ -1,0 +1,4 @@
+id,type,label,category,x,y,typeVersion,disabled,originalN8nType
+mt0nmw5fo15s17bn,webhook,"Receber Lead",trigger,250,300,1,false,n8n-nodes-base.webhook
+mt0nmw5f7yy3zjbc,set,"Enriquecer Dados",transform,550,300,3.4,false,n8n-nodes-base.set
+mt0nmw5fapv87gin,slack,"Notificar Slack",action,850,300,2.1,false,n8n-nodes-base.slack

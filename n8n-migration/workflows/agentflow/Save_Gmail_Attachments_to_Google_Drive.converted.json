@@ -1,0 +1,282 @@
+{
+  "workflow": {
+    "name": "Save Gmail Attachments to Google Drive",
+    "description": "",
+    "status": "DRAFT",
+    "config": {
+      "executionOrder": "v1",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "executionTimeout": 3600,
+      "timezone": "UTC",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+    "meta": {},
+    "tags": [],
+    "nodes": [
+      {
+        "id": "node-35244a31-6691-422f-affd-ee2b75dfb50f",
+        "type": "gmailTrigger",
+        "label": "On New Email",
+        "config": {
+          "typeVersion": 1.4,
+          "parameters": {
+            "event": "messageReceived",
+            "simple": false,
+            "pollTimes": {
+              "item": [
+                {
+                  "mode": "everyMinute"
+                }
+              ]
+            },
+            "filters": {
+              "q": "has:attachment",
+              "readStatus": "unread"
+            },
+            "options": {
+              "downloadAttachments": true,
+              "dataPropertyAttachmentsPrefixName": "attachment_"
+            }
+          },
+          "credentials": {},
+          "originalN8nType": "n8n-nodes-base.gmailTrigger",
+          "originalN8nId": "35244a31-6691-422f-affd-ee2b75dfb50f"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "node-f600ebdc-eaca-4de6-b104-4821a55f58e8",
+        "type": "code",
+        "label": "Split Attachments",
+        "config": {
+          "typeVersion": 2,
+          "parameters": {
+            "mode": "runOnceForEachItem",
+            "jsCode": "const results = [];\nconst binary = $input.item.binary || {};\nfor (const key of Object.keys(binary)) {\n  results.push({\n    json: {\n      fileName: binary[key].fileName || key,\n      mimeType: binary[key].mimeType,\n      subject: $input.item.json.subject,\n      from: $input.item.json.from,\n    },\n    binary: { data: binary[key] },\n  });\n}\nreturn results;"
+          },
+          "originalN8nType": "n8n-nodes-base.code",
+          "originalN8nId": "f600ebdc-eaca-4de6-b104-4821a55f58e8"
+        },
+        "position": {
+          "x": 224,
+          "y": 0
+        }
+      },
+      {
+        "id": "node-a4660b67-67b0-49f8-9ec8-8a8d330828af",
+        "type": "googleDrive",
+        "label": "Upload to Google Drive",
+        "config": {
+          "typeVersion": 3,
+          "parameters": {
+            "resource": "file",
+            "operation": "upload",
+            "inputDataFieldName": "data",
+            "name": "={{ $json.fileName }}",
+            "driveId": {
+              "__rl": true,
+              "mode": "list",
+              "value": "My Drive",
+              "cachedResultName": "My Drive"
+            },
+            "folderId": {
+              "__rl": true,
+              "mode": "list",
+              "value": "root",
+              "cachedResultName": "/ (Root folder)"
+            }
+          },
+          "credentials": {},
+          "originalN8nType": "n8n-nodes-base.googleDrive",
+          "originalN8nId": "a4660b67-67b0-49f8-9ec8-8a8d330828af"
+        },
+        "position": {
+          "x": 448,
+          "y": 0
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-mteiwle3c0opf5gv",
+        "sourceNodeId": "node-35244a31-6691-422f-affd-ee2b75dfb50f",
+        "targetNodeId": "node-f600ebdc-eaca-4de6-b104-4821a55f58e8",
+        "label": "0"
+      },
+      {
+        "id": "edge-mteiwle3yokm9w53",
+        "sourceNodeId": "node-f600ebdc-eaca-4de6-b104-4821a55f58e8",
+        "targetNodeId": "node-a4660b67-67b0-49f8-9ec8-8a8d330828af",
+        "label": "0"
+      }
+    ],
+    "triggers": [
+      {
+        "type": "gmail",
+        "config": {
+          "event": "messageReceived",
+          "pollTimes": {
+            "item": [
+              {
+                "mode": "everyMinute"
+              }
+            ]
+          },
+          "filters": {
+            "q": "has:attachment",
+            "readStatus": "unread"
+          },
+          "options": {
+            "downloadAttachments": true,
+            "dataPropertyAttachmentsPrefixName": "attachment_"
+          }
+        },
+        "nodeId": "node-35244a31-6691-422f-affd-ee2b75dfb50f"
+      }
+    ],
+    "schedules": [],
+    "credentialsUsed": [],
+    "webhooks": []
+  },
+  "nodes": [
+    {
+      "id": "node-35244a31-6691-422f-affd-ee2b75dfb50f",
+      "type": "gmailTrigger",
+      "label": "On New Email",
+      "config": {
+        "typeVersion": 1.4,
+        "parameters": {
+          "event": "messageReceived",
+          "simple": false,
+          "pollTimes": {
+            "item": [
+              {
+                "mode": "everyMinute"
+              }
+            ]
+          },
+          "filters": {
+            "q": "has:attachment",
+            "readStatus": "unread"
+          },
+          "options": {
+            "downloadAttachments": true,
+            "dataPropertyAttachmentsPrefixName": "attachment_"
+          }
+        },
+        "credentials": {},
+        "originalN8nType": "n8n-nodes-base.gmailTrigger",
+        "originalN8nId": "35244a31-6691-422f-affd-ee2b75dfb50f"
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "node-f600ebdc-eaca-4de6-b104-4821a55f58e8",
+      "type": "code",
+      "label": "Split Attachments",
+      "config": {
+        "typeVersion": 2,
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const results = [];\nconst binary = $input.item.binary || {};\nfor (const key of Object.keys(binary)) {\n  results.push({\n    json: {\n      fileName: binary[key].fileName || key,\n      mimeType: binary[key].mimeType,\n      subject: $input.item.json.subject,\n      from: $input.item.json.from,\n    },\n    binary: { data: binary[key] },\n  });\n}\nreturn results;"
+        },
+        "originalN8nType": "n8n-nodes-base.code",
+        "originalN8nId": "f600ebdc-eaca-4de6-b104-4821a55f58e8"
+      },
+      "position": {
+        "x": 224,
+        "y": 0
+      }
+    },
+    {
+      "id": "node-a4660b67-67b0-49f8-9ec8-8a8d330828af",
+      "type": "googleDrive",
+      "label": "Upload to Google Drive",
+      "config": {
+        "typeVersion": 3,
+        "parameters": {
+          "resource": "file",
+          "operation": "upload",
+          "inputDataFieldName": "data",
+          "name": "={{ $json.fileName }}",
+          "driveId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "My Drive",
+            "cachedResultName": "My Drive"
+          },
+          "folderId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "root",
+            "cachedResultName": "/ (Root folder)"
+          }
+        },
+        "credentials": {},
+        "originalN8nType": "n8n-nodes-base.googleDrive",
+        "originalN8nId": "a4660b67-67b0-49f8-9ec8-8a8d330828af"
+      },
+      "position": {
+        "x": 448,
+        "y": 0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-mteiwle3c0opf5gv",
+      "sourceNodeId": "node-35244a31-6691-422f-affd-ee2b75dfb50f",
+      "targetNodeId": "node-f600ebdc-eaca-4de6-b104-4821a55f58e8",
+      "label": "0"
+    },
+    {
+      "id": "edge-mteiwle3yokm9w53",
+      "sourceNodeId": "node-f600ebdc-eaca-4de6-b104-4821a55f58e8",
+      "targetNodeId": "node-a4660b67-67b0-49f8-9ec8-8a8d330828af",
+      "label": "0"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "gmail",
+      "config": {
+        "event": "messageReceived",
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "q": "has:attachment",
+          "readStatus": "unread"
+        },
+        "options": {
+          "downloadAttachments": true,
+          "dataPropertyAttachmentsPrefixName": "attachment_"
+        }
+      },
+      "nodeId": "node-35244a31-6691-422f-affd-ee2b75dfb50f"
+    }
+  ],
+  "schedules": [],
+  "webhooks": [],
+  "credentialsUsed": [],
+  "warnings": [],
+  "errors": [],
+  "stats": {
+    "totalNodes": 3,
+    "totalEdges": 2,
+    "totalTriggers": 1,
+    "totalCredentials": 0,
+    "totalWebhooks": 0
+  }
+}

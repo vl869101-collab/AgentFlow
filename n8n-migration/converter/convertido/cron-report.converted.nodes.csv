@@ -1,0 +1,4 @@
+id,type,label,category,x,y,typeVersion,disabled,originalN8nType
+mt0nmw54ee3mz1r3,cron,"Agendar Diário",trigger,250,300,1.2,false,n8n-nodes-base.cron
+mt0nmw54zc7mfis1,httpRequest,"Buscar Vendas",action,550,300,4.1,false,n8n-nodes-base.httpRequest
+mt0nmw54bfzh6543,emailSend,"Enviar Email",action,850,300,2.1,false,n8n-nodes-base.emailSend

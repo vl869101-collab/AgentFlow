@@ -1,0 +1,380 @@
+{
+  "workflow": {
+    "name": "Webhook com Branching IF",
+    "description": "",
+    "status": "DRAFT",
+    "config": {
+      "executionOrder": "v1",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "executionTimeout": 3600,
+      "timezone": "UTC",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+    "meta": {},
+    "tags": [
+      "branching",
+      "if",
+      "merge"
+    ],
+    "nodes": [
+      {
+        "id": "mt0nmw5bhm8bxp3j",
+        "type": "webhook",
+        "label": "Webhook Entrada",
+        "config": {
+          "typeVersion": 1,
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "webhook/branching",
+            "responseMode": "lastNode",
+            "responseCode": 200
+          },
+          "webhookId": "branching-webhook-001",
+          "originalN8nType": "n8n-nodes-base.webhook"
+        },
+        "position": {
+          "x": 250,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw5bd5ro5f9h",
+        "type": "if",
+        "label": "IF: Valor Alto?",
+        "config": {
+          "typeVersion": 2,
+          "parameters": {
+            "conditions": {
+              "number": [
+                {
+                  "value1": "={{ $json.valor }}",
+                  "operation": "greaterThan",
+                  "value2": 1000
+                }
+              ]
+            }
+          },
+          "originalN8nType": "n8n-nodes-base.if"
+        },
+        "position": {
+          "x": 550,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw5byfy5mtw3",
+        "type": "set",
+        "label": "Processar VIP",
+        "config": {
+          "typeVersion": 3.4,
+          "parameters": {
+            "keepOnlySet": false,
+            "values": {
+              "string": [
+                {
+                  "name": "prioridade",
+                  "value": "alta"
+                },
+                {
+                  "name": "tratamento",
+                  "value": "vip"
+                }
+              ]
+            }
+          },
+          "originalN8nType": "n8n-nodes-base.set"
+        },
+        "position": {
+          "x": 850,
+          "y": 200
+        }
+      },
+      {
+        "id": "mt0nmw5be0vlyb2k",
+        "type": "set",
+        "label": "Processar Normal",
+        "config": {
+          "typeVersion": 3.4,
+          "parameters": {
+            "keepOnlySet": false,
+            "values": {
+              "string": [
+                {
+                  "name": "prioridade",
+                  "value": "normal"
+                },
+                {
+                  "name": "tratamento",
+                  "value": "padrao"
+                }
+              ]
+            }
+          },
+          "originalN8nType": "n8n-nodes-base.set"
+        },
+        "position": {
+          "x": 850,
+          "y": 400
+        }
+      },
+      {
+        "id": "mt0nmw5bipx8pgks",
+        "type": "merge",
+        "label": "Merge Resultados",
+        "config": {
+          "typeVersion": 2.1,
+          "parameters": {
+            "mode": "wait",
+            "options": {}
+          },
+          "originalN8nType": "n8n-nodes-base.merge"
+        },
+        "position": {
+          "x": 1150,
+          "y": 300
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "mt0nmw5b4rjli90y",
+        "sourceNodeId": "mt0nmw5bhm8bxp3j",
+        "targetNodeId": "mt0nmw5bd5ro5f9h",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw5bjt018tot",
+        "sourceNodeId": "mt0nmw5bd5ro5f9h",
+        "targetNodeId": "mt0nmw5byfy5mtw3",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw5bwd3p4elc",
+        "sourceNodeId": "mt0nmw5bd5ro5f9h",
+        "targetNodeId": "mt0nmw5be0vlyb2k",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw5bi6dbamfl",
+        "sourceNodeId": "mt0nmw5byfy5mtw3",
+        "targetNodeId": "mt0nmw5bipx8pgks",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw5b6nv6obkq",
+        "sourceNodeId": "mt0nmw5be0vlyb2k",
+        "targetNodeId": "mt0nmw5bipx8pgks",
+        "label": "1"
+      }
+    ],
+    "triggers": [
+      {
+        "type": "webhook",
+        "config": {
+          "httpMethod": "POST",
+          "path": "webhook/branching",
+          "responseMode": "lastNode",
+          "responseCode": 200,
+          "options": {}
+        },
+        "nodeId": "mt0nmw5bhm8bxp3j"
+      }
+    ],
+    "schedules": [],
+    "credentialsUsed": [],
+    "webhooks": [
+      {
+        "path": "/webhook/webhook/branching",
+        "method": "POST",
+        "responseMode": "lastNode",
+        "responseCode": 200,
+        "nodeId": "mt0nmw5bhm8bxp3j"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "mt0nmw5bhm8bxp3j",
+      "type": "webhook",
+      "label": "Webhook Entrada",
+      "config": {
+        "typeVersion": 1,
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "webhook/branching",
+          "responseMode": "lastNode",
+          "responseCode": 200
+        },
+        "webhookId": "branching-webhook-001",
+        "originalN8nType": "n8n-nodes-base.webhook"
+      },
+      "position": {
+        "x": 250,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw5bd5ro5f9h",
+      "type": "if",
+      "label": "IF: Valor Alto?",
+      "config": {
+        "typeVersion": 2,
+        "parameters": {
+          "conditions": {
+            "number": [
+              {
+                "value1": "={{ $json.valor }}",
+                "operation": "greaterThan",
+                "value2": 1000
+              }
+            ]
+          }
+        },
+        "originalN8nType": "n8n-nodes-base.if"
+      },
+      "position": {
+        "x": 550,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw5byfy5mtw3",
+      "type": "set",
+      "label": "Processar VIP",
+      "config": {
+        "typeVersion": 3.4,
+        "parameters": {
+          "keepOnlySet": false,
+          "values": {
+            "string": [
+              {
+                "name": "prioridade",
+                "value": "alta"
+              },
+              {
+                "name": "tratamento",
+                "value": "vip"
+              }
+            ]
+          }
+        },
+        "originalN8nType": "n8n-nodes-base.set"
+      },
+      "position": {
+        "x": 850,
+        "y": 200
+      }
+    },
+    {
+      "id": "mt0nmw5be0vlyb2k",
+      "type": "set",
+      "label": "Processar Normal",
+      "config": {
+        "typeVersion": 3.4,
+        "parameters": {
+          "keepOnlySet": false,
+          "values": {
+            "string": [
+              {
+                "name": "prioridade",
+                "value": "normal"
+              },
+              {
+                "name": "tratamento",
+                "value": "padrao"
+              }
+            ]
+          }
+        },
+        "originalN8nType": "n8n-nodes-base.set"
+      },
+      "position": {
+        "x": 850,
+        "y": 400
+      }
+    },
+    {
+      "id": "mt0nmw5bipx8pgks",
+      "type": "merge",
+      "label": "Merge Resultados",
+      "config": {
+        "typeVersion": 2.1,
+        "parameters": {
+          "mode": "wait",
+          "options": {}
+        },
+        "originalN8nType": "n8n-nodes-base.merge"
+      },
+      "position": {
+        "x": 1150,
+        "y": 300
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "mt0nmw5b4rjli90y",
+      "sourceNodeId": "mt0nmw5bhm8bxp3j",
+      "targetNodeId": "mt0nmw5bd5ro5f9h",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw5bjt018tot",
+      "sourceNodeId": "mt0nmw5bd5ro5f9h",
+      "targetNodeId": "mt0nmw5byfy5mtw3",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw5bwd3p4elc",
+      "sourceNodeId": "mt0nmw5bd5ro5f9h",
+      "targetNodeId": "mt0nmw5be0vlyb2k",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw5bi6dbamfl",
+      "sourceNodeId": "mt0nmw5byfy5mtw3",
+      "targetNodeId": "mt0nmw5bipx8pgks",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw5b6nv6obkq",
+      "sourceNodeId": "mt0nmw5be0vlyb2k",
+      "targetNodeId": "mt0nmw5bipx8pgks",
+      "label": "1"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "webhook",
+      "config": {
+        "httpMethod": "POST",
+        "path": "webhook/branching",
+        "responseMode": "lastNode",
+        "responseCode": 200,
+        "options": {}
+      },
+      "nodeId": "mt0nmw5bhm8bxp3j"
+    }
+  ],
+  "schedules": [],
+  "webhooks": [
+    {
+      "path": "/webhook/webhook/branching",
+      "method": "POST",
+      "responseMode": "lastNode",
+      "responseCode": 200,
+      "nodeId": "mt0nmw5bhm8bxp3j"
+    }
+  ],
+  "credentialsUsed": [],
+  "warnings": [],
+  "errors": [],
+  "stats": {
+    "totalNodes": 5,
+    "totalEdges": 5,
+    "totalTriggers": 1,
+    "totalCredentials": 0,
+    "totalWebhooks": 1
+  }
+}

@@ -1,0 +1,6 @@
+id,type,label,category,x,y,typeVersion,disabled,originalN8nType
+mt0nmw50x1gnna8q,webhook,"Webhook Dados Brutos",trigger,250,300,1,false,n8n-nodes-base.webhook
+mt0nmw501zk2t3z8,code,"Transformar JS",transform,550,300,2,false,n8n-nodes-base.code
+mt0nmw50zc0n63fz,if,"Filtrar Válidos",logic,850,300,2,false,n8n-nodes-base.if
+mt0nmw50bl451eyn,httpRequest,"HTTP para API",action,1150,200,4.1,false,n8n-nodes-base.httpRequest
+mt0nmw50qr3ot8q2,set,"Log Inválidos",transform,1150,400,3.4,false,n8n-nodes-base.set

@@ -1,0 +1,2 @@
+nodeId,type,config
+mt0nmw5bhm8bxp3j,webhook,"{""httpMethod"":""POST"",""path"":""webhook/branching"",""responseMode"":""lastNode"",""responseCode"":200,""options"":{}}"

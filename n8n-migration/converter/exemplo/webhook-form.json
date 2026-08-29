@@ -1,0 +1,75 @@
+{
+  "name": "Webhook Form Lead",
+  "nodes": [
+    {
+      "name": "Receber Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead/novo",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "options": {}
+      },
+      "webhookId": "lead-webhook-001"
+    },
+    {
+      "name": "Enriquecer Dados",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [550, 300],
+      "parameters": {
+        "keepOnlySet": false,
+        "values": {
+          "string": [
+            { "name": "source", "value": "website_form" },
+            { "name": "status", "value": "novo" }
+          ],
+          "number": [
+            { "name": "score", "value": 10 }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Notificar Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [850, 300],
+      "parameters": {
+        "operation": "post",
+        "channel": "#leads",
+        "text": "🎉 Novo lead: {{ $json.nome }} ({{ $json.email }})",
+        "options": {}
+      },
+      "credentials": {
+        "slackOAuth2Api": "Slack Workspace Principal"
+      }
+    }
+  ],
+  "connections": {
+    "Receber Lead": {
+      "main": [
+        [
+          { "node": "Enriquecer Dados", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Enriquecer Dados": {
+      "main": [
+        [
+          { "node": "Notificar Slack", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "tags": ["leads", "marketing"]
+}

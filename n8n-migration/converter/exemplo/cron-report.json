@@ -1,0 +1,82 @@
+{
+  "name": "Relatório Diário de Vendas",
+  "nodes": [
+    {
+      "name": "Agendar Diário",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "cron",
+              "cronExpression": "0 8 * * *",
+              "timezone": "America/Sao_Paulo"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Buscar Vendas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [550, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.exemplo.com/vendas",
+        "queryParameters": {
+          "parameters": [
+            { "name": "data_inicio", "value": "={{ $now.minus(1, 'day').format('YYYY-MM-DD') }}" },
+            { "name": "data_fim", "value": "={{ $now.format('YYYY-MM-DD') }}" }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "headerAuth": "API Vendas"
+      }
+    },
+    {
+      "name": "Enviar Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [850, 300],
+      "parameters": {
+        "fromEmail": "relatorios@empresa.com",
+        "toEmail": "gestao@empresa.com",
+        "subject": "Relatório Diário - {{ $now.format('DD/MM/YYYY') }}",
+        "text": "Total de vendas: {{ $json.totalVendas }}\nValor total: R$ {{ $json.valorTotal }}",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": "Email Corporativo"
+      }
+    }
+  ],
+  "connections": {
+    "Agendar Diário": {
+      "main": [
+        [
+          { "node": "Buscar Vendas", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Buscar Vendas": {
+      "main": [
+        [
+          { "node": "Enviar Email", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "tags": ["relatorios", "cron", "vendas"]
+}

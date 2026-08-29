@@ -1,0 +1,142 @@
+{
+  "workflow": {
+    "name": "My workflow 2",
+    "description": "",
+    "status": "DRAFT",
+    "config": {
+      "executionOrder": "v1",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "executionTimeout": 3600,
+      "timezone": "UTC",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+    "meta": {},
+    "tags": [],
+    "nodes": [
+      {
+        "id": "node-00b57fc2-a2f3-41c9-aa5b-e833a162659a",
+        "type": "emailReadImap",
+        "label": "Email Trigger (IMAP)",
+        "config": {
+          "typeVersion": 2.2,
+          "parameters": {
+            "options": {}
+          },
+          "originalN8nType": "n8n-nodes-base.emailReadImap",
+          "originalN8nId": "00b57fc2-a2f3-41c9-aa5b-e833a162659a"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "node-82fca877-6b61-4f40-902a-fccd7cf5beea",
+        "type": "gmail",
+        "label": "Add label to message",
+        "config": {
+          "typeVersion": 2.2,
+          "parameters": {
+            "operation": "addLabels"
+          },
+          "webhookId": "09fc1dd4-a6dd-4e14-a817-de6d6c6503fd",
+          "originalN8nType": "n8n-nodes-base.gmail",
+          "originalN8nId": "82fca877-6b61-4f40-902a-fccd7cf5beea"
+        },
+        "position": {
+          "x": 224,
+          "y": 0
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-mteixuituwqc0dc5",
+        "sourceNodeId": "node-00b57fc2-a2f3-41c9-aa5b-e833a162659a",
+        "targetNodeId": "node-82fca877-6b61-4f40-902a-fccd7cf5beea",
+        "label": "0"
+      }
+    ],
+    "triggers": [
+      {
+        "type": "imap",
+        "config": {
+          "options": {},
+          "mailbox": "INBOX"
+        },
+        "nodeId": "node-00b57fc2-a2f3-41c9-aa5b-e833a162659a"
+      }
+    ],
+    "schedules": [],
+    "credentialsUsed": [],
+    "webhooks": []
+  },
+  "nodes": [
+    {
+      "id": "node-00b57fc2-a2f3-41c9-aa5b-e833a162659a",
+      "type": "emailReadImap",
+      "label": "Email Trigger (IMAP)",
+      "config": {
+        "typeVersion": 2.2,
+        "parameters": {
+          "options": {}
+        },
+        "originalN8nType": "n8n-nodes-base.emailReadImap",
+        "originalN8nId": "00b57fc2-a2f3-41c9-aa5b-e833a162659a"
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "node-82fca877-6b61-4f40-902a-fccd7cf5beea",
+      "type": "gmail",
+      "label": "Add label to message",
+      "config": {
+        "typeVersion": 2.2,
+        "parameters": {
+          "operation": "addLabels"
+        },
+        "webhookId": "09fc1dd4-a6dd-4e14-a817-de6d6c6503fd",
+        "originalN8nType": "n8n-nodes-base.gmail",
+        "originalN8nId": "82fca877-6b61-4f40-902a-fccd7cf5beea"
+      },
+      "position": {
+        "x": 224,
+        "y": 0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-mteixuituwqc0dc5",
+      "sourceNodeId": "node-00b57fc2-a2f3-41c9-aa5b-e833a162659a",
+      "targetNodeId": "node-82fca877-6b61-4f40-902a-fccd7cf5beea",
+      "label": "0"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "imap",
+      "config": {
+        "options": {},
+        "mailbox": "INBOX"
+      },
+      "nodeId": "node-00b57fc2-a2f3-41c9-aa5b-e833a162659a"
+    }
+  ],
+  "schedules": [],
+  "webhooks": [],
+  "credentialsUsed": [],
+  "warnings": [],
+  "errors": [],
+  "stats": {
+    "totalNodes": 2,
+    "totalEdges": 1,
+    "totalTriggers": 1,
+    "totalCredentials": 0,
+    "totalWebhooks": 0
+  }
+}

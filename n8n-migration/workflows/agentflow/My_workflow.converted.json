@@ -1,0 +1,106 @@
+{
+  "workflow": {
+    "name": "My workflow",
+    "description": "",
+    "status": "DRAFT",
+    "config": {
+      "executionOrder": "v1",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "executionTimeout": 3600,
+      "timezone": "UTC",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+    "meta": {},
+    "tags": [],
+    "nodes": [
+      {
+        "id": "node-e8e46fb0-ddb0-46e0-aa37-fa3419e5554b",
+        "type": "evaluationTrigger",
+        "label": "When fetching a dataset row",
+        "config": {
+          "typeVersion": 4.7,
+          "parameters": {
+            "dataTableId": {
+              "__rl": true,
+              "mode": "list",
+              "value": ""
+            }
+          },
+          "originalN8nType": "n8n-nodes-base.evaluationTrigger",
+          "originalN8nId": "e8e46fb0-ddb0-46e0-aa37-fa3419e5554b"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    ],
+    "edges": [],
+    "triggers": [
+      {
+        "type": "evaluation",
+        "config": {
+          "dataTableId": {
+            "__rl": true,
+            "mode": "list",
+            "value": ""
+          }
+        },
+        "nodeId": "node-e8e46fb0-ddb0-46e0-aa37-fa3419e5554b"
+      }
+    ],
+    "schedules": [],
+    "credentialsUsed": [],
+    "webhooks": []
+  },
+  "nodes": [
+    {
+      "id": "node-e8e46fb0-ddb0-46e0-aa37-fa3419e5554b",
+      "type": "evaluationTrigger",
+      "label": "When fetching a dataset row",
+      "config": {
+        "typeVersion": 4.7,
+        "parameters": {
+          "dataTableId": {
+            "__rl": true,
+            "mode": "list",
+            "value": ""
+          }
+        },
+        "originalN8nType": "n8n-nodes-base.evaluationTrigger",
+        "originalN8nId": "e8e46fb0-ddb0-46e0-aa37-fa3419e5554b"
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "edges": [],
+  "triggers": [
+    {
+      "type": "evaluation",
+      "config": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        }
+      },
+      "nodeId": "node-e8e46fb0-ddb0-46e0-aa37-fa3419e5554b"
+    }
+  ],
+  "schedules": [],
+  "webhooks": [],
+  "credentialsUsed": [],
+  "warnings": [],
+  "errors": [],
+  "stats": {
+    "totalNodes": 1,
+    "totalEdges": 0,
+    "totalTriggers": 1,
+    "totalCredentials": 0,
+    "totalWebhooks": 0
+  }
+}

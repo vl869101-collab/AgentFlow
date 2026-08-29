@@ -1,0 +1,2 @@
+nodeId,type,config
+mt0nmw50x1gnna8q,webhook,"{""httpMethod"":""POST"",""path"":""transform/bruto"",""responseMode"":""onReceived"",""responseCode"":200,""options"":{}}"

@@ -1,0 +1,4 @@
+id,type,label,category,x,y,typeVersion,disabled,originalN8nType
+mt0nmw4pll3faiiu,webhook,"Webhook Chat",trigger,250,300,1,false,n8n-nodes-base.webhook
+mt0nmw4peso6qjvv,aiAgent,"Agente IA",ai,550,300,1.7,false,@n8n/n8n-nodes-langchain.agent
+mt0nmw4p07d6yfvp,webhookResponse,"Responder Webhook",trigger,850,300,1,false,n8n-nodes-base.webhookResponse

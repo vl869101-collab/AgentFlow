@@ -1,0 +1,257 @@
+{
+  "workflow": {
+    "name": "Chatbot IA - Atendimento Leads",
+    "description": "",
+    "status": "ACTIVE",
+    "config": {
+      "executionOrder": "v1",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "executionTimeout": 3600,
+      "timezone": "America/Sao_Paulo",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+    "meta": {},
+    "tags": [
+      "ai",
+      "chatbot",
+      "leads",
+      "langchain"
+    ],
+    "nodes": [
+      {
+        "id": "mt0nmw4pll3faiiu",
+        "type": "webhook",
+        "label": "Webhook Chat",
+        "config": {
+          "typeVersion": 1,
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "chat/lead",
+            "responseMode": "responseNode",
+            "responseCode": 200,
+            "options": {
+              "responseDataPropertyName": "body"
+            }
+          },
+          "webhookId": "chat-webhook-001",
+          "originalN8nType": "n8n-nodes-base.webhook"
+        },
+        "position": {
+          "x": 250,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw4peso6qjvv",
+        "type": "aiAgent",
+        "label": "Agente IA",
+        "config": {
+          "typeVersion": 1.7,
+          "parameters": {
+            "agent": "tools",
+            "systemMessage": "Você é um assistente de vendas especializado. Responda de forma amigável e direta.",
+            "options": {
+              "temperature": 0.7,
+              "maxTokens": 1000
+            },
+            "tools": [
+              "calculadora",
+              "buscar_curso"
+            ]
+          },
+          "credentials": {
+            "openAiApi": "OpenAI Produção"
+          },
+          "originalN8nType": "@n8n/n8n-nodes-langchain.agent"
+        },
+        "position": {
+          "x": 550,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw4p07d6yfvp",
+        "type": "webhookResponse",
+        "label": "Responder Webhook",
+        "config": {
+          "typeVersion": 1,
+          "parameters": {
+            "options": {}
+          },
+          "originalN8nType": "n8n-nodes-base.webhookResponse"
+        },
+        "position": {
+          "x": 850,
+          "y": 300
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "mt0nmw4pvxdte8va",
+        "sourceNodeId": "mt0nmw4pll3faiiu",
+        "targetNodeId": "mt0nmw4peso6qjvv",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw4pwu2fgxer",
+        "sourceNodeId": "mt0nmw4peso6qjvv",
+        "targetNodeId": "mt0nmw4p07d6yfvp",
+        "label": "0"
+      }
+    ],
+    "triggers": [
+      {
+        "type": "webhook",
+        "config": {
+          "httpMethod": "POST",
+          "path": "chat/lead",
+          "responseMode": "responseNode",
+          "responseCode": 200,
+          "options": {
+            "responseDataPropertyName": "body"
+          }
+        },
+        "nodeId": "mt0nmw4pll3faiiu"
+      }
+    ],
+    "schedules": [],
+    "credentialsUsed": [
+      "OpenAI Produção"
+    ],
+    "webhooks": [
+      {
+        "path": "/webhook/chat/lead",
+        "method": "POST",
+        "responseMode": "responseNode",
+        "responseCode": 200,
+        "nodeId": "mt0nmw4pll3faiiu"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "mt0nmw4pll3faiiu",
+      "type": "webhook",
+      "label": "Webhook Chat",
+      "config": {
+        "typeVersion": 1,
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "chat/lead",
+          "responseMode": "responseNode",
+          "responseCode": 200,
+          "options": {
+            "responseDataPropertyName": "body"
+          }
+        },
+        "webhookId": "chat-webhook-001",
+        "originalN8nType": "n8n-nodes-base.webhook"
+      },
+      "position": {
+        "x": 250,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw4peso6qjvv",
+      "type": "aiAgent",
+      "label": "Agente IA",
+      "config": {
+        "typeVersion": 1.7,
+        "parameters": {
+          "agent": "tools",
+          "systemMessage": "Você é um assistente de vendas especializado. Responda de forma amigável e direta.",
+          "options": {
+            "temperature": 0.7,
+            "maxTokens": 1000
+          },
+          "tools": [
+            "calculadora",
+            "buscar_curso"
+          ]
+        },
+        "credentials": {
+          "openAiApi": "OpenAI Produção"
+        },
+        "originalN8nType": "@n8n/n8n-nodes-langchain.agent"
+      },
+      "position": {
+        "x": 550,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw4p07d6yfvp",
+      "type": "webhookResponse",
+      "label": "Responder Webhook",
+      "config": {
+        "typeVersion": 1,
+        "parameters": {
+          "options": {}
+        },
+        "originalN8nType": "n8n-nodes-base.webhookResponse"
+      },
+      "position": {
+        "x": 850,
+        "y": 300
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "mt0nmw4pvxdte8va",
+      "sourceNodeId": "mt0nmw4pll3faiiu",
+      "targetNodeId": "mt0nmw4peso6qjvv",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw4pwu2fgxer",
+      "sourceNodeId": "mt0nmw4peso6qjvv",
+      "targetNodeId": "mt0nmw4p07d6yfvp",
+      "label": "0"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "webhook",
+      "config": {
+        "httpMethod": "POST",
+        "path": "chat/lead",
+        "responseMode": "responseNode",
+        "responseCode": 200,
+        "options": {
+          "responseDataPropertyName": "body"
+        }
+      },
+      "nodeId": "mt0nmw4pll3faiiu"
+    }
+  ],
+  "schedules": [],
+  "webhooks": [
+    {
+      "path": "/webhook/chat/lead",
+      "method": "POST",
+      "responseMode": "responseNode",
+      "responseCode": 200,
+      "nodeId": "mt0nmw4pll3faiiu"
+    }
+  ],
+  "credentialsUsed": [
+    {
+      "nodeId": "mt0nmw4peso6qjvv",
+      "credentialType": "apiKey",
+      "credentialName": "OpenAI Produção"
+    }
+  ],
+  "warnings": [],
+  "errors": [],
+  "stats": {
+    "totalNodes": 3,
+    "totalEdges": 2,
+    "totalTriggers": 1,
+    "totalCredentials": 1,
+    "totalWebhooks": 1
+  }
+}

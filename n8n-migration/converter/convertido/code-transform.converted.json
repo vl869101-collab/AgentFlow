@@ -1,0 +1,363 @@
+{
+  "workflow": {
+    "name": "Webhook Transformação Código",
+    "description": "",
+    "status": "ACTIVE",
+    "config": {
+      "executionOrder": "v1",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "executionTimeout": 3600,
+      "timezone": "UTC",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+    "meta": {},
+    "tags": [
+      "transform",
+      "code",
+      "validation",
+      "http"
+    ],
+    "nodes": [
+      {
+        "id": "mt0nmw50x1gnna8q",
+        "type": "webhook",
+        "label": "Webhook Dados Brutos",
+        "config": {
+          "typeVersion": 1,
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "transform/bruto",
+            "responseMode": "onReceived"
+          },
+          "webhookId": "raw-webhook-001",
+          "originalN8nType": "n8n-nodes-base.webhook"
+        },
+        "position": {
+          "x": 250,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw501zk2t3z8",
+        "type": "code",
+        "label": "Transformar JS",
+        "config": {
+          "typeVersion": 2,
+          "parameters": {
+            "mode": "runOnceForAllItems",
+            "jsCode": "// Normaliza dados de entrada\nconst items = $input.all();\nreturn items.map(item => ({\n  id: item.json.id || `gen_${Date.now()}`,\n  nome: item.json.nome?.trim().toUpperCase(),\n  email: item.json.email?.toLowerCase(),\n  valor: Number(item.json.valor) || 0,\n  criadoEm: new Date().toISOString(),\n  valido: !!item.json.email && item.json.valor > 0\n}));"
+          },
+          "originalN8nType": "n8n-nodes-base.code"
+        },
+        "position": {
+          "x": 550,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw50zc0n63fz",
+        "type": "if",
+        "label": "Filtrar Válidos",
+        "config": {
+          "typeVersion": 2,
+          "parameters": {
+            "conditions": {
+              "boolean": [
+                {
+                  "value1": "={{ $json.valido }}",
+                  "operation": "true"
+                }
+              ]
+            }
+          },
+          "originalN8nType": "n8n-nodes-base.if"
+        },
+        "position": {
+          "x": 850,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw50bl451eyn",
+        "type": "httpRequest",
+        "label": "HTTP para API",
+        "config": {
+          "typeVersion": 4.1,
+          "parameters": {
+            "method": "POST",
+            "url": "https://api.exemplo.com/leads",
+            "jsonParameters": true,
+            "options": {},
+            "bodyParametersJson": "={{ JSON.stringify($json) }}"
+          },
+          "credentials": {
+            "headerAuth": "API Leads"
+          },
+          "originalN8nType": "n8n-nodes-base.httpRequest"
+        },
+        "position": {
+          "x": 1150,
+          "y": 200
+        }
+      },
+      {
+        "id": "mt0nmw50qr3ot8q2",
+        "type": "set",
+        "label": "Log Inválidos",
+        "config": {
+          "typeVersion": 3.4,
+          "parameters": {
+            "keepOnlySet": false,
+            "values": {
+              "string": [
+                {
+                  "name": "erro",
+                  "value": "Dados inválidos"
+                },
+                {
+                  "name": "origem",
+                  "value": "webhook_bruto"
+                }
+              ]
+            }
+          },
+          "originalN8nType": "n8n-nodes-base.set"
+        },
+        "position": {
+          "x": 1150,
+          "y": 400
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "mt0nmw508c74z5en",
+        "sourceNodeId": "mt0nmw50x1gnna8q",
+        "targetNodeId": "mt0nmw501zk2t3z8",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw507fnddajp",
+        "sourceNodeId": "mt0nmw501zk2t3z8",
+        "targetNodeId": "mt0nmw50zc0n63fz",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw50pvkh8sb9",
+        "sourceNodeId": "mt0nmw50zc0n63fz",
+        "targetNodeId": "mt0nmw50bl451eyn",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw50mcfb2crm",
+        "sourceNodeId": "mt0nmw50zc0n63fz",
+        "targetNodeId": "mt0nmw50qr3ot8q2",
+        "label": "0"
+      }
+    ],
+    "triggers": [
+      {
+        "type": "webhook",
+        "config": {
+          "httpMethod": "POST",
+          "path": "transform/bruto",
+          "responseMode": "onReceived",
+          "responseCode": 200,
+          "options": {}
+        },
+        "nodeId": "mt0nmw50x1gnna8q"
+      }
+    ],
+    "schedules": [],
+    "credentialsUsed": [
+      "API Leads"
+    ],
+    "webhooks": [
+      {
+        "path": "/webhook/transform/bruto",
+        "method": "POST",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "nodeId": "mt0nmw50x1gnna8q"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "mt0nmw50x1gnna8q",
+      "type": "webhook",
+      "label": "Webhook Dados Brutos",
+      "config": {
+        "typeVersion": 1,
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "transform/bruto",
+          "responseMode": "onReceived"
+        },
+        "webhookId": "raw-webhook-001",
+        "originalN8nType": "n8n-nodes-base.webhook"
+      },
+      "position": {
+        "x": 250,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw501zk2t3z8",
+      "type": "code",
+      "label": "Transformar JS",
+      "config": {
+        "typeVersion": 2,
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "// Normaliza dados de entrada\nconst items = $input.all();\nreturn items.map(item => ({\n  id: item.json.id || `gen_${Date.now()}`,\n  nome: item.json.nome?.trim().toUpperCase(),\n  email: item.json.email?.toLowerCase(),\n  valor: Number(item.json.valor) || 0,\n  criadoEm: new Date().toISOString(),\n  valido: !!item.json.email && item.json.valor > 0\n}));"
+        },
+        "originalN8nType": "n8n-nodes-base.code"
+      },
+      "position": {
+        "x": 550,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw50zc0n63fz",
+      "type": "if",
+      "label": "Filtrar Válidos",
+      "config": {
+        "typeVersion": 2,
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{ $json.valido }}",
+                "operation": "true"
+              }
+            ]
+          }
+        },
+        "originalN8nType": "n8n-nodes-base.if"
+      },
+      "position": {
+        "x": 850,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw50bl451eyn",
+      "type": "httpRequest",
+      "label": "HTTP para API",
+      "config": {
+        "typeVersion": 4.1,
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.exemplo.com/leads",
+          "jsonParameters": true,
+          "options": {},
+          "bodyParametersJson": "={{ JSON.stringify($json) }}"
+        },
+        "credentials": {
+          "headerAuth": "API Leads"
+        },
+        "originalN8nType": "n8n-nodes-base.httpRequest"
+      },
+      "position": {
+        "x": 1150,
+        "y": 200
+      }
+    },
+    {
+      "id": "mt0nmw50qr3ot8q2",
+      "type": "set",
+      "label": "Log Inválidos",
+      "config": {
+        "typeVersion": 3.4,
+        "parameters": {
+          "keepOnlySet": false,
+          "values": {
+            "string": [
+              {
+                "name": "erro",
+                "value": "Dados inválidos"
+              },
+              {
+                "name": "origem",
+                "value": "webhook_bruto"
+              }
+            ]
+          }
+        },
+        "originalN8nType": "n8n-nodes-base.set"
+      },
+      "position": {
+        "x": 1150,
+        "y": 400
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "mt0nmw508c74z5en",
+      "sourceNodeId": "mt0nmw50x1gnna8q",
+      "targetNodeId": "mt0nmw501zk2t3z8",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw507fnddajp",
+      "sourceNodeId": "mt0nmw501zk2t3z8",
+      "targetNodeId": "mt0nmw50zc0n63fz",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw50pvkh8sb9",
+      "sourceNodeId": "mt0nmw50zc0n63fz",
+      "targetNodeId": "mt0nmw50bl451eyn",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw50mcfb2crm",
+      "sourceNodeId": "mt0nmw50zc0n63fz",
+      "targetNodeId": "mt0nmw50qr3ot8q2",
+      "label": "0"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "webhook",
+      "config": {
+        "httpMethod": "POST",
+        "path": "transform/bruto",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "options": {}
+      },
+      "nodeId": "mt0nmw50x1gnna8q"
+    }
+  ],
+  "schedules": [],
+  "webhooks": [
+    {
+      "path": "/webhook/transform/bruto",
+      "method": "POST",
+      "responseMode": "onReceived",
+      "responseCode": 200,
+      "nodeId": "mt0nmw50x1gnna8q"
+    }
+  ],
+  "credentialsUsed": [
+    {
+      "nodeId": "mt0nmw50bl451eyn",
+      "credentialType": "apiKey",
+      "credentialName": "API Leads"
+    }
+  ],
+  "warnings": [],
+  "errors": [],
+  "stats": {
+    "totalNodes": 5,
+    "totalEdges": 4,
+    "totalTriggers": 1,
+    "totalCredentials": 1,
+    "totalWebhooks": 1
+  }
+}

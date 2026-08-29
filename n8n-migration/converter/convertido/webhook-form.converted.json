@@ -1,0 +1,273 @@
+{
+  "workflow": {
+    "name": "Webhook Form Lead",
+    "description": "",
+    "status": "ACTIVE",
+    "config": {
+      "executionOrder": "v1",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "executionTimeout": 3600,
+      "timezone": "America/Sao_Paulo",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+    "meta": {},
+    "tags": [
+      "leads",
+      "marketing"
+    ],
+    "nodes": [
+      {
+        "id": "mt0nmw5fo15s17bn",
+        "type": "webhook",
+        "label": "Receber Lead",
+        "config": {
+          "typeVersion": 1,
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "lead/novo",
+            "responseMode": "onReceived",
+            "responseCode": 200,
+            "options": {}
+          },
+          "webhookId": "lead-webhook-001",
+          "originalN8nType": "n8n-nodes-base.webhook"
+        },
+        "position": {
+          "x": 250,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw5f7yy3zjbc",
+        "type": "set",
+        "label": "Enriquecer Dados",
+        "config": {
+          "typeVersion": 3.4,
+          "parameters": {
+            "keepOnlySet": false,
+            "values": {
+              "string": [
+                {
+                  "name": "source",
+                  "value": "website_form"
+                },
+                {
+                  "name": "status",
+                  "value": "novo"
+                }
+              ],
+              "number": [
+                {
+                  "name": "score",
+                  "value": 10
+                }
+              ]
+            },
+            "options": {}
+          },
+          "originalN8nType": "n8n-nodes-base.set"
+        },
+        "position": {
+          "x": 550,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw5fapv87gin",
+        "type": "slack",
+        "label": "Notificar Slack",
+        "config": {
+          "typeVersion": 2.1,
+          "parameters": {
+            "operation": "post",
+            "channel": "#leads",
+            "text": "🎉 Novo lead: {{ $json.nome }} ({{ $json.email }})",
+            "options": {}
+          },
+          "credentials": {
+            "slackOAuth2Api": "Slack Workspace Principal"
+          },
+          "originalN8nType": "n8n-nodes-base.slack"
+        },
+        "position": {
+          "x": 850,
+          "y": 300
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "mt0nmw5fk1vse4dh",
+        "sourceNodeId": "mt0nmw5fo15s17bn",
+        "targetNodeId": "mt0nmw5f7yy3zjbc",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw5frhotgiaa",
+        "sourceNodeId": "mt0nmw5f7yy3zjbc",
+        "targetNodeId": "mt0nmw5fapv87gin",
+        "label": "0"
+      }
+    ],
+    "triggers": [
+      {
+        "type": "webhook",
+        "config": {
+          "httpMethod": "POST",
+          "path": "lead/novo",
+          "responseMode": "onReceived",
+          "responseCode": 200,
+          "options": {}
+        },
+        "nodeId": "mt0nmw5fo15s17bn"
+      }
+    ],
+    "schedules": [],
+    "credentialsUsed": [
+      "Slack Workspace Principal"
+    ],
+    "webhooks": [
+      {
+        "path": "/webhook/lead/novo",
+        "method": "POST",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "nodeId": "mt0nmw5fo15s17bn"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "mt0nmw5fo15s17bn",
+      "type": "webhook",
+      "label": "Receber Lead",
+      "config": {
+        "typeVersion": 1,
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "lead/novo",
+          "responseMode": "onReceived",
+          "responseCode": 200,
+          "options": {}
+        },
+        "webhookId": "lead-webhook-001",
+        "originalN8nType": "n8n-nodes-base.webhook"
+      },
+      "position": {
+        "x": 250,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw5f7yy3zjbc",
+      "type": "set",
+      "label": "Enriquecer Dados",
+      "config": {
+        "typeVersion": 3.4,
+        "parameters": {
+          "keepOnlySet": false,
+          "values": {
+            "string": [
+              {
+                "name": "source",
+                "value": "website_form"
+              },
+              {
+                "name": "status",
+                "value": "novo"
+              }
+            ],
+            "number": [
+              {
+                "name": "score",
+                "value": 10
+              }
+            ]
+          },
+          "options": {}
+        },
+        "originalN8nType": "n8n-nodes-base.set"
+      },
+      "position": {
+        "x": 550,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw5fapv87gin",
+      "type": "slack",
+      "label": "Notificar Slack",
+      "config": {
+        "typeVersion": 2.1,
+        "parameters": {
+          "operation": "post",
+          "channel": "#leads",
+          "text": "🎉 Novo lead: {{ $json.nome }} ({{ $json.email }})",
+          "options": {}
+        },
+        "credentials": {
+          "slackOAuth2Api": "Slack Workspace Principal"
+        },
+        "originalN8nType": "n8n-nodes-base.slack"
+      },
+      "position": {
+        "x": 850,
+        "y": 300
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "mt0nmw5fk1vse4dh",
+      "sourceNodeId": "mt0nmw5fo15s17bn",
+      "targetNodeId": "mt0nmw5f7yy3zjbc",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw5frhotgiaa",
+      "sourceNodeId": "mt0nmw5f7yy3zjbc",
+      "targetNodeId": "mt0nmw5fapv87gin",
+      "label": "0"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "webhook",
+      "config": {
+        "httpMethod": "POST",
+        "path": "lead/novo",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "options": {}
+      },
+      "nodeId": "mt0nmw5fo15s17bn"
+    }
+  ],
+  "schedules": [],
+  "webhooks": [
+    {
+      "path": "/webhook/lead/novo",
+      "method": "POST",
+      "responseMode": "onReceived",
+      "responseCode": 200,
+      "nodeId": "mt0nmw5fo15s17bn"
+    }
+  ],
+  "credentialsUsed": [
+    {
+      "nodeId": "mt0nmw5fapv87gin",
+      "credentialType": "oauth2",
+      "credentialName": "Slack Workspace Principal"
+    }
+  ],
+  "warnings": [],
+  "errors": [],
+  "stats": {
+    "totalNodes": 3,
+    "totalEdges": 2,
+    "totalTriggers": 1,
+    "totalCredentials": 1,
+    "totalWebhooks": 1
+  }
+}

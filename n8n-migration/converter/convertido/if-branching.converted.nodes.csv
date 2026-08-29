@@ -1,0 +1,6 @@
+id,type,label,category,x,y,typeVersion,disabled,originalN8nType
+mt0nmw5bhm8bxp3j,webhook,"Webhook Entrada",trigger,250,300,1,false,n8n-nodes-base.webhook
+mt0nmw5bd5ro5f9h,if,"IF: Valor Alto?",logic,550,300,2,false,n8n-nodes-base.if
+mt0nmw5byfy5mtw3,set,"Processar VIP",transform,850,200,3.4,false,n8n-nodes-base.set
+mt0nmw5be0vlyb2k,set,"Processar Normal",transform,850,400,3.4,false,n8n-nodes-base.set
+mt0nmw5bipx8pgks,merge,"Merge Resultados",logic,1150,300,2.1,false,n8n-nodes-base.merge

@@ -1,0 +1,73 @@
+{
+  "name": "Chatbot IA - Atendimento Leads",
+  "nodes": [
+    {
+      "name": "Webhook Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat/lead",
+        "responseMode": "responseNode",
+        "responseCode": 200,
+        "options": {
+          "responseDataPropertyName": "body"
+        }
+      },
+      "webhookId": "chat-webhook-001"
+    },
+    {
+      "name": "Agente IA",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [550, 300],
+      "parameters": {
+        "agent": "tools",
+        "systemMessage": "Você é um assistente de vendas especializado. Responda de forma amigável e direta.",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 1000
+        },
+        "tools": [
+          "calculadora",
+          "buscar_curso"
+        ]
+      },
+      "credentials": {
+        "openAiApi": "OpenAI Produção"
+      }
+    },
+    {
+      "name": "Responder Webhook",
+      "type": "n8n-nodes-base.webhookResponse",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "parameters": {
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Chat": {
+      "main": [
+        [
+          { "node": "Agente IA", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Agente IA": {
+      "main": [
+        [
+          { "node": "Responder Webhook", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "tags": ["ai", "chatbot", "leads", "langchain"]
+}

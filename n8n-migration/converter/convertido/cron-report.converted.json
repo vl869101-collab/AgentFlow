@@ -1,0 +1,262 @@
+{
+  "workflow": {
+    "name": "Relatório Diário de Vendas",
+    "description": "",
+    "status": "ACTIVE",
+    "config": {
+      "executionOrder": "v1",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "executionTimeout": 3600,
+      "timezone": "America/Sao_Paulo",
+      "callerPolicy": "workflowsFromSameOwner"
+    },
+    "meta": {},
+    "tags": [
+      "relatorios",
+      "cron",
+      "vendas"
+    ],
+    "nodes": [
+      {
+        "id": "mt0nmw54ee3mz1r3",
+        "type": "cron",
+        "label": "Agendar Diário",
+        "config": {
+          "typeVersion": 1.2,
+          "parameters": {
+            "triggerTimes": {
+              "item": [
+                {
+                  "mode": "cron",
+                  "cronExpression": "0 8 * * *",
+                  "timezone": "America/Sao_Paulo"
+                }
+              ]
+            }
+          },
+          "originalN8nType": "n8n-nodes-base.cron"
+        },
+        "position": {
+          "x": 250,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw54zc7mfis1",
+        "type": "httpRequest",
+        "label": "Buscar Vendas",
+        "config": {
+          "typeVersion": 4.1,
+          "parameters": {
+            "method": "GET",
+            "url": "https://api.exemplo.com/vendas",
+            "queryParameters": {
+              "parameters": [
+                {
+                  "name": "data_inicio",
+                  "value": "={{ $now.minus(1, 'day').format('YYYY-MM-DD') }}"
+                },
+                {
+                  "name": "data_fim",
+                  "value": "={{ $now.format('YYYY-MM-DD') }}"
+                }
+              ]
+            },
+            "options": {
+              "timeout": 30000
+            }
+          },
+          "credentials": {
+            "headerAuth": "API Vendas"
+          },
+          "originalN8nType": "n8n-nodes-base.httpRequest"
+        },
+        "position": {
+          "x": 550,
+          "y": 300
+        }
+      },
+      {
+        "id": "mt0nmw54bfzh6543",
+        "type": "emailSend",
+        "label": "Enviar Email",
+        "config": {
+          "typeVersion": 2.1,
+          "parameters": {
+            "fromEmail": "relatorios@empresa.com",
+            "toEmail": "gestao@empresa.com",
+            "subject": "Relatório Diário - {{ $now.format('DD/MM/YYYY') }}",
+            "text": "Total de vendas: {{ $json.totalVendas }}\nValor total: R$ {{ $json.valorTotal }}",
+            "options": {}
+          },
+          "credentials": {
+            "smtp": "Email Corporativo"
+          },
+          "originalN8nType": "n8n-nodes-base.emailSend"
+        },
+        "position": {
+          "x": 850,
+          "y": 300
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "mt0nmw557ro6q677",
+        "sourceNodeId": "mt0nmw54ee3mz1r3",
+        "targetNodeId": "mt0nmw54zc7mfis1",
+        "label": "0"
+      },
+      {
+        "id": "mt0nmw550qasx5yz",
+        "sourceNodeId": "mt0nmw54zc7mfis1",
+        "targetNodeId": "mt0nmw54bfzh6543",
+        "label": "0"
+      }
+    ],
+    "triggers": [],
+    "schedules": [
+      {
+        "cronExpression": "0 8 * * *",
+        "timezone": "America/Sao_Paulo",
+        "enabled": true,
+        "nodeId": "mt0nmw54ee3mz1r3"
+      }
+    ],
+    "credentialsUsed": [
+      "API Vendas",
+      "Email Corporativo"
+    ],
+    "webhooks": []
+  },
+  "nodes": [
+    {
+      "id": "mt0nmw54ee3mz1r3",
+      "type": "cron",
+      "label": "Agendar Diário",
+      "config": {
+        "typeVersion": 1.2,
+        "parameters": {
+          "triggerTimes": {
+            "item": [
+              {
+                "mode": "cron",
+                "cronExpression": "0 8 * * *",
+                "timezone": "America/Sao_Paulo"
+              }
+            ]
+          }
+        },
+        "originalN8nType": "n8n-nodes-base.cron"
+      },
+      "position": {
+        "x": 250,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw54zc7mfis1",
+      "type": "httpRequest",
+      "label": "Buscar Vendas",
+      "config": {
+        "typeVersion": 4.1,
+        "parameters": {
+          "method": "GET",
+          "url": "https://api.exemplo.com/vendas",
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "data_inicio",
+                "value": "={{ $now.minus(1, 'day').format('YYYY-MM-DD') }}"
+              },
+              {
+                "name": "data_fim",
+                "value": "={{ $now.format('YYYY-MM-DD') }}"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "credentials": {
+          "headerAuth": "API Vendas"
+        },
+        "originalN8nType": "n8n-nodes-base.httpRequest"
+      },
+      "position": {
+        "x": 550,
+        "y": 300
+      }
+    },
+    {
+      "id": "mt0nmw54bfzh6543",
+      "type": "emailSend",
+      "label": "Enviar Email",
+      "config": {
+        "typeVersion": 2.1,
+        "parameters": {
+          "fromEmail": "relatorios@empresa.com",
+          "toEmail": "gestao@empresa.com",
+          "subject": "Relatório Diário - {{ $now.format('DD/MM/YYYY') }}",
+          "text": "Total de vendas: {{ $json.totalVendas }}\nValor total: R$ {{ $json.valorTotal }}",
+          "options": {}
+        },
+        "credentials": {
+          "smtp": "Email Corporativo"
+        },
+        "originalN8nType": "n8n-nodes-base.emailSend"
+      },
+      "position": {
+        "x": 850,
+        "y": 300
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "mt0nmw557ro6q677",
+      "sourceNodeId": "mt0nmw54ee3mz1r3",
+      "targetNodeId": "mt0nmw54zc7mfis1",
+      "label": "0"
+    },
+    {
+      "id": "mt0nmw550qasx5yz",
+      "sourceNodeId": "mt0nmw54zc7mfis1",
+      "targetNodeId": "mt0nmw54bfzh6543",
+      "label": "0"
+    }
+  ],
+  "triggers": [],
+  "schedules": [
+    {
+      "cronExpression": "0 8 * * *",
+      "timezone": "America/Sao_Paulo",
+      "enabled": true,
+      "nodeId": "mt0nmw54ee3mz1r3"
+    }
+  ],
+  "webhooks": [],
+  "credentialsUsed": [
+    {
+      "nodeId": "mt0nmw54zc7mfis1",
+      "credentialType": "apiKey",
+      "credentialName": "API Vendas"
+    },
+    {
+      "nodeId": "mt0nmw54bfzh6543",
+      "credentialType": "custom",
+      "credentialName": "Email Corporativo"
+    }
+  ],
+  "warnings": [],
+  "errors": [],
+  "stats": {
+    "totalNodes": 3,
+    "totalEdges": 2,
+    "totalTriggers": 0,
+    "totalCredentials": 2,
+    "totalWebhooks": 0
+  }
+}

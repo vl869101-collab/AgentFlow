@@ -1,0 +1,114 @@
+{
+  "name": "Webhook com Branching IF",
+  "nodes": [
+    {
+      "name": "Webhook Entrada",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook/branching",
+        "responseMode": "lastNode",
+        "responseCode": 200
+      },
+      "webhookId": "branching-webhook-001"
+    },
+    {
+      "name": "IF: Valor Alto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [550, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.valor }}",
+              "operation": "greaterThan",
+              "value2": 1000
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Processar VIP",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [850, 200],
+      "parameters": {
+        "keepOnlySet": false,
+        "values": {
+          "string": [
+            { "name": "prioridade", "value": "alta" },
+            { "name": "tratamento", "value": "vip" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Processar Normal",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [850, 400],
+      "parameters": {
+        "keepOnlySet": false,
+        "values": {
+          "string": [
+            { "name": "prioridade", "value": "normal" },
+            { "name": "tratamento", "value": "padrao" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Merge Resultados",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1150, 300],
+      "parameters": {
+        "mode": "wait",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Entrada": {
+      "main": [
+        [
+          { "node": "IF: Valor Alto?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "IF: Valor Alto?": {
+      "main": [
+        [
+          { "node": "Processar VIP", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Processar Normal", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Processar VIP": {
+      "main": [
+        [
+          { "node": "Merge Resultados", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Processar Normal": {
+      "main": [
+        [
+          { "node": "Merge Resultados", "type": "main", "index": 1 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "tags": ["branching", "if", "merge"]
+}

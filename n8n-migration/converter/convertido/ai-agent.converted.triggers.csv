@@ -1,0 +1,2 @@
+nodeId,type,config
+mt0nmw4pll3faiiu,webhook,"{""httpMethod"":""POST"",""path"":""chat/lead"",""responseMode"":""responseNode"",""responseCode"":200,""options"":{""responseDataPropertyName"":""body""}}"

@@ -1,0 +1,106 @@
+{
+  "name": "Webhook Transformação Código",
+  "nodes": [
+    {
+      "name": "Webhook Dados Brutos",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "transform/bruto",
+        "responseMode": "onReceived"
+      },
+      "webhookId": "raw-webhook-001"
+    },
+    {
+      "name": "Transformar JS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [550, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normaliza dados de entrada\nconst items = $input.all();\nreturn items.map(item => ({\n  id: item.json.id || `gen_${Date.now()}`,\n  nome: item.json.nome?.trim().toUpperCase(),\n  email: item.json.email?.toLowerCase(),\n  valor: Number(item.json.valor) || 0,\n  criadoEm: new Date().toISOString(),\n  valido: !!item.json.email && item.json.valor > 0\n}));"
+      }
+    },
+    {
+      "name": "Filtrar Válidos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [850, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valido }}",
+              "operation": "true"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "HTTP para API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1150, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.exemplo.com/leads",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify($json) }}"
+      },
+      "credentials": {
+        "headerAuth": "API Leads"
+      }
+    },
+    {
+      "name": "Log Inválidos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1150, 400],
+      "parameters": {
+        "keepOnlySet": false,
+        "values": {
+          "string": [
+            { "name": "erro", "value": "Dados inválidos" },
+            { "name": "origem", "value": "webhook_bruto" }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Dados Brutos": {
+      "main": [
+        [
+          { "node": "Transformar JS", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Transformar JS": {
+      "main": [
+        [
+          { "node": "Filtrar Válidos", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Filtrar Válidos": {
+      "main": [
+        [
+          { "node": "HTTP para API", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Log Inválidos", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  },
+  "tags": ["transform", "code", "validation", "http"]
+}

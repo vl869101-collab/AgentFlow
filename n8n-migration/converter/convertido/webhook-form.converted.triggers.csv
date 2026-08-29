@@ -1,0 +1,2 @@
+nodeId,type,config
+mt0nmw5fo15s17bn,webhook,"{""httpMethod"":""POST"",""path"":""lead/novo"",""responseMode"":""onReceived"",""responseCode"":200,""options"":{}}"
