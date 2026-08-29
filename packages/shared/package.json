@@ -18,6 +18,7 @@
     "test": "node -e \"console.log('Shared tests passed')\""
   },
   "dependencies": {
+    "@types/node": "^22.10.0",
     "zod": "^3.24.0",
     "typescript": "^5.7.0"
   },
