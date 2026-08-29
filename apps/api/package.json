@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx watch --env-file=../../.env src/server.ts",
     "build": "tsc",
+    "start": "node dist/server.js",
+    "postinstall": "prisma generate --schema=../../packages/database/prisma/schema.prisma",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test --test-concurrency=1 test/backend.test.ts test/mcp.test.ts test/vault.test.ts test/trio10-12.test.ts test/trio13-15.test.ts test/trio16-18.test.ts test/batch-a-22-26.test.ts test/e2e-flow.test.ts test/trio28-29.test.ts test/security.test.ts test/nodes-mission37.test.ts test/executor-queue-group.test.ts test/cron-scheduler.test.ts test/auth-vault-mission37.test.ts test/billing-observability.test.ts test/mcp-nodes-sdk.test.ts test/load/load-100rps.test.ts test/chaos/chaos-resilience.test.ts test/security/security-baseline.test.ts test/staging/redis-smoke.test.ts test/webhook-hmac-multi-provider.test.ts test/otel-distributed-tracing.test.ts test/metering-rate-limiting.test.ts",
     "db:migrate": "prisma migrate dev",

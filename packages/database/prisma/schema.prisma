@@ -71,6 +71,7 @@ model Organization {
   usageRecords      UsageRecord[]
   subscriptions     Subscription[]
   auditLogs         AuditLog[]
+  apiKeys           ApiKey[]
 
   @@index([plan])
 }
