@@ -1,6 +1,11 @@
-// Google Gmail Node Handler with Gmail API v1 and Vault OAuth2 integration.
+// Google Gmail Node Handler with Gmail API v1, Quota Backoff, and Vault OAuth2 integration.
 import { z } from "zod";
 import { getValidGoogleToken } from "../../lib/google-oauth.js";
+import {
+  fetchWithGoogleQuotaBackoff,
+  GoogleQuotaRetryOptions,
+} from "../../lib/google-quota.js";
+import { isNodeMockEnabled, mergeNodeInput } from "./oauth.js";
 
 export const GoogleGmailInputSchema = z.object({
   operation: z.enum([
@@ -22,6 +27,11 @@ export const GoogleGmailInputSchema = z.object({
   maxResults: z.number().optional().default(10),
   credentialId: z.string().optional(),
   mock: z.boolean().optional(),
+  retryOptions: z.object({
+    maxRetries: z.number().optional(),
+    baseDelayMs: z.number().optional(),
+    maxDelayMs: z.number().optional(),
+  }).optional(),
 }).passthrough();
 
 export type GoogleGmailInput = z.infer<typeof GoogleGmailInputSchema>;
@@ -48,11 +58,12 @@ export async function executeGoogleGmail(
   config: Record<string, unknown>,
   input: unknown,
   orgId: string,
+  retryOpts?: GoogleQuotaRetryOptions,
 ): Promise<Record<string, unknown>> {
-  const merged = { ...config, ...(typeof input === "object" && input !== null ? (input as object) : {}) };
+  const merged = mergeNodeInput(config, input);
   const validated = GoogleGmailInputSchema.parse(merged);
 
-  const isMock = validated.mock === true || process.env.MOCK_SERVICES === "true" || process.env.EXEC_MOCK === "true";
+  const isMock = isNodeMockEnabled(validated.mock);
   const auth = await getValidGoogleToken({ credentialId: validated.credentialId, orgId });
 
   if (isMock || !auth.accessToken || auth.accessToken.startsWith("mock_")) {
@@ -111,54 +122,70 @@ export async function executeGoogleGmail(
     Authorization: `Bearer ${auth.accessToken}`,
     "Content-Type": "application/json",
   };
+  const effectiveRetryOpts: GoogleQuotaRetryOptions = {
+    ...retryOpts,
+    ...(validated.retryOptions ?? {}),
+  };
 
   switch (validated.operation) {
     case "sendMessage": {
       const raw = makeRawEmail(validated.to ?? "", validated.subject, validated.body, validated.cc);
-      const res = await fetch(`${baseUrl}/messages/send`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ raw }),
-      });
+      const res = await fetchWithGoogleQuotaBackoff(
+        `${baseUrl}/messages/send`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ raw }),
+        },
+        effectiveRetryOpts,
+      );
       if (!res.ok) throw new Error(`Gmail API error (${res.status}): ${await res.text()}`);
       return (await res.json()) as Record<string, unknown>;
     }
     case "getMessages": {
       const q = validated.query ? `&q=${encodeURIComponent(validated.query)}` : "";
       const url = `${baseUrl}/messages?maxResults=${validated.maxResults}${q}`;
-      const res = await fetch(url, { headers });
+      const res = await fetchWithGoogleQuotaBackoff(url, { headers }, effectiveRetryOpts);
       if (!res.ok) throw new Error(`Gmail API error (${res.status}): ${await res.text()}`);
       return (await res.json()) as Record<string, unknown>;
     }
     case "getMessage": {
       const url = `${baseUrl}/messages/${encodeURIComponent(validated.messageId ?? "")}`;
-      const res = await fetch(url, { headers });
+      const res = await fetchWithGoogleQuotaBackoff(url, { headers }, effectiveRetryOpts);
       if (!res.ok) throw new Error(`Gmail API error (${res.status}): ${await res.text()}`);
       return (await res.json()) as Record<string, unknown>;
     }
     case "createDraft": {
       const raw = makeRawEmail(validated.to ?? "", validated.subject, validated.body, validated.cc);
-      const res = await fetch(`${baseUrl}/drafts`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ message: { raw } }),
-      });
+      const res = await fetchWithGoogleQuotaBackoff(
+        `${baseUrl}/drafts`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ message: { raw } }),
+        },
+        effectiveRetryOpts,
+      );
       if (!res.ok) throw new Error(`Gmail API error (${res.status}): ${await res.text()}`);
       return (await res.json()) as Record<string, unknown>;
     }
     case "addLabel": {
       const url = `${baseUrl}/messages/${encodeURIComponent(validated.messageId ?? "")}/modify`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ addLabelIds: [validated.label ?? "STARRED"] }),
-      });
+      const res = await fetchWithGoogleQuotaBackoff(
+        url,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ addLabelIds: [validated.label ?? "STARRED"] }),
+        },
+        effectiveRetryOpts,
+      );
       if (!res.ok) throw new Error(`Gmail API error (${res.status}): ${await res.text()}`);
       return (await res.json()) as Record<string, unknown>;
     }
     case "deleteMessage": {
       const url = `${baseUrl}/messages/${encodeURIComponent(validated.messageId ?? "")}/trash`;
-      const res = await fetch(url, { method: "POST", headers });
+      const res = await fetchWithGoogleQuotaBackoff(url, { method: "POST", headers }, effectiveRetryOpts);
       if (!res.ok) throw new Error(`Gmail API error (${res.status}): ${await res.text()}`);
       return { id: validated.messageId, deleted: true };
     }

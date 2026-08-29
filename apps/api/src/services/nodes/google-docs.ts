@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { safeFetch } from "../../lib/ssrf.js";
+import { fetchWithGoogleQuotaBackoff, GoogleQuotaRetryOptions } from "../../lib/google-quota.js";
 import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem, wrapItems } from "./types.js";
 import { isNodeMockEnabled, mergeNodeInput, resolveVaultOAuthCredential } from "./oauth.js";
 
@@ -17,6 +17,11 @@ export const GoogleDocsInputSchema = z.object({
   index: z.number().int().min(1).optional(),
   credentialId: z.string().min(1).optional(),
   mock: z.boolean().optional(),
+  retryOptions: z.object({
+    maxRetries: z.number().optional(),
+    baseDelayMs: z.number().optional(),
+    maxDelayMs: z.number().optional(),
+  }).optional(),
 }).passthrough().superRefine((value, ctx) => {
   if (value.operation !== "createDocument" && !value.documentId) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["documentId"], message: `documentId is required for ${value.operation}` });
@@ -92,6 +97,7 @@ export async function executeGoogleDocs(
   config: Record<string, unknown>,
   input: unknown = {},
   orgId = "",
+  retryOpts?: GoogleQuotaRetryOptions,
 ): Promise<Record<string, unknown>> {
   const validated = GoogleDocsInputSchema.parse(mergeNodeInput(config, input));
   const variables = { ...mergeNodeInput({}, input), ...validated.variables };
@@ -107,22 +113,35 @@ export async function executeGoogleDocs(
   if (!accessToken) return mockDocsResult(validated, content);
 
   const headers = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
+  const effectiveRetryOpts: GoogleQuotaRetryOptions = {
+    ...retryOpts,
+    ...(validated.retryOptions ?? {}),
+  };
+
   if (validated.operation === "createDocument") {
-    const createResponse = await safeFetch("https://docs.googleapis.com/v1/documents", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ title: validated.title }),
-    });
+    const createResponse = await fetchWithGoogleQuotaBackoff(
+      "https://docs.googleapis.com/v1/documents",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ title: validated.title }),
+      },
+      effectiveRetryOpts,
+    );
     if (!createResponse.ok) throw new Error(`Google Docs API error (${createResponse.status}): ${await createResponse.text()}`);
-    const created = await createResponse.json() as Record<string, unknown>;
+    const created = (await createResponse.json()) as Record<string, unknown>;
     const documentId = String(created.documentId ?? "");
     if (!documentId) throw new Error("Google Docs API response did not include documentId");
     if (content) {
-      const insertResponse = await safeFetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}:batchUpdate`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: content } }] }),
-      });
+      const insertResponse = await fetchWithGoogleQuotaBackoff(
+        `https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}:batchUpdate`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: content } }] }),
+        },
+        effectiveRetryOpts,
+      );
       if (!insertResponse.ok) throw new Error(`Google Docs content insert error (${insertResponse.status}): ${await insertResponse.text()}`);
     }
     return { operation: validated.operation, ...created, documentId, title: validated.title, documentUrl: `https://docs.google.com/document/d/${documentId}/edit` };
@@ -130,25 +149,33 @@ export async function executeGoogleDocs(
 
   const documentId = validated.documentId!;
   if (validated.operation === "getDocument" || validated.operation === "getText") {
-    const response = await safeFetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}`, { headers });
+    const response = await fetchWithGoogleQuotaBackoff(
+      `https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}`,
+      { headers },
+      effectiveRetryOpts,
+    );
     if (!response.ok) throw new Error(`Google Docs API error (${response.status}): ${await response.text()}`);
-    const document = await response.json() as Record<string, unknown>;
+    const document = (await response.json()) as Record<string, unknown>;
     return validated.operation === "getText"
       ? { operation: validated.operation, documentId, title: document.title, text: extractGoogleDocumentText(document) }
       : { operation: validated.operation, ...document };
   }
 
-  const response = await safeFetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}:batchUpdate`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ requests: batchRequests(validated, content) }),
-  });
+  const response = await fetchWithGoogleQuotaBackoff(
+    `https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}:batchUpdate`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ requests: batchRequests(validated, content) }),
+    },
+    effectiveRetryOpts,
+  );
   if (!response.ok) throw new Error(`Google Docs API error (${response.status}): ${await response.text()}`);
   return {
     operation: validated.operation,
     documentId,
     documentUrl: `https://docs.google.com/document/d/${documentId}/edit`,
-    ...(await response.json() as Record<string, unknown>),
+    ...((await response.json()) as Record<string, unknown>),
   };
 }
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { safeFetch } from "../../lib/ssrf.js";
+import { fetchWithGoogleQuotaBackoff, GoogleQuotaRetryOptions } from "../../lib/google-quota.js";
 import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem, wrapItems } from "./types.js";
 import { isNodeMockEnabled, mergeNodeInput, resolveVaultOAuthCredential } from "./oauth.js";
 
@@ -40,6 +40,11 @@ export const GoogleCalendarInputSchema = z.object({
   quickAddText: z.string().min(1).optional(),
   credentialId: z.string().min(1).optional(),
   mock: z.boolean().optional(),
+  retryOptions: z.object({
+    maxRetries: z.number().optional(),
+    baseDelayMs: z.number().optional(),
+    maxDelayMs: z.number().optional(),
+  }).optional(),
 }).passthrough().superRefine((value, ctx) => {
   if (["getEvent", "updateEvent", "deleteEvent"].includes(value.operation) && !value.eventId) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["eventId"], message: `eventId is required for ${value.operation}` });
@@ -108,6 +113,7 @@ export async function executeGoogleCalendar(
   config: Record<string, unknown>,
   input: unknown = {},
   orgId = "",
+  retryOpts?: GoogleQuotaRetryOptions,
 ): Promise<Record<string, unknown>> {
   const validated = GoogleCalendarInputSchema.parse(mergeNodeInput(config, input));
   const startFallback = validated.startTime ?? new Date().toISOString();
@@ -128,6 +134,11 @@ export async function executeGoogleCalendar(
   const calendarId = encodeURIComponent(validated.calendarId);
   const baseUrl = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`;
   const headers = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
+  const effectiveRetryOpts: GoogleQuotaRetryOptions = {
+    ...retryOpts,
+    ...(validated.retryOptions ?? {}),
+  };
+
   let endpoint = baseUrl;
   let method = "POST";
   let body: Record<string, unknown> | undefined;
@@ -169,10 +180,14 @@ export async function executeGoogleCalendar(
     if (validated.addGoogleMeet || validated.conferenceData) endpoint += `${endpoint.includes("?") ? "&" : "?"}conferenceDataVersion=1`;
   }
 
-  const response = await safeFetch(endpoint, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const response = await fetchWithGoogleQuotaBackoff(
+    endpoint,
+    { method, headers, body: body ? JSON.stringify(body) : undefined },
+    effectiveRetryOpts,
+  );
   if (!response.ok) throw new Error(`Google Calendar API error (${response.status}): ${await response.text()}`);
   if (method === "DELETE") return { operation: validated.operation, eventId: validated.eventId, deleted: true };
-  return { operation: validated.operation, ...(await response.json() as Record<string, unknown>) };
+  return { operation: validated.operation, ...((await response.json()) as Record<string, unknown>) };
 }
 
 export class GoogleCalendarNodeHandler implements NodeHandler {
