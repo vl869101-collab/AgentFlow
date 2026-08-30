@@ -13,8 +13,11 @@ import {
   type DLQIncidentRecord,
 } from "../services/queue.js";
 import { deadMansSwitch, type DeadMansSwitchConfig } from "../services/dead-mans-switch.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 export async function dlqRoutes(app: FastifyInstance) {
+  app.addHook("onRequest", requireAdmin);
+
   // List failed jobs in Dead Letter Queue with filters & pagination
   app.get("/", async (request: FastifyRequest, reply: FastifyReply) => {
     const query = (request.query as Record<string, string>) ?? {};

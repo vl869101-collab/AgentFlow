@@ -15,6 +15,21 @@ export interface ExpressionContext {
   [key: string]: unknown;
 }
 
+const SENSITIVE_KEY_PATTERN = /(SECRET|KEY|PASS|PWD|TOKEN|DATABASE|URL|AUTH|PRIVATE|CREDENTIAL|AWS_|OPENAI|ANTHROPIC|NVIDIA|STRIPE|REDIS|SALT|BEARER|CERT|SIGNATURE)/i;
+
+/**
+ * Sanitizes environment variables to prevent leaking sensitive secrets in workflow expressions.
+ */
+export function sanitizeEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): Record<string, string | undefined> {
+  const sanitized: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (k && !SENSITIVE_KEY_PATTERN.test(k)) {
+      sanitized[k] = v;
+    }
+  }
+  return sanitized;
+}
+
 /**
  * Safely extracts a property path from an object or context.
  * Supports dot notation `a.b.c` and bracket notation `a['b']['c']` or `a[0]`.
@@ -98,7 +113,7 @@ export function buildExpressionContext(options: {
     $workflow: { id: options.workflowId, name: options.workflowName },
     $now: now.toISOString(),
     $today: now.toISOString().split("T")[0],
-    $env: process.env,
+    $env: sanitizeEnv(process.env),
   };
 }
 

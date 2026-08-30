@@ -220,10 +220,31 @@ test("DLQ API & DeadMansSwitch integration: sendToDLQ automatically feeds incide
   const incidents = await getDLQIncidents();
   assert.ok(incidents.total >= 2);
 
+  // Register test user with ADMIN role to access protected DLQ endpoints
+  const adminUser = await (await import("../src/lib/prisma.js")).prisma.user.create({
+    data: {
+      email: "admin-dlq-test@example.com",
+      passwordHash: "hash123",
+      memberships: {
+        create: {
+          role: "ADMIN",
+          org: {
+            create: {
+              name: "Admin Org",
+              slug: `admin-org-${Date.now()}`,
+            },
+          },
+        },
+      },
+    },
+  });
+  const adminToken = (app as any).jwt.sign({ sub: adminUser.id, email: adminUser.email });
+
   // Test DLQ alerts API endpoints
   const configRes = await app.inject({
     method: "GET",
     url: "/api/admin/dlq/alerts/config",
+    headers: { authorization: `Bearer ${adminToken}` },
   });
   assert.equal(configRes.statusCode, 200);
   const configBody = JSON.parse(configRes.body);
@@ -233,7 +254,7 @@ test("DLQ API & DeadMansSwitch integration: sendToDLQ automatically feeds incide
   const updateRes = await app.inject({
     method: "POST",
     url: "/api/admin/dlq/alerts/config",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
     payload: JSON.stringify({ thresholdCount: 4 }),
   });
   assert.equal(updateRes.statusCode, 200);
@@ -244,7 +265,7 @@ test("DLQ API & DeadMansSwitch integration: sendToDLQ automatically feeds incide
   const testAlertRes = await app.inject({
     method: "POST",
     url: "/api/admin/dlq/alerts/test",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
     payload: JSON.stringify({ executionId: "exec-manual-test", error: "Simulated worker deadlock" }),
   });
   assert.equal(testAlertRes.statusCode, 200);

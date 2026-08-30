@@ -12,6 +12,20 @@ import { recordAuditEvent } from "../services/audit-ledger.js";
 export async function executionRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
 
+  // Validate that if an organization context is requested, the user is a verified member
+  app.addHook("preHandler", async (request, reply) => {
+    const userId = userIdFromRequest(request);
+    const requestedOrgId = orgIdFromRequest(request);
+    if (userId && requestedOrgId) {
+      const membership = await prisma.organizationMember.findUnique({
+        where: { userId_orgId: { userId, orgId: requestedOrgId } },
+      });
+      if (!membership) {
+        return reply.code(403).send({ error: "Not a member of this organization", code: "FORBIDDEN_ORG" });
+      }
+    }
+  });
+
   app.post("/trigger", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } }, preHandler: checkQuota }, async (request, reply) => {
     const body = request.body as { workflowId?: unknown; input?: unknown; trigger?: unknown };
     if (!body || typeof body.workflowId !== "string" || !body.workflowId) {

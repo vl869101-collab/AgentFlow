@@ -10,9 +10,12 @@ import {
 } from "../services/queue.js";
 import { telemetry } from "../lib/otel.js";
 import { getRedisClient } from "../lib/redis.js";
+import { requireAdmin } from "../middleware/auth.js";
 import os from "node:os";
 
 export async function bullBoardRoutes(app: FastifyInstance) {
+  app.addHook("onRequest", requireAdmin);
+
   // HTML dashboard — full Bull Board monitoring with Redis + Otel metrics + Queue actions
   app.get("/", async (_request: FastifyRequest, reply: FastifyReply) => {
     const cpus = os.cpus().length || 1;

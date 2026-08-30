@@ -125,8 +125,22 @@ export const store = {
       return project(u, select);
     },
     async create({ data }: { data: any }) {
-      const user = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };
+      const { members, memberships, ...rest } = data;
+      const user = { id: cuid(), ...rest, createdAt: now(), updatedAt: now() };
       users.set(user.id, user);
+      if (memberships?.create) {
+        const m = memberships.create;
+        const memberId = cuid();
+        let targetOrgId = m.orgId;
+        if (!targetOrgId && m.org?.create) {
+          const org = { id: cuid(), ...m.org.create, createdAt: now(), updatedAt: now() };
+          orgs.set(org.id, org);
+          targetOrgId = org.id;
+        }
+        if (targetOrgId) {
+          orgMembers.set(memberId, { id: memberId, userId: user.id, orgId: targetOrgId, role: m.role || "MEMBER", createdAt: now() });
+        }
+      }
       return user;
     },
     async update({ where, data }: { where: any; data: any }) {

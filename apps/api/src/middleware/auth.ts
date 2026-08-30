@@ -101,3 +101,35 @@ export async function requireOrgMember(
     return reply.code(403).send({ error: "Insufficient permissions", code: "FORBIDDEN" });
   }
 }
+
+export async function requireAdmin(request: FastifyRequest, reply: FastifyReply) {
+  await requireAuth(request, reply);
+  if (reply.sent) return;
+
+  const userId = userIdFromRequest(request);
+  if (!userId) {
+    return reply.code(401).send({ error: "Unauthorized", code: "AUTH_FAILED" });
+  }
+
+  const explicitOrgId = orgIdFromRequest(request);
+  if (explicitOrgId) {
+    const member = await prisma.organizationMember.findUnique({
+      where: { userId_orgId: { userId, orgId: explicitOrgId } },
+    });
+    if (member && ["ADMIN", "OWNER"].includes(member.role)) {
+      return;
+    }
+  }
+
+  // Check any membership where user is ADMIN or OWNER
+  const adminMembership = await prisma.organizationMember.findFirst({
+    where: {
+      userId,
+      role: { in: ["ADMIN", "OWNER"] },
+    },
+  });
+
+  if (!adminMembership) {
+    return reply.code(403).send({ error: "Admin role required", code: "FORBIDDEN" });
+  }
+}
