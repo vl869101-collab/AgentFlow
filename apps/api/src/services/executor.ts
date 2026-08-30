@@ -698,6 +698,87 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
   }
 }
 
+type RetryPolicy = {
+  enabled: boolean;
+  maxAttempts: number;
+  waitBetweenTriesMs: number;
+  backoff: "fixed" | "linear" | "exponential";
+};
+
+function getNodeRetryPolicy(node: WorkflowNode): RetryPolicy {
+  const config = node.config ?? {};
+  const parameters = asObject(config.parameters);
+  const retryOnFail = config.retryOnFail ?? config.retryOnFailure ?? parameters.retryOnFail ?? parameters.retryOnFailure;
+  const enabled = retryOnFail === true || String(retryOnFail ?? "").toLowerCase() === "true";
+  const configuredTries = config.maxTries ?? config.maxAttempts ?? parameters.maxTries ?? parameters.maxAttempts;
+  const parsedTries = Number(configuredTries);
+  const maxAttempts = Math.min(10, Math.max(1, Number.isFinite(parsedTries) ? Math.floor(parsedTries) : enabled ? 3 : 1));
+  const configuredDelay = config.waitBetweenTries ?? parameters.waitBetweenTries ?? 0;
+  const parsedDelay = Number(configuredDelay);
+  const waitBetweenTriesMs = Math.min(60_000, Math.max(0, Number.isFinite(parsedDelay) ? parsedDelay : 0));
+  const configuredBackoff = String(config.backoff ?? config.retryBackoff ?? parameters.backoff ?? parameters.retryBackoff ?? "exponential").toLowerCase();
+  const backoff = configuredBackoff === "fixed" || configuredBackoff === "linear" ? configuredBackoff : "exponential";
+
+  return { enabled, maxAttempts: enabled ? maxAttempts : 1, waitBetweenTriesMs, backoff };
+}
+
+function retryDelay(policy: RetryPolicy, failedAttempt: number): number {
+  const multiplier = policy.backoff === "fixed"
+    ? 1
+    : policy.backoff === "linear"
+    ? failedAttempt
+    : 2 ** Math.max(0, failedAttempt - 1);
+  return Math.min(60_000, policy.waitBetweenTriesMs * multiplier);
+}
+
+function isCancellationError(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes("cancel") || message.includes("abort");
+}
+
+async function assertExecutionNotCancelled(executionId: string): Promise<void> {
+  const current = await prisma.workflowExecution.findUnique({ where: { id: executionId } });
+  if (current?.status === "CANCELLED") throw new Error("Execution cancelled");
+}
+
+async function executeNodeWithRetry(
+  node: WorkflowNode,
+  input: unknown,
+  orgId: string,
+  executionId: string,
+  nodeExecutionId: string,
+): Promise<unknown> {
+  const policy = getNodeRetryPolicy(node);
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
+    await assertExecutionNotCancelled(executionId);
+    try {
+      const output = await withTimeout(executeNode(node, input, orgId), NODE_TIMEOUT_MS, "Node execution timed out");
+      if (attempt > 1) {
+        await prisma.nodeExecution.update({
+          where: { id: nodeExecutionId },
+          data: { retryCount: attempt - 1, error: null },
+        });
+      }
+      return output;
+    } catch (error) {
+      lastError = error;
+      const hasAttemptsLeft = attempt < policy.maxAttempts;
+      if (!policy.enabled || !hasAttemptsLeft || isCancellationError(error)) throw error;
+
+      await prisma.nodeExecution.update({
+        where: { id: nodeExecutionId },
+        data: { retryCount: attempt, error: errorMessage(error) },
+      });
+      const delayMs = retryDelay(policy, attempt);
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(errorMessage(lastError));
+}
+
 function workflowGraph(workflow: any): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
   const version = Array.isArray(workflow.versions) ? workflow.versions[0] : undefined;
   const snapshot = asObject(parseJson(version?.snapshot, {}));
@@ -851,7 +932,7 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
     }
 
     try {
-      const output = await withTimeout(executeNode(node, nodeInput, execution.orgId), NODE_TIMEOUT_MS, "Node execution timed out");
+      const output = await executeNodeWithRetry(node, nodeInput, execution.orgId, execution.id, nodeExecution.id);
       const nodeDuration = Date.now() - nodeStartedAt;
       await prisma.nodeExecution.update({
         where: { id: nodeExecution.id },
