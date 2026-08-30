@@ -10,6 +10,10 @@ describe("Database Performance & Schema Optimization Audit", () => {
     migrationsDir,
     "202608300001_database_optimization"
   );
+  const performanceIndexesMigrationDir = path.join(
+    migrationsDir,
+    "000000000001_performance_indexes"
+  );
 
   it("schema.prisma includes high-throughput composite indexes for WorkflowExecution", () => {
     const schema = fs.readFileSync(schemaPath, "utf8");
@@ -38,6 +42,31 @@ describe("Database Performance & Schema Optimization Audit", () => {
     expect(schema).toContain("@@index([executionId, startedAt])");
     expect(schema).toContain("@@index([nodeId, status, startedAt])");
     expect(schema).toContain("@@index([executionId, status, startedAt])");
+  });
+
+  it("000000000001_performance_indexes migration.sql and down.sql contain required composite indexes and rollback", () => {
+    expect(fs.existsSync(performanceIndexesMigrationDir)).toBe(true);
+
+    const upFile = path.join(performanceIndexesMigrationDir, "migration.sql");
+    expect(fs.existsSync(upFile)).toBe(true);
+    const sql = fs.readFileSync(upFile, "utf8");
+
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS "WorkflowExecution_orgId_status_startedAt_idx"');
+    expect(sql).toContain('ON "WorkflowExecution" ("orgId", "status", "startedAt")');
+
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS "AuditLog_orgId_action_createdAt_idx"');
+    expect(sql).toContain('ON "AuditLog" ("orgId", "action", "createdAt")');
+
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS "NodeExecution_executionId_status_startedAt_idx"');
+    expect(sql).toContain('ON "NodeExecution" ("executionId", "status", "startedAt")');
+
+    const downFile = path.join(performanceIndexesMigrationDir, "down.sql");
+    expect(fs.existsSync(downFile)).toBe(true);
+    const downSql = fs.readFileSync(downFile, "utf8");
+
+    expect(downSql).toContain('DROP INDEX IF EXISTS "NodeExecution_executionId_status_startedAt_idx"');
+    expect(downSql).toContain('DROP INDEX IF EXISTS "AuditLog_orgId_action_createdAt_idx"');
+    expect(downSql).toContain('DROP INDEX IF EXISTS "WorkflowExecution_orgId_status_startedAt_idx"');
   });
 
   it("202608300001_database_optimization migration.sql contains partial and composite indexes", () => {
