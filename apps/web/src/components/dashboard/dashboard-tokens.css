@@ -1,0 +1,130 @@
+/* ═══════════════════════════════════════════
+   AgentFlow Dashboard — design tokens & motion
+   Scoped under .af-dash to avoid global bleed
+   ═══════════════════════════════════════════ */
+
+.af-dash {
+  --af-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --af-duration: 220ms;
+  --af-accent: #8b5cf6;
+  --af-border: rgb(255 255 255 / 0.08);
+  --af-border-strong: rgb(255 255 255 / 0.18);
+}
+
+/* Bento card surface with spotlight hover */
+.af-dash-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid var(--af-border);
+  background: linear-gradient(180deg, rgb(39 39 42 / 0.5), rgb(24 24 27 / 0.72));
+  backdrop-filter: blur(12px);
+  transition:
+    transform var(--af-duration) var(--af-ease),
+    border-color var(--af-duration) var(--af-ease),
+    box-shadow var(--af-duration) var(--af-ease);
+}
+
+.af-dash-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(480px circle at 16% -12%, rgb(139 92 246 / 0.13), transparent 56%);
+  opacity: 0;
+  transition: opacity var(--af-duration) var(--af-ease);
+  pointer-events: none;
+}
+
+.af-dash-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--af-border-strong);
+  box-shadow: 0 14px 44px -20px rgb(139 92 246 / 0.4);
+}
+
+.af-dash-card:hover::before,
+.af-dash-card:focus-within::before {
+  opacity: 1;
+}
+
+.af-dash-card:focus-within {
+  border-color: rgb(139 92 246 / 0.5);
+}
+
+/* Staggered page-load reveal */
+@keyframes af-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.af-dash-reveal {
+  animation: af-reveal 0.45s var(--af-ease) both;
+}
+
+.af-dash > .af-dash-reveal:nth-child(1) { animation-delay: 30ms; }
+.af-dash > .af-dash-reveal:nth-child(2) { animation-delay: 90ms; }
+.af-dash > .af-dash-reveal:nth-child(3) { animation-delay: 150ms; }
+.af-dash > .af-dash-reveal:nth-child(4) { animation-delay: 210ms; }
+.af-dash > .af-dash-reveal:nth-child(5) { animation-delay: 270ms; }
+.af-dash > .af-dash-reveal:nth-child(6) { animation-delay: 330ms; }
+.af-dash > .af-dash-reveal:nth-child(7) { animation-delay: 390ms; }
+.af-dash > .af-dash-reveal:nth-child(8) { animation-delay: 450ms; }
+
+/* Live status dot pulse ring */
+@keyframes af-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(52 211 153 / 0.5);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px rgb(52 211 153 / 0);
+  }
+}
+
+.af-dash-dot--live {
+  animation: af-pulse-ring 2.4s ease-out infinite;
+}
+
+/* Sparkline draw-in (pathLength normalized to 100) */
+@keyframes af-draw {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.af-spark-line {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: af-draw 0.9s var(--af-ease) 0.2s forwards;
+}
+
+/* Reduced motion: kill all decorative animation */
+@media (prefers-reduced-motion: reduce) {
+  .af-dash-reveal,
+  .af-dash-dot--live,
+  .af-spark-line {
+    animation: none !important;
+  }
+
+  .af-spark-line {
+    stroke-dashoffset: 0;
+  }
+
+  .af-dash-card,
+  .af-dash-card::before {
+    transition: none;
+  }
+
+  .af-dash-card:hover {
+    transform: none;
+  }
+}
