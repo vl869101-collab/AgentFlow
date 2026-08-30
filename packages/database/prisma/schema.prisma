@@ -117,6 +117,7 @@ model Workflow {
   @@index([ownerId, updatedAt])
   @@index([status, updatedAt])
   @@index([orgId, status])
+  @@index([orgId, status, updatedAt])
 }
 
 model WorkflowVersion {
@@ -130,6 +131,7 @@ model WorkflowVersion {
 
   @@unique([workflowId, version])
   @@index([workflowId, createdAt])
+  @@index([workflowId, version(sort: Desc)])
 }
 
 model WorkflowNode {
@@ -203,6 +205,8 @@ model WorkflowExecution {
   @@index([userId, startedAt])
   @@index([status, startedAt])
   @@index([workflowId, status, startedAt])
+  @@index([orgId, status, startedAt])
+  @@index([orgId, trigger, startedAt])
 }
 
 model NodeExecution {
@@ -225,6 +229,8 @@ model NodeExecution {
   idempotencyKey String? @unique
 
   @@index([executionId, startedAt])
+  @@index([nodeId, status, startedAt])
+  @@index([executionId, status, startedAt])
 }
 
 // ═══════════════════════════════════════════
@@ -362,6 +368,10 @@ model AuditLog {
   user   User @relation(fields: [userId], references: [id])
   orgId  String
   org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([orgId, action, createdAt])
+  @@index([orgId, resource, createdAt])
 }
 
 model ApiKey {
