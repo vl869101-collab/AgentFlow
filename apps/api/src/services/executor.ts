@@ -30,6 +30,7 @@ import { AiAgentNodeHandler } from "./nodes/ai-agent.js";
 import { LlmModelNodeHandler } from "./nodes/llm-model.js";
 import { LlmChainNodeHandler } from "./nodes/llm-chain.js";
 import { VectorStoreNodeHandler } from "./nodes/vector-store.js";
+import { ExecuteWorkflowNodeHandler } from "./nodes/execute-workflow.js";
 import {
   wrapItems,
   unwrapItems,
@@ -421,12 +422,19 @@ function containsCodeNode(workflow: any): boolean {
   return workflowGraph(workflow).nodes.some((node) => node.type === "code" || node.type === "transform");
 }
 
-async function executeNode(node: WorkflowNode, input: unknown, orgId: string): Promise<unknown> {
+async function executeNode(
+  node: WorkflowNode,
+  input: unknown,
+  orgId: string,
+  executionId?: string,
+  workflowId?: string
+): Promise<unknown> {
   switch (node.type) {
     case "trigger":
     case "webhook":
     case "cron":
     case "manual":
+    case "executeWorkflowTrigger":
       return input;
     case "ai":
       return executeAi(node.config, input);
@@ -732,11 +740,27 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
     case "vectorStorePgvector": {
       const handler = new VectorStoreNodeHandler();
       const res = await handler.execute({
-        executionId: "",
+        executionId: executionId || "",
         nodeId: node.id,
         workflowId: "",
         orgId,
         nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+      return res.items;
+    }
+    case "executeWorkflow":
+    case "execute_workflow":
+    case "executeWorkflowTrigger":
+    case "subworkflow":
+    case "sub_workflow": {
+      const handler = new ExecuteWorkflowNodeHandler();
+      const res = await handler.execute({
+        executionId: executionId || "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>),
         input,
       });
       return res.items;
@@ -809,6 +833,7 @@ async function executeNodeWithRetry(
   orgId: string,
   executionId: string,
   nodeExecutionId: string,
+  workflowId?: string
 ): Promise<unknown> {
   const policy = getNodeRetryPolicy(node);
   let lastError: unknown;
@@ -816,7 +841,11 @@ async function executeNodeWithRetry(
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
     await assertExecutionNotCancelled(executionId);
     try {
-      const output = await withTimeout(executeNode(node, input, orgId), NODE_TIMEOUT_MS, "Node execution timed out");
+      const output = await withTimeout(
+        executeNode(node, input, orgId, executionId, workflowId),
+        NODE_TIMEOUT_MS,
+        "Node execution timed out"
+      );
       if (attempt > 1) {
         await prisma.nodeExecution.update({
           where: { id: nodeExecutionId },
@@ -919,6 +948,7 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
       "evaluationTrigger",
       "gmailTrigger",
       "emailReadImap",
+      "executeWorkflowTrigger",
     ].includes(node.type),
   );
   if (!trigger) throw new Error("Workflow has no trigger node");
@@ -994,7 +1024,14 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
     }
 
     try {
-      const output = await executeNodeWithRetry(node, nodeInput, execution.orgId, execution.id, nodeExecution.id);
+      const output = await executeNodeWithRetry(
+        node,
+        nodeInput,
+        execution.orgId,
+        execution.id,
+        nodeExecution.id,
+        workflow.id
+      );
       const nodeDuration = Date.now() - nodeStartedAt;
       await prisma.nodeExecution.update({
         where: { id: nodeExecution.id },
@@ -1148,7 +1185,7 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
 export async function createWorkflowExecution(
   workflowId: string,
   input?: unknown,
-  options: { userId?: string; trigger?: string } = {},
+  options: { userId?: string; trigger?: string; parentExecutionId?: string } = {},
 ): Promise<ExecutionResult> {
   const workflow = await prisma.workflow.findFirst({
     where: { id: workflowId },
@@ -1167,13 +1204,20 @@ export async function createWorkflowExecution(
       startedAt: new Date(),
     },
   })) as ExecutionResult;
-  await recordExecutionAudit(created as any, "execution.created", { status: "PENDING" });
+  await recordExecutionAudit(created as any, "execution.created", {
+    status: "PENDING",
+    ...(options.parentExecutionId ? { parentExecutionId: options.parentExecutionId } : {}),
+  });
   return created;
 }
 
 export async function runExecution(
   executionId: string,
-  options: { parentContext?: import("../lib/otel.js").TraceContext | null; traceparent?: string } = {}
+  options: {
+    parentContext?: import("../lib/otel.js").TraceContext | null;
+    traceparent?: string;
+    parentExecutionId?: string;
+  } = {}
 ): Promise<ExecutionResult> {
   const execution = await prisma.workflowExecution.findUnique({ where: { id: executionId } });
   if (!execution) throw new Error("Execution not found");

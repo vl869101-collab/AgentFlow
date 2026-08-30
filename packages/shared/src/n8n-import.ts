@@ -304,6 +304,14 @@ export const N8N_SDK_CATALOG: Record<string, N8nNodeSdkSpec> = {
     description: "Waits for a webhook or delay interval",
     supportedVersions: [1, 1.1],
   },
+  "n8n-nodes-base.executeWorkflow": {
+    n8nType: "n8n-nodes-base.executeWorkflow",
+    agentFlowType: "executeWorkflow",
+    category: "advanced",
+    label: "Execute Workflow",
+    description: "Calls a sub-workflow synchronously or asynchronously with isolated variable context and item passing",
+    supportedVersions: [1, 1.1, 1.2],
+  },
 
   // Service & Communication Nodes
   "n8n-nodes-base.gmail": {
