@@ -1,0 +1,67 @@
+/**
+ * Linha de planilha Google Sheets (leitura/escrita)
+ * Node: Google Sheets (Read/Update/Append)
+ * Colunas típicas: ID, Data, Cliente, Email, Produto, Valor, Status, Origem
+ */
+{
+  "range": "Vendas!A2:H",
+  "majorDimension": "ROWS",
+  "values": [
+    [
+      "20260819_001",
+      "2026-08-19T10:30:00Z",
+      "João Silva",
+      "joao.silva@email.com",
+      "Curso Completo de Marketing Digital",
+      "299.90",
+      "Aprovado",
+      "Website"
+    ],
+    [
+      "20260819_002",
+      "2026-08-19T11:15:00Z",
+      "Maria Oliveira",
+      "maria.oliveira@email.com",
+      "Ebook: Estratégias de Tráfego Pago",
+      "49.95",
+      "Aprovado",
+      "Instagram Ads"
+    ],
+    [
+      "20260819_003",
+      "2026-08-19T14:22:00Z",
+      "Carlos Santos",
+      "carlos.santos@email.com",
+      "Curso Completo de Marketing Digital",
+      "299.90",
+      "Pendente",
+      "Email Marketing"
+    ],
+    [
+      "20260819_004",
+      "2026-08-19T15:45:00Z",
+      "Ana Costa",
+      "ana.costa@email.com",
+      "Mentoria VIP 1:1",
+      "1499.00",
+      "Aprovado",
+      "Indicação"
+    ],
+    [
+      "20260819_005",
+      "2026-08-19T16:20:00Z",
+      "Pedro Lima",
+      "pedro.lima@email.com",
+      "Ebook: Estratégias de Tráfego Pago",
+      "49.95",
+      "Recusado",
+      "Google Ads"
+    ]
+  ],
+  "metadados": {
+    "totalLinhas": 5,
+    "ultimaAtualizacao": "2026-08-19T16:20:00Z",
+    "planilhaId": "1ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789",
+    "aba": "Vendas"
+  }
+}

@@ -1,0 +1,15 @@
+/**
+ * Webhook de formulário de lead/contato
+ * Node: Webhook (recebe dados de formulário HTML)
+ * Campos: nome, email, telefone, mensagem
+ */
+{
+  "nome": "João Silva",
+  "email": "joao.silva@email.com",
+  "telefone": "+55 11 99999-9999",
+  "mensagem": "Olá, estou interessado nos seus serviços de consultoria. Poderiam me enviar mais informações?",
+  "timestamp": "2026-08-19T10:30:00Z",
+  "formId": "lead-contact-form-001",
+  "ipAddress": "200.123.45.67",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}

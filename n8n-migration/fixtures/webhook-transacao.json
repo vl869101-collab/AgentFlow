@@ -1,0 +1,33 @@
+/**
+ * Webhook de transação/pagamento/pedido
+ * Node: Webhook (recebe callback de gateway de pagamento)
+ * Campos: id, valor, status, cliente, itens
+ */
+{
+  "id": "txn_20260819_001234",
+  "valor": 299.90,
+  "moeda": "BRL",
+  "status": "aprovado",
+  "gateway": "mercadopago",
+  "cliente": {
+    "nome": "Maria Oliveira",
+    "email": "maria.oliveira@email.com",
+    "telefone": "+55 21 98888-7777",
+    "documento": "123.456.789-00"
+  },
+  "itens": [
+    {
+      "produtoId": "prod_curso_001",
+      "nome": "Curso Completo de Marketing Digital",
+      "quantidade": 1,
+      "precoUnitario": 299.90
+    }
+  ],
+  "dataCriacao": "2026-08-19T14:22:15Z",
+  "dataAprovacao": "2026-08-19T14:22:18Z",
+  "metadados": {
+    "utm_source": "google",
+    "utm_medium": "cpc",
+    "utm_campaign": "venda_curso_agosto"
+  }
+}

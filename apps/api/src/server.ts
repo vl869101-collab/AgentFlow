@@ -316,7 +316,7 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
   await app.register(cors, { origin: parseCorsOrigin(env.CORS_ORIGIN), credentials: true });
   await app.register(sensible);
   await app.register(rateLimit, {
-    max: 200,
+    max: env.NODE_ENV === "test" ? 10000 : 200,
     timeWindow: "1 minute",
     keyGenerator: (request) => {
       const user = request.user as { sub?: string } | undefined;

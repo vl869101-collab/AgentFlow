@@ -26,7 +26,9 @@ export async function executionRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/trigger", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } }, preHandler: checkQuota }, async (request, reply) => {
+  const isTest = process.env.NODE_ENV === "test";
+
+  app.post("/trigger", { config: { rateLimit: { max: isTest ? 10000 : 60, timeWindow: "1 minute" } }, preHandler: checkQuota }, async (request, reply) => {
     const body = request.body as { workflowId?: unknown; input?: unknown; trigger?: unknown };
     if (!body || typeof body.workflowId !== "string" || !body.workflowId) {
       return reply.badRequest("workflowId required");

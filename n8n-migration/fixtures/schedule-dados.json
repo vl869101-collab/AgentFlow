@@ -1,0 +1,39 @@
+/**
+ * Payload gerado por trigger agendado (cron)
+ * Node: Schedule Trigger + HTTP Request/Set
+ * Cenário: Relatório diário de vendas para envio por email
+ */
+{
+  "tipo": "relatorio_vendas_diario",
+  "data": "2026-08-18",
+  "periodo": "00:00:00-23:59:59",
+  "resumo": {
+    "totalVendas": 15,
+    "valorTotal": 4498.50,
+    "ticketMedio": 299.90,
+    "novosClientes": 3
+  },
+  "detalhes": {
+    "produtosMaisVendidos": [
+      {
+        "produtoId": "prod_curso_001",
+        "nome": "Curso Completo de Marketing Digital",
+        "quantidade": 8,
+        "valorTotal": 2399.20
+      },
+      {
+        "produtoId": "prod_ebook_002",
+        "nome": "Ebook: Estratégias de Tráfego Pago",
+        "quantidade": 5,
+        "valorTotal": 249.75
+      }
+    ],
+    "canaisVenda": {
+      "website": 10,
+      "instagram": 3,
+      "email": 2
+    }
+  },
+  "geradoEm": "2026-08-19T08:00:00Z",
+  "proximoRelatorio": "2026-08-19T08:00:00Z"
+}

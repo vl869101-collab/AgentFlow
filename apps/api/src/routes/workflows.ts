@@ -137,9 +137,10 @@ async function saveCanvas(workflowId: string, body: any) {
 
 export async function workflowRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
+  const isTest = process.env.NODE_ENV === "test";
 
   // List workflows with Org Scoping + Search `q` + Cursor Pagination
-  app.get("/", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get("/", { config: { rateLimit: { max: isTest ? 10000 : 120, timeWindow: "1 minute" } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = await activeOrgId(request);
     if (!orgId) return [];
 
@@ -205,7 +206,7 @@ export async function workflowRoutes(app: FastifyInstance) {
     return serializeWorkflow(workflow);
   });
 
-  app.post("/", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } }, preHandler: checkWorkflowQuota }, async (request, reply) => {
+  app.post("/", { config: { rateLimit: { max: isTest ? 10000 : 30, timeWindow: "1 minute" } }, preHandler: checkWorkflowQuota }, async (request, reply) => {
     const userId = userIdFromRequest(request);
     const orgId = await activeOrgId(request);
     if (!orgId) return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });

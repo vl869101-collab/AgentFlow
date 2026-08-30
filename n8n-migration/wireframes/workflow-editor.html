@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow - Editor de Workflow</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          },
+          colors: {
+            primary: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+            },
+            dark: {
+              50: '#f8fafc',
+              100: '#f1f5f9',
+              200: '#e2e8f0',
+              300: '#cbd5e1',
+              400: '#94a3b8',
+              500: '#64748b',
+              600: '#475569',
+              700: '#334155',
+              800: '#1e293b',
+              900: '#0f172a',
+              950: '#020617',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .node { transition: all 0.2s ease; cursor: move; }
+    .node:hover { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); }
+    .node.selected { box-shadow: 0 0 0 2px #0ea5e9, 0 10px 15px -3px rgba(0,0,0,0.1); }
+    .connection { pointer-events: none; }
+    .sidebar-panel { transition: transform 0.3s ease; }
+    .zoom-controls button { transition: all 0.2s ease; }
+    .zoom-controls button:hover { background-color: #e2e8f0; }
+    .node-type-webhook { border-left: 4px solid #0ea5e9; }
+    .node-type-http { border-left: 4px solid #8b5cf6; }
+    .node-type-if { border-left: 4px solid #f59e0b; }
+    .node-type-code { border-left: 4px solid #10b981; }
+    .node-type-llm { border-left: 4px solid #ec4899; }
+    .node-type-telegram { border-left: 4px solid #0088cc; }
+    .node-port { transition: all 0.2s ease; }
+    .node-port:hover { transform: scale(1.3); background-color: #0ea5e9; }
+    .canvas-grid { background-image: linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px); background-size: 20px 20px; }
+  </style>
+</head>
+<body class="font-sans bg-dark-50 h-screen overflow-hidden flex">
+  <!-- Top Bar -->
+  <header class="bg-white border-b border-dark-200 h-14 flex items-center px-4 shadow-sm z-30">
+    <div class="max-w-full mx-auto flex items-center justify-between w-full">
+      <div class="flex items-center gap-4">
+        <a href="workflows-list.html" class="flex items-center gap-2">
+          <svg class="w-6 h-6 text-dark-400 hover:text-dark-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+        </a>
+        <div class="w-px h-6 bg-dark-200"></div>
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+          </div>
+          <div>
+            <h1 class="font-bold text-dark-900 text-sm">Processamento de Leads</h1>
+            <p class="text-xs text-dark-500">Workflow ativo • Última execução: há 2 min</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- Search/Command Palette -->
+        <div class="relative hidden sm:block">
+          <input type="text" placeholder="Buscar nodes, ações... (⌘K)" class="pl-10 pr-4 py-1.5 w-64 border border-dark-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-dark-50">
+          <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M13.5 8.637a4.5 4.5 0 11-8.993-8.99 4.5 4.5 0 018.993 8.99z"></path></svg>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1.5 text-sm font-medium text-dark-600 hover:text-dark-900 hover:bg-dark-100 rounded-lg transition">
+            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            Salvar
+          </button>
+          <button class="px-3 py-1.5 text-sm font-medium text-dark-600 hover:text-dark-900 hover:bg-dark-100 rounded-lg transition">
+            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            Ativar
+          </button>
+          <button class="px-4 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            Executar
+          </button>
+        </div>
+
+        <div class="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
+          <span class="text-sm font-semibold text-primary-700">AF</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Left Sidebar - Nodes Panel -->
+    <aside class="w-72 bg-white border-r border-dark-200 flex flex-col hidden lg:flex">
+      <div class="p-4 border-b border-dark-200">
+        <h2 class="text-sm font-semibold text-dark-900 uppercase tracking-wider">Nodes</h2>
+        <p class="text-xs text-dark-500 mt-1">Arraste para o canvas</p>
+      </div>
+
+      <div class="p-3">
+        <input type="text" placeholder="Filtrar nodes..." class="w-full pl-10 pr-4 py-2 border border-dark-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-dark-50">
+        <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M13.5 8.637a4.5 4.5 0 11-8.993-8.99 4.5 4.5 0 018.993 8.99z"></path></svg>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-3 space-y-4">
+        <!-- Trigger Nodes -->
+        <div>
+          <h3 class="text-xs font-semibold text-dark-500 uppercase tracking-wider mb-2 px-2">Triggers</h3>
+          <div class="space-y-2">
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-webhook flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">Webhook</span>
+            </div>
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-http flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">HTTP Request</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Logic Nodes -->
+        <div>
+          <h3 class="text-xs font-semibold text-dark-500 uppercase tracking-wider mb-2 px-2">Logic</h3>
+          <div class="space-y-2">
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-if flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">IF</span>
+            </div>
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-code flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">Code</span>
+            </div>
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-llm flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">LLM</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Nodes -->
+        <div>
+          <h3 class="text-xs font-semibold text-dark-500 uppercase tracking-wider mb-2 px-2">Actions</h3>
+          <div class="space-y-2">
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-telegram flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24"><path d="M23.973 4.97a.039.039 0 0 0-.043.044L11.313 19.982a.197.197 0 0 1-.09.049.21.21 0 0 1-.104-.021l-3.886-1.279a.23.23 0 0 1-.08-.139L.02 9.47a.042.042 0 0 0-.011-.074.039.039 0 0 0 .055-.011l4.281-1.308 10.349-13.085a.039.039 0 0 0 .011-.043.037.037 0 0 0-.037-.037h-.002ZM6.45 17.55l2.311.758 8.399-10.627-2.315-.757Z"/></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">Telegram</span>
+            </div>
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-http flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">Send Email</span>
+            </div>
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-http flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">Create Record</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Data Nodes -->
+        <div>
+          <h3 class="text-xs font-semibold text-dark-500 uppercase tracking-wider mb-2 px-2">Data</h3>
+          <div class="space-y-2">
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-code flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">Postgres</span>
+            </div>
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-http flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">Redis</span>
+            </div>
+            <div class="node p-3 bg-white border border-dark-200 rounded-lg node-type-code flex items-center gap-3" draggable="true">
+              <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"></path></svg>
+              </div>
+              <span class="text-sm font-medium text-dark-900">Transform Data</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Canvas Area -->
+    <main class="flex-1 relative overflow-hidden">
+      <!-- Canvas Container -->
+      <div id="canvas" class="w-full h-full canvas-grid relative" style="transform-origin: 0 0;">
+        <!-- Canvas Background Grid -->
+        <div class="absolute inset-0" id="grid"></div>
+
+        <!-- Connections Layer (SVG) -->
+        <svg class="absolute inset-0 connection" id="connections"></svg>
+
+        <!-- Nodes Layer -->
+        <div class="absolute" id="nodes-layer"></div>
+
+        <!-- Mini-map placeholder -->
+        <div class="absolute bottom-4 right-4 w-48 h-32 bg-white border border-dark-200 rounded-lg shadow-lg hidden">
+          <canvas id="minimap" class="w-full h-full"></canvas>
+        </div>
+      </div>
+
+      <!-- Zoom Controls -->
+      <div class="absolute bottom-4 left-4 zoom-controls bg-white border border-dark-200 rounded-lg shadow-lg p-2 flex flex-col gap-1">
+        <button class="p-2 rounded hover:bg-dark-100" title="Zoom In (+)">
+          <svg class="w-5 h-5 text-dark-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+        </button>
+        <button class="p-2 rounded hover:bg-dark-100" title="Zoom Out (-)">
+          <svg class="w-5 h-5 text-dark-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+        </button>
+        <button class="p-2 rounded hover:bg-dark-100" title="Reset Zoom (0)">
+          <svg class="w-5 h-5 text-dark-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+        </button>
+        <button class="p-2 rounded hover:bg-dark-100" title="Fit to Screen">
+          <svg class="w-5 h-5 text-dark-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+        </button>
+      </div>
+
+      <!-- Status Bar -->
+      <div class="absolute bottom-4 left-20 bg-white border border-dark-200 rounded-lg shadow-lg px-3 py-1.5 flex items-center gap-4 text-xs text-dark-600">
+        <span>Zoom: <span id="zoom-level">100%</span></span>
+        <span>Nodes: <span id="node-count">6</span></span>
+        <span>Conexões: <span id="connection-count">5</span></span>
+      </div>
+    </main>
+
+    <!-- Right Sidebar - Parameters Panel -->
+    <aside id="sidebar" class="w-96 bg-white border-l border-dark-200 flex flex-col sidebar-panel translate-x-full lg:translate-x-0">
+      <div class="p-4 border-b border-dark-200 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-dark-900">Parâmetros</h2>
+        <button id="close-sidebar" class="lg:hidden p-1 text-dark-400 hover:text-dark-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+
+      <!-- Node Parameter Tabs -->
+      <div class="p-4 border-b border-dark-200">
+        <div class="flex gap-1 bg-dark-100 rounded-lg p-1">
+          <button class="px-3 py-1.5 text-xs font-medium rounded-md bg-white shadow text-primary-600">Parâmetros</button>
+          <button class="px-3 py-1.5 text-xs font-medium rounded-md text-dark-500 hover:text-dark-700">Execuções</button>
+          <button class="px-3 py-1.5 text-xs font-medium rounded-md text-dark-500 hover:text-dark-700">Configurações</button>
+        </div>
+      </div>
+
+      <!-- Parameter Content -->
+      <div class="flex-1 overflow-y-auto p-4" id="parameter-content">
+        <!-- Empty State -->
+        <div id="empty-state" class="flex flex-col items-center justify-center h-full text-center">
+          <div class="w-16 h-16 bg-dark-100 rounded-full flex items-center justify-center mb-4">
+            <svg class="w-8 h-8 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+          </div>
+          <p class="text-dark-500 text-sm">Selecione um node para ver seus parâmetros</p>
+          <p class="text-dark-400 text-xs mt-1">Clique em qualquer node no canvas</p>
+        </div>
+
+        <!-- Webhook Node Parameters (Example) -->
+        <div id="webhook-params" class="hidden space-y-6">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-dark-900">Webhook</h3>
+              <p class="text-xs text-dark-500">Recebe requisições HTTP externas</p>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Método HTTP</label>
+            <select class="w-full px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+              <option value="POST">POST</option>
+              <option value="GET">GET</option>
+              <option value="PUT">PUT</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Caminho (Path)</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-dark-400 text-sm font-mono">/webhook/</span>
+              <input type="text" value="leads" class="w-full pl-20 pr-4 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Resposta</label>
+            <select class="w-full px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+              <option value="onReceived">Ao receber</option>
+              <option value="onFinished">Ao finalizar</option>
+              <option value="custom">Personalizada</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="flex items-center gap-2">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500" checked>
+              <span class="text-sm text-dark-700">Responder com dados do node</span>
+            </label>
+          </div>
+
+          <div class="pt-4 border-t border-dark-200">
+            <h4 class="text-sm font-medium text-dark-700 mb-3">Saídas</h4>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between p-2 bg-dark-50 rounded-lg">
+                <span class="text-sm text-dark-600 font-mono">body</span>
+                <span class="text-xs text-dark-400 bg-dark-200 px-2 py-0.5 rounded">JSON</span>
+              </div>
+              <div class="flex items-center justify-between p-2 bg-dark-50 rounded-lg">
+                <span class="text-sm text-dark-600 font-mono">headers</span>
+                <span class="text-xs text-dark-400 bg-dark-200 px-2 py-0.5 rounded">Object</span>
+              </div>
+              <div class="flex items-center justify-between p-2 bg-dark-50 rounded-lg">
+                <span class="text-sm text-dark-600 font-mono">query</span>
+                <span class="text-xs text-dark-400 bg-dark-200 px-2 py-0.5 rounded">Object</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- IF Node Parameters (Example) -->
+        <div id="if-params" class="hidden space-y-6">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-dark-900">IF</h3>
+              <p class="text-xs text-dark-500">Condicional simples</p>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Condição</label>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2 p-2 bg-dark-50 rounded-lg">
+                <select class="w-1/3 px-2 py-1 border border-dark-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                  <option value="">Valor 1</option>
+                  <option value="body.status">body.status</option>
+                  <option value="body.email">body.email</option>
+                  <option value="headers.content-type">headers.content-type</option>
+                </select>
+                <select class="w-1/3 px-2 py-1 border border-dark-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                  <option value="equal">Igual a</option>
+                  <option value="notEqual">Diferente de</option>
+                  <option value="contains">Contém</option>
+                  <option value="startsWith">Começa com</option>
+                  <option value="endsWith">Termina com</option>
+                  <option value="exists">Existe</option>
+                </select>
+                <input type="text" placeholder="Valor 2" class="flex-1 px-3 py-1 border border-dark-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+              </div>
+              <button class="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                Adicionar condição
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="flex items-center gap-2">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+              <span class="text-sm text-dark-700">Combinar com AND (padrão: OR)</span>
+            </label>
+          </div>
+
+          <div class="pt-4 border-t border-dark-200">
+            <h4 class="text-sm font-medium text-dark-700 mb-3">Saídas</h4>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2 p-2 bg-green-50 rounded-lg border border-green-200">
+                <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span class="text-sm font-medium text-green-800">True</span>
+                <span class="text-xs text-green-600 ml-auto">Saída principal</span>
+              </div>
+              <div class="flex items-center gap-2 p-2 bg-red-50 rounded-lg border border-red-200">
+                <div class="w-2 h-2 bg-red-500 rounded-full"></div>
+                <span class="text-sm font-medium text-red-800">False</span>
+                <span class="text-xs text-red-600 ml-auto">Saída alternativa</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Code Node Parameters -->
+        <div id="code-params" class="hidden space-y-6">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-dark-900">Code</h3>
+              <p class="text-xs text-dark-500">Execute JavaScript/TypeScript personalizado</p>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Modo</label>
+            <select class="w-full px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+              <option value="javascript">JavaScript (Node.js)</option>
+              <option value="typescript">TypeScript</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Código</label>
+            <textarea class="w-full h-48 font-mono text-sm px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-dark-900 text-dark-100 resize-none" spellcheck="false">// Código executado para cada item
+// item = dados de entrada
+// $json = objeto de saída
+
+return {
+  ...item,
+  processed: true,
+  timestamp: new Date().toISOString()
+};</textarea>
+          </div>
+
+          <div class="pt-4 border-t border-dark-200">
+            <h4 class="text-sm font-medium text-dark-700 mb-3">Variáveis Disponíveis</h4>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="p-2 bg-dark-50 rounded font-mono text-dark-600">item</div>
+              <div class="p-2 bg-dark-50 rounded font-mono text-dark-600">$json</div>
+              <div class="p-2 bg-dark-50 rounded font-mono text-dark-600">$parameter</div>
+              <div class="p-2 bg-dark-50 rounded font-mono text-dark-600">$workflow</div>
+              <div class="p-2 bg-dark-50 rounded font-mono text-dark-600">$node</div>
+              <div class="p-2 bg-dark-50 rounded font-mono text-dark-600">$now</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LLM Node Parameters -->
+        <div id="llm-params" class="hidden space-y-6">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-pink-100 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-dark-900">LLM</h3>
+              <p class="text-xs text-dark-500">Chamar modelo de linguagem</p>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Provedor</label>
+            <select class="w-full px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="google">Google (Gemini)</option>
+              <option value="ollama">Ollama (Local)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Modelo</label>
+            <select class="w-full px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="gpt-4o-mini">GPT-4o Mini</option>
+              <option value="claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+              <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Credencial</label>
+            <select class="w-full px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+              <option value="">Selecionar credencial...</option>
+              <option value="openai-main">OpenAI - Principal</option>
+              <option value="anthropic-main">Anthropic - Principal</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Prompt do Sistema</label>
+            <textarea class="w-full h-24 px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" rows="3">Você é um assistente que processa leads e extrai informações relevantes.</textarea>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Prompt do Usuário</label>
+            <textarea class="w-full h-24 px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" rows="3">Processe este lead: {{ $json.body }}</textarea>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-dark-700 mb-1">Temperatura</label>
+              <input type="range" min="0" max="2" step="0.1" value="0.7" class="w-full h-2 bg-dark-200 rounded-lg appearance-none accent-primary-600">
+              <p class="text-xs text-dark-500 mt-1">0.7</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-dark-700 mb-1">Max Tokens</label>
+              <input type="number" value="2000" class="w-full px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm">
+            </div>
+          </div>
+        </div>
+
+        <!-- Telegram Node Parameters -->
+        <div id="telegram-params" class="hidden space-y-6">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24"><path d="M23.973 4.97a.039.039 0 0 0-.043.044L11.313 19.982a.197.197 0 0 1-.09.049.21.21 0 0 1-.104-.021l-3.886-1.279a.23.23 0 0 1-.08-.139L.02 9.47a.042.042 0 0 0-.011-.074.039.039 0 0 0 .055-.011l4.281-1.308 10.349-13.085a.039.039 0 0 0 .011-.043.037.037 0 0 0-.037-.037h-.002ZM6.45 17.55l2.311.758 8.399-10.627-2.315-.757Z"/></svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-dark-900">Telegram</h3>
+              <p class="text-xs text-dark-500">Enviar mensagem via Bot do Telegram</p>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Credencial</label>
+            <select class="w-full px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+              <option value="">Selecionar credencial...</option>
+              <option value="telegram-bot-main">Bot Principal (@meubot)</option>
+              <option value="telegram-bot-alerts">Bot Alertas (@alertbot)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Chat ID</label>
+            <div class="flex items-center gap-2">
+              <input type="text" placeholder="-1001234567890" class="flex-1 px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm">
+              <button class="px-3 py-2 border border-dark-300 rounded-lg hover:bg-dark-50 text-sm font-medium">Expr</button>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-dark-700 mb-1">Texto da Mensagem</label>
+            <textarea class="w-full h-28 px-3 py-2 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm" rows="4">🎯 Novo Lead Recebido!
+
+📧 Email: {{ $json.body.email }}
+👤 Nome: {{ $json.body.name }}
+🏢 Empresa: {{ $json.body.company }}
+
+#AgentFlow #Leads</textarea>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+                <span class="text-sm text-dark-700">Parse Mode (Markdown)</span>
+              </label>
+            </div>
+            <div>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+                <span class="text-sm text-dark-700">Desativar Preview de Link</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // Simple canvas simulation with nodes and connections
+    const canvas = document.getElementById('canvas');
+    const nodesLayer = document.getElementById('nodes-layer');
+    const connectionsSvg = document.getElementById('connections');
+    const zoomLevel = document.getElementById('zoom-level');
+    const nodeCount = document.getElementById('node-count');
+    const connectionCount = document.getElementById('connection-count');
+    const sidebar = document.getElementById('sidebar');
+    const parameterContent = document.getElementById('parameter-content');
+    const emptyState = document.getElementById('empty-state');
+    const closeSidebar = document.getElementById('close-sidebar');
+
+    // Node definitions
+    const nodes = [
+      { id: 'webhook-1', type: 'webhook', name: 'Webhook', x: 100, y: 200, color: '#0ea5e9', icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', params: 'webhook-params' },
+      { id: 'if-1', type: 'if', name: 'IF', x: 400, y: 100, color: '#f59e0b', icon: 'M9 5l7 7-7 7', params: 'if-params' },
+      { id: 'code-1', type: 'code', name: 'Transform', x: 400, y: 300, color: '#10b981', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', params: 'code-params' },
+      { id: 'llm-1', type: 'llm', name: 'LLM', x: 700, y: 100, color: '#ec4899', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', params: 'llm-params' },
+      { id: 'http-1', type: 'http', name: 'HTTP Request', x: 700, y: 300, color: '#8b5cf6', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', params: 'webhook-params' },
+      { id: 'telegram-1', type: 'telegram', name: 'Telegram', x: 1000, y: 200, color: '#0088cc', icon: 'M23.973 4.97a.039.039 0 0 0-.043.044L11.313 19.982a.197.197 0 0 1-.09.049.21.21 0 0 1-.104-.021l-3.886-1.279a.23.23 0 0 1-.08-.139L.02 9.47a.042.042 0 0 0-.011-.074.039.039 0 0 0 .055-.011l4.281-1.308 10.349-13.085a.039.039 0 0 0 .011-.043.037.037 0 0 0-.037-.037h-.002ZM6.45 17.55l2.311.758 8.399-10.627-2.315-.757Z', params: 'telegram-params', isIcon: true },
+    ];
+
+    // Connections: from -> to
+    const connections = [
+      { from: 'webhook-1', to: 'if-1', fromPort: 'right', toPort: 'left' },
+      { from: 'if-1', to: 'llm-1', fromPort: 'right', toPort: 'left', condition: 'true' },
+      { from: 'if-1', to: 'code-1', fromPort: 'bottom', toPort: 'top', condition: 'false' },
+      { from: 'code-1', to: 'http-1', fromPort: 'right', toPort: 'left' },
+      { from: 'llm-1', to: 'telegram-1', fromPort: 'right', toPort: 'left' },
+    ];
+
+    let selectedNode = null;
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+
+    // Render nodes
+    function renderNodes() {
+      nodesLayer.innerHTML = '';
+      nodes.forEach(node => {
+        const el = document.createElement('div');
+        el.id = node.id;
+        el.className = `node absolute node-type-${node.type}`;
+        el.style.left = `${node.x}px`;
+        el.style.top = `${node.y}px`;
+        el.style.minWidth = '180px';
+        el.style.maxWidth = '220px';
+
+        const isSelected = selectedNode === node.id;
+
+        el.innerHTML = `
+          <div class="flex items-center gap-3 p-3 bg-white border border-dark-200 rounded-lg shadow-sm ${isSelected ? 'ring-2 ring-primary-500' : ''}">
+            <!-- Input Ports (left) -->
+            <div class="flex flex-col gap-3 pl-1 -ml-1">
+              <div class="node-port w-3 h-3 bg-dark-300 rounded-full border-2 border-white cursor-crosshair" data-port="left" title="Entrada"></div>
+              ${node.type === 'if' ? '<div class="node-port w-3 h-3 bg-green-500 rounded-full border-2 border-white cursor-crosshair" data-port="top" title="True"></div>' : ''}
+            </div>
+
+            <!-- Node Content -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background-color: ${node.color}15;">
+                  ${node.isIcon ?
+                    `<svg class="w-5 h-5" style="color: ${node.color}" fill="currentColor" viewBox="0 0 24 24"><path d="${node.icon}"/></svg>` :
+                    `<svg class="w-5 h-5" style="color: ${node.color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${node.icon}"/></svg>`
+                  }
+                </div>
+                <span class="font-medium text-dark-900 truncate">${node.name}</span>
+              </div>
+              <div class="flex items-center gap-1 text-xs text-dark-400">
+                <span class="px-1.5 py-0.5 bg-dark-100 rounded text-dark-600">${node.type.toUpperCase()}</span>
+              </div>
+            </div>
+
+            <!-- Output Ports (right) -->
+            <div class="flex flex-col gap-3 pr-1 -mr-1 items-end">
+              <div class="node-port w-3 h-3 bg-dark-300 rounded-full border-2 border-white cursor-crosshair" data-port="right" title="Saída"></div>
+              ${node.type === 'if' ? '<div class="node-port w-3 h-3 bg-red-500 rounded-full border-2 border-white cursor-crosshair" data-port="bottom" title="False"></div>' : ''}
+            </div>
+          </div>
+        `;
+
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectNode(node.id);
+        });
+
+        // Make draggable
+        makeDraggable(el, node);
+
+        nodesLayer.appendChild(el);
+      });
+      nodeCount.textContent = nodes.length;
+    }
+
+    // Render connections (SVG paths)
+    function renderConnections() {
+      connectionsSvg.innerHTML = '';
+      connections.forEach(conn => {
+        const fromNode = nodes.find(n => n.id === conn.from);
+        const toNode = nodes.find(n => n.id === conn.to);
+        if (!fromNode || !toNode) return;
+
+        // Calculate port positions
+        const fromX = fromNode.x + (conn.fromPort === 'right' ? 200 : conn.fromPort === 'left' ? 0 : 100);
+        const fromY = fromNode.y + (conn.fromPort === 'top' ? 0 : conn.fromPort === 'bottom' ? 80 : 40);
+        const toX = toNode.x + (conn.toPort === 'left' ? 0 : conn.toPort === 'right' ? 200 : 100);
+        const toY = toNode.y + (conn.toPort === 'top' ? 0 : conn.toPort === 'bottom' ? 80 : 40);
+
+        // Create curved path
+        const midX = (fromX + toX) / 2;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+        let strokeColor = '#94a3b8';
+        let strokeWidth = 2;
+        let strokeDash = 'none';
+
+        if (conn.condition === 'true') {
+          strokeColor = '#10b981';
+          strokeDash = '4,4';
+        } else if (conn.condition === 'false') {
+          strokeColor = '#ef4444';
+          strokeDash = '4,4';
+        }
+
+        path.setAttribute('d', `M${fromX} ${fromY} C${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`);
+        path.setAttribute('stroke', strokeColor);
+        path.setAttribute('stroke-width', strokeWidth);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke-dasharray', strokeDash);
+        path.setAttribute('stroke-linecap', 'round');
+        path.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))';
+
+        // Arrow head
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', `arrow-${conn.from}-${conn.to}`);
+        marker.setAttribute('markerWidth', '10');
+        marker.setAttribute('markerHeight', '10');
+        marker.setAttribute('refX', '8');
+        marker.setAttribute('refY', '3');
+        marker.setAttribute('orient', 'auto');
+        marker.setAttribute('markerUnits', 'strokeWidth');
+        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        arrow.setAttribute('d', 'M0,0 L0,6 L9,3 z');
+        arrow.setAttribute('fill', strokeColor);
+        marker.appendChild(arrow);
+
+        const defs = connectionsSvg.querySelector('defs') || document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        if (!connectionsSvg.querySelector('defs')) connectionsSvg.appendChild(defs);
+        defs.appendChild(marker);
+        path.setAttribute('marker-end', `url(#arrow-${conn.from}-${conn.to})`);
+
+        connectionsSvg.appendChild(path);
+      });
+      connectionCount.textContent = connections.length;
+    }
+
+    // Make node draggable
+    function makeDraggable(el, node) {
+      let isDragging = false;
+      let startX, startY;
+
+      el.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('node-port')) return;
+        isDragging = true;
+        startX = e.clientX - node.x;
+        startY = e.clientY - node.y;
+        el.style.zIndex = '100';
+        selectNode(node.id);
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        node.x = e.clientX - startX;
+        node.y = e.clientY - startY;
+        el.style.left = `${node.x}px`;
+        el.style.top = `${node.y}px`;
+        renderConnections();
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          el.style.zIndex = '';
+        }
+      });
+    }
+
+    // Select node and show parameters
+    function selectNode(nodeId) {
+      selectedNode = nodeId;
+      const node = nodes.find(n => n.id === nodeId);
+
+      // Update node visual
+      document.querySelectorAll('.node').forEach(el => {
+        el.classList.remove('selected');
+        el.querySelector('div').classList.remove('ring-2', 'ring-primary-500');
+      });
+      const selectedEl = document.getElementById(nodeId);
+      if (selectedEl) {
+        selectedEl.classList.add('selected');
+        selectedEl.querySelector('div').classList.add('ring-2', 'ring-primary-500');
+      }
+
+      // Show sidebar on mobile
+      sidebar.classList.remove('translate-x-full');
+
+      // Show parameters
+      if (node) {
+        emptyState.classList.add('hidden');
+        document.querySelectorAll('#parameter-content > div[id$="-params"]').forEach(el => el.classList.add('hidden'));
+        const paramEl = document.getElementById(node.params);
+        if (paramEl) paramEl.classList.remove('hidden');
+      }
+    }
+
+    // Close sidebar
+    closeSidebar.addEventListener('click', () => {
+      sidebar.classList.add('translate-x-full');
+    });
+
+    // Zoom controls
+    const zoomButtons = document.querySelectorAll('.zoom-controls button');
+    zoomButtons[0].addEventListener('click', () => setZoom(scale + 0.1)); // Zoom in
+    zoomButtons[1].addEventListener('click', () => setZoom(scale - 0.1)); // Zoom out
+    zoomButtons[2].addEventListener('click', () => setZoom(1)); // Reset
+    zoomButtons[3].addEventListener('click', fitToScreen); // Fit
+
+    function setZoom(newScale) {
+      scale = Math.max(0.25, Math.min(2, newScale));
+      canvas.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+      zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+    }
+
+    function fitToScreen() {
+      // Calculate bounds of all nodes
+      const bounds = nodes.reduce((acc, node) => {
+        return {
+          minX: Math.min(acc.minX, node.x),
+          minY: Math.min(acc.minY, node.y),
+          maxX: Math.max(acc.maxX, node.x + 200),
+          maxY: Math.max(acc.maxY, node.y + 100)
+        };
+      }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+
+      const width = bounds.maxX - bounds.minX;
+      const height = bounds.maxY - bounds.minY;
+      const canvasRect = canvas.getBoundingClientRect();
+
+      const scaleX = (canvasRect.width - 100) / width;
+      const scaleY = (canvasRect.height - 100) / height;
+      const newScale = Math.min(scaleX, scaleY, 1);
+
+      scale = Math.max(0.25, newScale);
+      translateX = -bounds.minX * scale + 50;
+      translateY = -bounds.minY * scale + 50;
+
+      canvas.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+      zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+    }
+
+    // Pan canvas with middle mouse or space+drag
+    let isPanning = false;
+    let panStartX, panStartY;
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+        isPanning = true;
+        panStartX = e.clientX - translateX;
+        panStartY = e.clientY - translateY;
+        canvas.style.cursor = 'grabbing';
+        e.preventDefault();
+      }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      translateX = e.clientX - panStartX;
+      translateY = e.clientY - panStartY;
+      canvas.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    });
+
+    document.addEventListener('mouseup', () => {
+      isPanning = false;
+      canvas.style.cursor = '';
+    });
+
+    // Wheel zoom
+    canvas.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const newScale = Math.max(0.25, Math.min(2, scale - e.deltaY * 0.001));
+        const scaleRatio = newScale / scale;
+
+        translateX = mouseX - (mouseX - translateX) * scaleRatio;
+        translateY = mouseY - (mouseY - translateY) * scaleRatio;
+        scale = newScale;
+
+        canvas.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+        zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+      }
+    }, { passive: false });
+
+    // Click canvas to deselect
+    canvas.addEventListener('click', (e) => {
+      if (e.target === canvas || e.target.id === 'grid' || e.target.id === 'nodes-layer') {
+        selectedNode = null;
+        document.querySelectorAll('.node').forEach(el => {
+          el.classList.remove('selected');
+          el.querySelector('div').classList.remove('ring-2', 'ring-primary-500');
+        });
+        emptyState.classList.remove('hidden');
+        document.querySelectorAll('#parameter-content > div[id$="-params"]').forEach(el => el.classList.add('hidden'));
+      }
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        // Open command palette
+      }
+      if (e.key === 'Delete' && selectedNode) {
+        // Delete node
+        const idx = nodes.findIndex(n => n.id === selectedNode);
+        if (idx > -1) {
+          nodes.splice(idx, 1);
+          connections.filter(c => c.from !== selectedNode && c.to !== selectedNode);
+          selectedNode = null;
+          renderNodes();
+          renderConnections();
+          emptyState.classList.remove('hidden');
+        }
+      }
+    });
+
+    // Initial render
+    renderNodes();
+    renderConnections();
+    fitToScreen();
+  </script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+{
+  "event": "checkout.session.completed",
+  "data": {
+    "object": {
+      "id": "cs_test_1234567890",
+      "object": "checkout.session",
+      "amount_total": 2990,
+      "amount_subtotal": 2990,
+      "currency": "brl",
+      "customer_email": "cliente@exemplo.com",
+      "customer_details": {
+        "email": "cliente@exemplo.com",
+        "name": "João Silva",
+        "phone": "+55 11 99999-9999",
+        "address": {
+          "city": "São Paulo",
+          "country": "BR",
+          "line1": "Rua das Flores, 123",
+          "line2": "Apto 45",
+          "postal_code": "01234-567",
+          "state": "SP"
+        }
+      },
+      "metadata": {
+        "order_id": "ord_abc123",
+        "user_id": "usr_xyz789",
+        "plan": "pro_monthly"
+      },
+      "payment_intent": "pi_test_1234567890",
+      "payment_status": "paid",
+      "status": "complete",
+      "created": 1703000000,
+      "expires_at": 1703086400,
+      "url": "https://checkout.stripe.com/pay/cs_test_1234567890"
+    }
+  },
+  "type": "event",
+  "created": 1703000000,
+  "livemode": false,
+  "id": "evt_test_webhook_123",
+  "api_version": "2023-10-16"
+}

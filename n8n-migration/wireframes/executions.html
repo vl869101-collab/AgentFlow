@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow - Execuções</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          },
+          colors: {
+            primary: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+            },
+            dark: {
+              50: '#f8fafc',
+              100: '#f1f5f9',
+              200: '#e2e8f0',
+              300: '#cbd5e1',
+              400: '#94a3b8',
+              500: '#64748b',
+              600: '#475569',
+              700: '#334155',
+              800: '#1e293b',
+              900: '#0f172a',
+              950: '#020617',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .row-hover { transition: background-color 0.2s ease; }
+    .row-hover:hover { background-color: #f8fafc; }
+    .status-badge { font-weight: 600; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; }
+    .status-success { @apply bg-green-100 text-green-800; }
+    .status-error { @apply bg-red-100 text-red-800; }
+    .status-running { @apply bg-blue-100 text-blue-800; }
+    .status-waiting { @apply bg-amber-100 text-amber-800; }
+    .detail-panel { transition: all 0.3s ease; }
+    .node-status { transition: all 0.2s ease; }
+  </style>
+</head>
+<body class="font-sans bg-dark-50 min-h-screen flex">
+  <!-- Navigation -->
+  <nav class="bg-white border-b border-dark-200 h-16 flex items-center px-4 shadow-sm z-30">
+    <div class="max-w-full mx-auto flex items-center justify-between w-full">
+      <div class="flex items-center gap-8">
+        <a href="index.html" class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+            </svg>
+          </div>
+          <span class="text-xl font-bold text-dark-900">AgentFlow</span>
+        </a>
+        <div class="hidden md:flex items-center gap-6">
+          <a href="workflows-list.html" class="text-dark-600 hover:text-dark-900 font-medium transition">Workflows</a>
+          <a href="executions.html" class="text-primary-600 font-medium px-3 py-2 rounded-md border border-primary-200 hover:bg-primary-50">Execuções</a>
+          <a href="credentials.html" class="text-dark-600 hover:text-dark-900 font-medium transition">Credenciais</a>
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="relative hidden sm:block">
+          <input type="text" placeholder="Filtrar execuções..." class="pl-10 pr-4 py-1.5 w-64 border border-dark-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-dark-50">
+          <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M13.5 8.637a4.5 4.5 0 11-8.993-8.99 4.5 4.5 0 018.993 8.99z"></path></svg>
+        </div>
+        <button class="p-2 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        </button>
+        <button class="p-2 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+        </button>
+        <div class="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
+          <span class="text-sm font-semibold text-primary-700">AF</span>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Layout -->
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Left Sidebar - Filters -->
+    <aside class="w-64 bg-white border-r border-dark-200 flex flex-col hidden lg:flex">
+      <div class="p-4 border-b border-dark-200">
+        <h2 class="text-sm font-semibold text-dark-900 uppercase tracking-wider">Filtros</h2>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-6">
+        <!-- Status Filter -->
+        <div>
+          <h3 class="text-xs font-semibold text-dark-500 uppercase tracking-wider mb-3">Status</h3>
+          <div class="space-y-2">
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500" checked>
+              <span class="text-sm text-dark-700">Sucesso (1,212)</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+              <span class="text-sm text-dark-700">Erro (22)</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+              <span class="text-sm text-dark-700">Em execução (3)</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+              <span class="text-sm text-dark-700">Aguardando (1)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Workflow Filter -->
+        <div>
+          <h3 class="text-xs font-semibold text-dark-500 uppercase tracking-wider mb-3">Workflow</h3>
+          <div class="space-y-2 max-h-40 overflow-y-auto">
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500" checked>
+              <span class="text-sm text-dark-700 truncate">Processamento de Leads</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500" checked>
+              <span class="text-sm text-dark-700 truncate">Notificação de Pagamento</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+              <span class="text-sm text-dark-700 truncate">Backup Diário</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+              <span class="text-sm text-dark-700 truncate">Relatório de Vendas</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+              <span class="text-sm text-dark-700 truncate">Sincronização CRM</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+              <span class="text-sm text-dark-700 truncate">Envio de Newsletter</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Date Range -->
+        <div>
+          <h3 class="text-xs font-semibold text-dark-500 uppercase tracking-wider mb-3">Período</h3>
+          <div class="space-y-2">
+            <button class="w-full px-3 py-2 text-left border border-dark-300 rounded-lg hover:bg-dark-50 text-sm text-dark-700 transition">Hoje</button>
+            <button class="w-full px-3 py-2 text-left border border-dark-300 rounded-lg hover:bg-dark-50 text-sm text-dark-700 transition">Últimos 7 dias</button>
+            <button class="w-full px-3 py-2 text-left border border-dark-300 rounded-lg hover:bg-dark-50 text-sm text-dark-700 transition">Últimos 30 dias</button>
+            <button class="w-full px-3 py-2 text-left border border-dark-300 rounded-lg hover:bg-dark-50 text-sm text-dark-700 transition">Este mês</button>
+            <button class="w-full px-3 py-2 text-left border border-dark-300 rounded-lg hover:bg-dark-50 text-sm text-dark-700 transition">Personalizado...</button>
+          </div>
+        </div>
+
+        <!-- Clear Filters -->
+        <div class="pt-4 border-t border-dark-200">
+          <button class="w-full px-3 py-2 text-sm font-medium text-primary-600 hover:text-primary-700 flex items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            Limpar Filtros
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+      <!-- Header -->
+      <header class="bg-white border-b border-dark-200 px-6 py-4 flex-shrink-0">
+        <div class="flex items-center justify-between">
+          <div>
+            <h1 class="text-2xl font-bold text-dark-900">Execuções</h1>
+            <p class="text-dark-500 text-sm mt-1">Histórico de execuções dos workflows</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <button class="px-4 py-2 border border-dark-300 text-dark-700 rounded-lg font-medium hover:bg-dark-50 transition flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+              Exportar CSV
+            </button>
+            <button class="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+              Reexecutar Selecionadas
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Executions Table -->
+      <div class="flex-1 overflow-auto">
+        <div class="bg-white">
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y border-dark-200">
+              <thead class="bg-dark-50 sticky top-0 z-10">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase tracking-wider w-12">
+                    <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500">
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Workflow</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Status</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Iniciado</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Duração</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Mode</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase tracking-wider w-16"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y border-dark-200" id="executions-body">
+                <!-- Row 1 - Success -->
+                <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-execution-id="exec-1">
+                  <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500"></td>
+                  <td class="px-6 py-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                      </div>
+                      <div>
+                        <p class="font-medium text-dark-900">Processamento de Leads</p>
+                        <p class="text-xs text-dark-500 font-mono">#1847</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class="status-badge status-success flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                      Sucesso
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-dark-700">19/08/2026 14:32:15</td>
+                  <td class="px-6 py-4 text-sm text-dark-700 font-mono">2.3s</td>
+                  <td class="px-6 py-4">
+                    <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs rounded-full">Produção</span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <button class="p-1.5 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition" title="Ver detalhes">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Row 2 - Success -->
+                <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-execution-id="exec-2">
+                  <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500"></td>
+                  <td class="px-6 py-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                      </div>
+                      <div>
+                        <p class="font-medium text-dark-900">Notificação de Pagamento</p>
+                        <p class="text-xs text-dark-500 font-mono">#1846</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class="status-badge status-success flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                      Sucesso
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-dark-700">19/08/2026 14:28:42</td>
+                  <td class="px-6 py-4 text-sm text-dark-700 font-mono">1.8s</td>
+                  <td class="px-6 py-4">
+                    <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs rounded-full">Produção</span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <button class="p-1.5 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition" title="Ver detalhes">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Row 3 - Error -->
+                <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-execution-id="exec-3">
+                  <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500"></td>
+                  <td class="px-6 py-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                      </div>
+                      <div>
+                        <p class="font-medium text-dark-900">Relatório de Vendas</p>
+                        <p class="text-xs text-dark-500 font-mono">#1845</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class="status-badge status-error flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                      Erro
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-dark-700">19/08/2026 13:45:20</td>
+                  <td class="px-6 py-4 text-sm text-dark-700 font-mono">12.4s</td>
+                  <td class="px-6 py-4">
+                    <span class="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full">Teste</span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <button class="p-1.5 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition" title="Ver detalhes">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Row 4 - Running -->
+                <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-execution-id="exec-4">
+                  <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500"></td>
+                  <td class="px-6 py-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                      </div>
+                      <div>
+                        <p class="font-medium text-dark-900">Sincronização CRM</p>
+                        <p class="text-xs text-dark-500 font-mono">#1844</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class="status-badge status-running flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+                      Em execução
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-dark-700">19/08/2026 14:33:00</td>
+                  <td class="px-6 py-4 text-sm text-dark-700 font-mono">—</td>
+                  <td class="px-6 py-4">
+                    <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs rounded-full">Produção</span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <button class="p-1.5 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition" title="Ver detalhes">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Row 5 - Error -->
+                <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-execution-id="exec-5">
+                  <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500"></td>
+                  <td class="px-6 py-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                      </div>
+                      <div>
+                        <p class="font-medium text-dark-900">Processamento de Leads</p>
+                        <p class="text-xs text-dark-500 font-mono">#1843</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class="status-badge status-error flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                      Erro
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-dark-700">19/08/2026 12:15:08</td>
+                  <td class="px-6 py-4 text-sm text-dark-700 font-mono">8.7s</td>
+                  <td class="px-6 py-4">
+                    <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs rounded-full">Produção</span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <button class="p-1.5 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition" title="Ver detalhes">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Row 6 - Waiting -->
+                <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-execution-id="exec-6">
+                  <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500"></td>
+                  <td class="px-6 py-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                      </div>
+                      <div>
+                        <p class="font-medium text-dark-900">Envio de Newsletter</p>
+                        <p class="text-xs text-dark-500 font-mono">#1842</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class="status-badge status-waiting flex items-center gap-1">
+                      <span class="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+                      Aguardando
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-dark-700">19/08/2026 11:00:00</td>
+                  <td class="px-6 py-4 text-sm text-dark-700 font-mono">—</td>
+                  <td class="px-6 py-4">
+                    <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs rounded-full">Produção</span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <button class="p-1.5 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition" title="Ver detalhes">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="px-6 py-4 border-t border-dark-200 flex items-center justify-between">
+          <div class="flex items-center gap-3 text-sm text-dark-600">
+            <span>Mostrando 1-6 de 1,238 execuções</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition disabled:opacity-50">
+              Anterior
+            </button>
+            <div class="flex items-center gap-1">
+              <button class="px-3 py-1 bg-primary-600 text-white rounded-lg">1</button>
+              <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition">2</button>
+              <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition">3</button>
+              <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition">4</button>
+              <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition">5</button>
+              <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition">...</button>
+              <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition">207</button>
+            </div>
+            <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition">
+              Próxima
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Sidebar - Execution Detail Panel -->
+    <aside id="detail-panel" class="w-96 bg-white border-l border-dark-200 flex flex-col detail-panel translate-x-full lg:translate-x-0 hidden" aria-label="Detalhes da execução">
+      <div class="p-4 border-b border-dark-200 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-dark-900">Detalhes da Execução</h2>
+        <button id="close-detail" class="p-1 text-dark-400 hover:text-dark-600 lg:hidden">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4" id="detail-content">
+        <!-- Empty State -->
+        <div id="detail-empty" class="flex flex-col items-center justify-center h-full text-center">
+          <div class="w-16 h-16 bg-dark-100 rounded-full flex items-center justify-center mb-4">
+            <svg class="w-8 h-8 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+          </div>
+          <p class="text-dark-500 text-sm">Selecione uma execução para ver detalhes</p>
+          <p class="text-dark-400 text-xs mt-1">Clique em qualquer linha na tabela</p>
+        </div>
+
+        <!-- Execution Detail Content -->
+        <div id="detail-loaded" class="hidden space-y-6">
+          <!-- Execution Header -->
+          <div class="p-4 bg-dark-50 rounded-xl">
+            <div class="flex items-start justify-between mb-4">
+              <div>
+                <h3 class="font-semibold text-dark-900" id="detail-workflow-name">Processamento de Leads</h3>
+                <p class="text-xs text-dark-500 font-mono mt-1" id="detail-execution-id">#1847</p>
+              </div>
+              <span class="status-badge status-success" id="detail-status-badge">
+                <span class="w-1.5 h-1.5 bg-green-500 rounded-full mr-1"></span>
+                Sucesso
+              </span>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <p class="text-dark-500">Iniciado</p>
+                <p class="font-medium text-dark-900" id="detail-started">19/08/2026 14:32:15</p>
+              </div>
+              <div>
+                <p class="text-dark-500">Finalizado</p>
+                <p class="font-medium text-dark-900" id="detail-finished">19/08/2026 14:32:17</p>
+              </div>
+              <div>
+                <p class="text-dark-500">Duração</p>
+                <p class="font-medium text-dark-900 font-mono" id="detail-duration">2.3s</p>
+              </div>
+            </div>
+
+            <div class="mt-4 flex items-center gap-4 text-sm">
+              <span class="flex items-center gap-1 text-dark-600">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                Mode: Produção
+              </span>
+              <span class="flex items-center gap-1 text-dark-600">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Trigger: Webhook
+              </span>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex gap-2">
+            <button class="flex-1 px-3 py-2 text-sm font-medium text-dark-700 border border-dark-300 rounded-lg hover:bg-dark-50 transition flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              Reexecutar
+            </button>
+            <button class="flex-1 px-3 py-2 text-sm font-medium text-dark-700 border border-dark-300 rounded-lg hover:bg-dark-50 transition flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+              Exportar
+            </button>
+          </div>
+
+          <!-- Nodes Execution Detail -->
+          <div>
+            <h3 class="text-sm font-semibold text-dark-900 mb-3">Nodes Executados</h3>
+            <div class="space-y-2" id="detail-nodes">
+              <!-- Node 1: Webhook -->
+              <div class="node-status p-3 bg-white border border-dark-200 rounded-lg hover:border-primary-300 transition">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium text-dark-900">Webhook</span>
+                      <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sucesso</span>
+                      <span class="text-xs text-dark-400 font-mono">45ms</span>
+                    </div>
+                    <p class="text-xs text-dark-500 truncate">Recebeu payload: {email, name, company}</p>
+                  </div>
+                  <button class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Ver dados de entrada/saída">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Node 2: IF -->
+              <div class="node-status p-3 bg-white border border-dark-200 rounded-lg hover:border-primary-300 transition">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium text-dark-900">IF</span>
+                      <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sucesso (True)</span>
+                      <span class="text-xs text-dark-400 font-mono">12ms</span>
+                    </div>
+                    <p class="text-xs text-dark-500 truncate">Condição: body.status === 'new' → True</p>
+                  </div>
+                  <button class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Ver dados de entrada/saída">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Node 3: LLM -->
+              <div class="node-status p-3 bg-white border border-dark-200 rounded-lg hover:border-primary-300 transition">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-pink-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium text-dark-900">LLM (GPT-4o)</span>
+                      <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sucesso</span>
+                      <span class="text-xs text-dark-400 font-mono">1,240ms</span>
+                    </div>
+                    <p class="text-xs text-dark-500 truncate">Tokens: 1,234 entrada / 567 saída | Custo: $0.0042</p>
+                  </div>
+                  <button class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Ver dados de entrada/saída">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Node 4: HTTP Request -->
+              <div class="node-status p-3 bg-white border border-dark-200 rounded-lg hover:border-primary-300 transition">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium text-dark-900">HTTP Request (POST /api/leads)</span>
+                      <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sucesso</span>
+                      <span class="text-xs text-dark-400 font-mono">890ms</span>
+                    </div>
+                    <p class="text-xs text-dark-500 truncate">Status: 201 Created | Lead criado com ID: lead_abc123</p>
+                  </div>
+                  <button class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Ver dados de entrada/saída">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Node 5: Telegram -->
+              <div class="node-status p-3 bg-white border border-dark-200 rounded-lg hover:border-primary-300 transition">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 24 24"><path d="M23.973 4.97a.039.039 0 0 0-.043.044L11.313 19.982a.197.197 0 0 1-.09.049.21.21 0 0 1-.104-.021l-3.886-1.279a.23.23 0 0 1-.08-.139L.02 9.47a.042.042 0 0 0-.011-.074.039.039 0 0 0 .055-.011l4.281-1.308 10.349-13.085a.039.039 0 0 0 .011-.043.037.037 0 0 0-.037-.037h-.002ZM6.45 17.55l2.311.758 8.399-10.627-2.315-.757Z"/></svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium text-dark-900">Telegram (Enviar Mensagem)</span>
+                      <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sucesso</span>
+                      <span class="text-xs text-dark-400 font-mono">320ms</span>
+                    </div>
+                    <p class="text-xs text-dark-500 truncate">Mensagem enviada para chat -1001234567890</p>
+                  </div>
+                  <button class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Ver dados de entrada/saída">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Error Details (for failed executions) -->
+          <div id="detail-error" class="hidden p-4 bg-red-50 border border-red-200 rounded-xl">
+            <h4 class="font-medium text-red-800 flex items-center gap-2 mb-3">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>
+              Erro na Execução
+            </h4>
+            <div class="bg-red-100 rounded-lg p-3 font-mono text-xs text-red-900 overflow-x-auto">
+              <pre id="detail-error-message">Error: Failed to connect to CRM API
+    at HTTP Request.execute (node:http-request:45)
+    at Workflow.execute (workflow:12)
+    at Runner.run (runner:89)
+    Caused by: ECONNREFUSED - Connection refused to api.crm.example.com:443</pre>
+            </div>
+            <div class="mt-3 flex gap-2">
+              <button class="px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                Reexecutar
+              </button>
+              <button class="px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-lg hover:bg-red-50 transition">Copiar Erro</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // Execution detail data
+    const executionDetails = {
+      'exec-1': {
+        workflowName: 'Processamento de Leads',
+        executionId: '#1847',
+        status: 'success',
+        started: '19/08/2026 14:32:15',
+        finished: '19/08/2026 14:32:17',
+        duration: '2.3s',
+        mode: 'Produção',
+        trigger: 'Webhook',
+        nodes: [
+          { name: 'Webhook', type: 'webhook', icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', color: 'bg-primary-100', iconColor: 'text-primary-600', status: 'success', time: '45ms', detail: 'Recebeu payload: {email, name, company}' },
+          { name: 'IF', type: 'if', icon: 'M9 5l7 7-7 7', color: 'bg-amber-100', iconColor: 'text-amber-600', status: 'success', time: '12ms', detail: 'Condição: body.status === \'new\' → True' },
+          { name: 'LLM (GPT-4o)', type: 'llm', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', color: 'bg-pink-100', iconColor: 'text-pink-600', status: 'success', time: '1,240ms', detail: 'Tokens: 1,234 entrada / 567 saída | Custo: $0.0042' },
+          { name: 'HTTP Request (POST /api/leads)', type: 'http', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', color: 'bg-purple-100', iconColor: 'text-purple-600', status: 'success', time: '890ms', detail: 'Status: 201 Created | Lead criado com ID: lead_abc123' },
+          { name: 'Telegram (Enviar Mensagem)', type: 'telegram', icon: 'M23.973 4.97a.039.039 0 0 0-.043.044L11.313 19.982a.197.197 0 0 1-.09.049.21.21 0 0 1-.104-.021l-3.886-1.279a.23.23 0 0 1-.08-.139L.02 9.47a.042.042 0 0 0-.011-.074.039.039 0 0 0 .055-.011l4.281-1.308 10.349-13.085a.039.039 0 0 0 .011-.043.037.037 0 0 0-.037-.037h-.002ZM6.45 17.55l2.311.758 8.399-10.627-2.315-.757Z', color: 'bg-blue-100', iconColor: 'text-blue-600', isIcon: true, status: 'success', time: '320ms', detail: 'Mensagem enviada para chat -1001234567890' },
+        ],
+        error: null
+      },
+      'exec-2': {
+        workflowName: 'Notificação de Pagamento',
+        executionId: '#1846',
+        status: 'success',
+        started: '19/08/2026 14:28:42',
+        finished: '19/08/2026 14:28:44',
+        duration: '1.8s',
+        mode: 'Produção',
+        trigger: 'Webhook',
+        nodes: [
+          { name: 'Webhook', type: 'webhook', icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', color: 'bg-primary-100', iconColor: 'text-primary-600', status: 'success', time: '38ms', detail: 'Payload: {payment_id, amount, customer}' },
+          { name: 'IF', type: 'if', icon: 'M9 5l7 7-7 7', color: 'bg-amber-100', iconColor: 'text-amber-600', status: 'success', time: '8ms', detail: 'Condição: amount > 100 → True' },
+          { name: 'HTTP Request (GET /customers/{id})', type: 'http', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', color: 'bg-purple-100', iconColor: 'text-purple-600', status: 'success', time: '420ms', detail: 'Status: 200 OK | Cliente: João Silva' },
+          { name: 'Send Email', type: 'http', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', color: 'bg-purple-100', iconColor: 'text-purple-600', status: 'success', time: '1,120ms', detail: 'Email enviado para joao@email.com' },
+        ],
+        error: null
+      },
+      'exec-3': {
+        workflowName: 'Relatório de Vendas',
+        executionId: '#1845',
+        status: 'error',
+        started: '19/08/2026 13:45:20',
+        finished: '19/08/2026 13:45:32',
+        duration: '12.4s',
+        mode: 'Teste',
+        trigger: 'Manual',
+        nodes: [
+          { name: 'Postgres (Query Vendas)', type: 'postgres', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4', color: 'bg-green-100', iconColor: 'text-green-600', status: 'success', time: '1,200ms', detail: '1,245 registros retornados' },
+          { name: 'Transform Data', type: 'code', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', color: 'bg-green-100', iconColor: 'text-green-600', status: 'success', time: '340ms', detail: 'Dados agregados por região e produto' },
+          { name: 'HTTP Request (POST /reports)', type: 'http', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', color: 'bg-purple-100', iconColor: 'text-purple-600', status: 'error', time: '8,900ms', detail: 'Timeout após 30s - API externa não respondeu' },
+        ],
+        error: 'Error: Failed to connect to CRM API\n    at HTTP Request.execute (node:http-request:45)\n    at Workflow.execute (workflow:12)\n    at Runner.run (runner:89)\n    Caused by: ECONNREFUSED - Connection refused to api.crm.example.com:443'
+      },
+      'exec-4': {
+        workflowName: 'Sincronização CRM',
+        executionId: '#1844',
+        status: 'running',
+        started: '19/08/2026 14:33:00',
+        finished: '—',
+        duration: '—',
+        mode: 'Produção',
+        trigger: 'Schedule',
+        nodes: [
+          { name: 'HTTP Request (GET /contacts)', type: 'http', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', color: 'bg-purple-100', iconColor: 'text-purple-600', status: 'success', time: '1,200ms', detail: '500 contatos obtidos' },
+          { name: 'Transform Data', type: 'code', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', color: 'bg-green-100', iconColor: 'text-green-600', status: 'success', time: '450ms', detail: 'Mapeamento de campos concluído' },
+          { name: 'HTTP Request (POST /sync)', type: 'http', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', color: 'bg-purple-100', iconColor: 'text-purple-600', status: 'running', time: '—', detail: 'Enviando lote 3 de 5...' },
+          { name: 'Postgres (Update Sync Log)', type: 'postgres', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4', color: 'bg-green-100', iconColor: 'text-green-600', status: 'waiting', time: '—', detail: 'Aguardando conclusão do sync' },
+        ],
+        error: null
+      },
+      'exec-5': {
+        workflowName: 'Processamento de Leads',
+        executionId: '#1843',
+        status: 'error',
+        started: '19/08/2026 12:15:08',
+        finished: '19/08/2026 12:15:17',
+        duration: '8.7s',
+        mode: 'Produção',
+        trigger: 'Webhook',
+        nodes: [
+          { name: 'Webhook', type: 'webhook', icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', color: 'bg-primary-100', iconColor: 'text-primary-600', status: 'success', time: '52ms', detail: 'Payload: {email: invalid-email, name, company}' },
+          { name: 'IF (Validate Email)', type: 'if', icon: 'M9 5l7 7-7 7', color: 'bg-amber-100', iconColor: 'text-amber-600', status: 'success', time: '10ms', detail: 'Condição: email válido → False' },
+          { name: 'Send Email (Error Notification)', type: 'http', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', color: 'bg-purple-100', iconColor: 'text-purple-600', status: 'error', time: '5,200ms', detail: 'SMTP Error: 550 Invalid recipient' },
+        ],
+        error: 'Error: SMTP Error: 550 Invalid recipient\n    at Send Email.execute (node:send-email:23)\n    at Workflow.execute (workflow:8)\n    at Runner.run (runner:89)\n    Caused by: Invalid email address format'
+      },
+      'exec-6': {
+        workflowName: 'Envio de Newsletter',
+        executionId: '#1842',
+        status: 'waiting',
+        started: '19/08/2026 11:00:00',
+        finished: '—',
+        duration: '—',
+        mode: 'Produção',
+        trigger: 'Schedule',
+        nodes: [
+          { name: 'Postgres (Get Subscribers)', type: 'postgres', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4', color: 'bg-green-100', iconColor: 'text-green-600', status: 'waiting', time: '—', detail: 'Aguardando horário agendado (11:00)' },
+          { name: 'Loop Over Items', type: 'code', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', color: 'bg-green-100', iconColor: 'text-green-600', status: 'waiting', time: '—', detail: '—' },
+          { name: 'Send Email', type: 'http', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', color: 'bg-purple-100', iconColor: 'text-purple-600', status: 'waiting', time: '—', detail: '—' },
+        ],
+        error: null
+      }
+    };
+
+    // DOM elements
+    const detailPanel = document.getElementById('detail-panel');
+    const detailContent = document.getElementById('detail-content');
+    const detailEmpty = document.getElementById('detail-empty');
+    const detailLoaded = document.getElementById('detail-loaded');
+    const detailError = document.getElementById('detail-error');
+    const closeDetail = document.getElementById('close-detail');
+    const executionsBody = document.getElementById('executions-body');
+
+    // Show detail panel
+    function showDetail(executionId) {
+      const detail = executionDetails[executionId];
+      if (!detail) return;
+
+      detailPanel.classList.remove('hidden', 'translate-x-full');
+      detailEmpty.classList.add('hidden');
+      detailLoaded.classList.remove('hidden');
+
+      // Update header
+      document.getElementById('detail-workflow-name').textContent = detail.workflowName;
+      document.getElementById('detail-execution-id').textContent = detail.executionId;
+      document.getElementById('detail-started').textContent = detail.started;
+      document.getElementById('detail-finished').textContent = detail.finished;
+      document.getElementById('detail-duration').textContent = detail.duration;
+
+      // Update status badge
+      const statusBadge = document.getElementById('detail-status-badge');
+      statusBadge.className = 'status-badge ';
+      if (detail.status === 'success') statusBadge.classList.add('status-success');
+      else if (detail.status === 'error') statusBadge.classList.add('status-error');
+      else if (detail.status === 'running') statusBadge.classList.add('status-running');
+      else if (detail.status === 'waiting') statusBadge.classList.add('status-waiting');
+
+      statusBadge.innerHTML = `
+        <span class="w-1.5 h-1.5 ${detail.status === 'success' ? 'bg-green-500' : detail.status === 'error' ? 'bg-red-500' : detail.status === 'running' ? 'bg-blue-500 animate-pulse' : 'bg-amber-500'} rounded-full mr-1"></span>
+        ${detail.status === 'success' ? 'Sucesso' : detail.status === 'error' ? 'Erro' : detail.status === 'running' ? 'Em execução' : 'Aguardando'}
+      `;
+
+      // Render nodes
+      const nodesContainer = document.getElementById('detail-nodes');
+      nodesContainer.innerHTML = detail.nodes.map(node => `
+        <div class="node-status p-3 bg-white border border-dark-200 rounded-lg hover:border-primary-300 transition">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 ${node.color} rounded-lg flex items-center justify-center flex-shrink-0">
+              ${node.isIcon ?
+                `<svg class="w-4 h-4" style="color: ${node.iconColor.replace('text-', '')}" fill="currentColor" viewBox="0 0 24 24"><path d="${node.icon}"/></svg>` :
+                `<svg class="w-4 h-4 ${node.iconColor}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${node.icon}"/></svg>`
+              }
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-medium text-dark-900">${node.name}</span>
+                <span class="px-2 py-0.5 ${node.status === 'success' ? 'bg-green-100 text-green-700' : node.status === 'error' ? 'bg-red-100 text-red-700' : node.status === 'running' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'} text-xs rounded-full">
+                  ${node.status === 'success' ? 'Sucesso' : node.status === 'error' ? 'Erro' : node.status === 'running' ? 'Em execução' : 'Aguardando'}
+                </span>
+                <span class="text-xs text-dark-400 font-mono">${node.time}</span>
+              </div>
+              <p class="text-xs text-dark-500 truncate">${node.detail}</p>
+            </div>
+            <button class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Ver dados de entrada/saída">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            </button>
+          </div>
+        </div>
+      `).join('');
+
+      // Show/hide error section
+      if (detail.error) {
+        detailError.classList.remove('hidden');
+        document.getElementById('detail-error-message').textContent = detail.error;
+      } else {
+        detailError.classList.add('hidden');
+      }
+    }
+
+    // Close detail panel
+    closeDetail.addEventListener('click', () => {
+      detailPanel.classList.add('translate-x-full');
+      setTimeout(() => detailPanel.classList.add('hidden'), 300);
+    });
+
+    // Click on execution row
+    executionsBody.addEventListener('click', (e) => {
+      const row = e.target.closest('tr[data-execution-id]');
+      if (row && !e.target.closest('button') && !e.target.closest('input[type="checkbox"]')) {
+        showDetail(row.dataset.executionId);
+      }
+    });
+
+    // Select all checkbox
+    const selectAll = document.querySelector('thead input[type="checkbox"]');
+    selectAll.addEventListener('change', () => {
+      document.querySelectorAll('tbody input[type="checkbox"]').forEach(cb => {
+        cb.checked = selectAll.checked;
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+# dependencies
+node_modules
+.pnpm-store
+
+# build outputs
+dist
+.next
+.turbo
+
+# development
+.env
+.env.local
+.env.*.local
+*.log
+npm-debug.log*
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# git
+.git
+.gitignore
+
+# docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# tools
+.turbo
+coverage
+
+# Overclock
+.overclock-app
+
+# OS
+.DS_Store
+Thumbs.db

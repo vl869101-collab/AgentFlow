@@ -35,8 +35,10 @@ const securityHeaders = [
     : []),
 ];
 
+const isDockerOrLinux = process.env.DOCKER_BUILD === "true" || process.platform !== "win32";
+
 const nextConfig: NextConfig = {
-  output: "standalone",
+  ...(isDockerOrLinux ? { output: "standalone" } : {}),
   transpilePackages: ["@agentflow/shared"],
   compress: true,
 

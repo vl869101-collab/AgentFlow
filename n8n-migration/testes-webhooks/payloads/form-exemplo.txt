@@ -1,0 +1,1 @@
+event=checkout.session.completed&data[object][id]=cs_test_1234567890&data[object][amount_total]=2990&data[object][currency]=brl&data[object][customer_email]=cliente%40exemplo.com&data[object][payment_status]=paid&data[object][status]=complete&metadata[order_id]=ord_abc123&metadata[user_id]=usr_xyz789&metadata[plan]=pro_monthly

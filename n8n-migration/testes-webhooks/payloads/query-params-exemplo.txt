@@ -1,0 +1,25 @@
+# Exemplo de Query Parameters para webhooks GET
+# Use com: curl "https://<TUNEL>/api/webhooks/trigger/<org>/<path>?event=...&data=..."
+#
+# NOTA: O endpoint /trigger/* do AgentFlow aceita QUALQUER método HTTP (app.all)
+# mas valida se o método bate com o cadastrado no webhook (method: POST/GET).
+# Para testar GET, crie o webhook com method: "GET".
+
+# Exemplo 1: Stripe-like event via query string
+event=payment_intent.succeeded&data[id]=pi_test_123&data[amount]=1990&data[currency]=brl&data[customer]=cus_abc123&metadata[order_id]=ord_456
+
+# Exemplo 2: GitHub webhook simplificado (ping)
+zen=keep%20it%20logically%20awesome&hook_id=123456789&hook[events][]=push&hook[events][]=pull_request&repository[full_name]=usuario/repo
+
+# Exemplo 3: Webhook genérico simples
+event=user.created&user_id=usr_789&email=novo%40cliente.com&plan=free&source=landing_page
+
+# Exemplo 4: Múltiplos valores mesmo parâmetro (arrays)
+tags[]=vip&tags[]=beta&tags[]=early-adopter&user_id=usr_999&action=upgrade
+
+# ── Como testar GET com curl ──────────────────────────────────────────────
+# 1. Crie webhook com method: "GET"
+# 2. Gere signature do QUERY STRING (não do body, pois GET não tem body):
+#    RAW_QUERY="event=payment_intent.succeeded&data[id]=pi_test_123..."
+#    SIG="sha256=$(echo -n "$RAW_QUERY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')"
+# 3. curl -X GET "URL?$RAW_QUERY" -H "X-Webhook-Signature: $SIG"

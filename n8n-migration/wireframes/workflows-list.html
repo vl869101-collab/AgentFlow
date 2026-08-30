@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow - Workflows</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          },
+          colors: {
+            primary: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+            },
+            dark: {
+              50: '#f8fafc',
+              100: '#f1f5f9',
+              200: '#e2e8f0',
+              300: '#cbd5e1',
+              400: '#94a3b8',
+              500: '#64748b',
+              600: '#475569',
+              700: '#334155',
+              800: '#1e293b',
+              900: '#0f172a',
+              950: '#020617',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .row-hover { transition: background-color 0.2s ease; }
+    .row-hover:hover { background-color: #f8fafc; }
+    .status-badge { font-weight: 600; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; }
+    .status-active { @apply bg-green-100 text-green-800; }
+    .status-inactive { @apply bg-gray-100 text-gray-800; }
+    .status-error { @apply bg-red-100 text-red-800; }
+    .status-draft { @apply bg-amber-100 text-amber-800; }
+  </style>
+</head>
+<body class="font-sans bg-dark-50 min-h-screen">
+  <!-- Navigation -->
+  <nav class="bg-white border-b border-dark-200 sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-8">
+          <a href="index.html" class="flex items-center gap-2">
+            <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+              </svg>
+            </div>
+            <span class="text-xl font-bold text-dark-900">AgentFlow</span>
+          </a>
+          <div class="hidden md:flex items-center gap-6">
+            <a href="index.html" class="text-dark-600 hover:text-dark-900 font-medium transition">Dashboard</a>
+            <a href="workflows-list.html" class="text-primary-600 font-medium px-3 py-2 rounded-md border border-primary-200 bg-primary-50">Workflows</a>
+            <a href="executions.html" class="text-dark-600 hover:text-dark-900 font-medium transition">Execuções</a>
+            <a href="credentials.html" class="text-dark-600 hover:text-dark-900 font-medium transition">Credenciais</a>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="relative hidden sm:block">
+            <input type="text" placeholder="Buscar workflows..." class="pl-10 pr-4 py-1.5 w-64 border border-dark-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-dark-50">
+            <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M13.5 8.637a4.5 4.5 0 11-8.993-8.99 4.5 4.5 0 018.993 8.99z"></path></svg>
+          </div>
+          <button class="p-2 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </button>
+          <button class="p-2 text-dark-400 hover:text-dark-600 hover:bg-dark-100 rounded-lg transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+          </button>
+          <div class="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
+            <span class="text-sm font-semibold text-primary-700">AF</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <!-- Header -->
+    <div class="mb-8">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-dark-900">Workflows</h1>
+          <p class="text-dark-500 mt-1">Gerencie e organize seus workflows de automação</p>
+        </div>
+        <a href="workflow-editor.html" class="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition flex items-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+          Novo Workflow
+        </a>
+      </div>
+
+      <!-- Filters -->
+      <div class="bg-white rounded-xl border border-dark-200 p-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="text-sm font-medium text-dark-700">Filtros:</label>
+            <select class="px-3 py-1.5 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-sm">
+              <option value="all">Todos os status</option>
+              <option value="active" selected>Ativos</option>
+              <option value="inactive">Inativos</option>
+              <option value="draft">Rascunhos</option>
+              <option value="error">Com erro</option>
+            </select>
+            <select class="px-3 py-1.5 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-sm">
+              <option value="">Todas as tags</option>
+              <option value="lead">Leads</option>
+              <option value="notification">Notificações</option>
+              <option value="report">Relatórios</option>
+              <option value="sync">Sincronização</option>
+              <option value="marketing">Marketing</option>
+            </select>
+            <select class="px-3 py-1.5 border border-dark-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-sm">
+              <option value="updated_desc">Ordenar por: Atualizado最近</option>
+              <option value="updated_asc">Atualizado antigamente</option>
+              <option value="name_asc">Nome A-Z</option>
+              <option value="name_desc">Nome Z-A</option>
+              <option value="executions_desc">Mais executados</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 py-1.5 border border-dark-300 rounded-lg text-sm hover:bg-dark-50 transition">Importar .json</button>
+            <button class="px-3 py-1.5 border border-dark-300 rounded-lg text-sm hover:bg-dark-50 transition">Exportar selecionados</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Workflows Table -->
+    <div class="bg-white rounded-xl border border-dark-200 overflow-hidden shadow-sm">
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y border-dark-200">
+          <thead class="bg-dark-50">
+            <tr>
+              <th class="px-6 py-4 text-left text-xs font-medium text-dark-500 uppercase tracking-wider w-12">
+                <input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500" id="select-all">
+              </th>
+              <th class="px-6 py-4 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Workflow</th>
+              <th class="px-6 py-4 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Status</th>
+              <th class="px-6 py-4 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Nodes</th>
+              <th class="px-6 py-4 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Última Execução</th>
+              <th class="px-6 py-4 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Próxima Execução</th>
+              <th class="px-6 py-4 text-left text-xs font-medium text-dark-500 uppercase tracking-wider">Ações</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y border-dark-200" id="workflows-body">
+            <!-- Row 1: Active -->
+            <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-workflow-id="wf-1">
+              <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500 row-checkbox"></td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                    <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  </div>
+                  <div>
+                    <p class="font-medium text-dark-900">Processamento de Leads</p>
+                    <p class="text-xs text-dark-500 font-mono">#wf_abc123</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <span class="status-badge status-active flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                  Ativo
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-dark-700">7 nodes</span>
+                  <div class="flex -space-x-2">
+                    <div class="w-6 h-6 bg-primary-100 rounded-full border-2 border-white flex items-center justify-center" title="Webhook"><span class="text-xs font-bold text-primary-600">W</span></div>
+                    <div class="w-6 h-6 bg-amber-100 rounded-full border-2 border-white flex items-center justify-center" title="IF"><span class="text-xs font-bold text-amber-600">IF</span></div>
+                    <div class="w-6 h-6 bg-pink-100 rounded-full border-2 border-white flex items-center justify-center" title="LLM"><span class="text-xs font-bold text-pink-600">AI</span></div>
+                    <div class="w-6 h-6 bg-purple-100 rounded-full border-2 border-white flex items-center justify-center" title="HTTP"><span class="text-xs font-bold text-purple-600">HT</span></div>
+                    <div class="w-6 h-6 bg-blue-100 rounded-full border-2 border-white flex items-center justify-center" title="Telegram"><svg class="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 24 24"><path d="M23.973 4.97a.039.039 0 0 0-.043.044L11.313 19.982a.197.197 0 0 1-.09.049.21.21 0 0 1-.104-.021l-3.886-1.279a.23.23 0 0 1-.08-.139L.02 9.47a.042.042 0 0 0-.011-.074.039.039 0 0 0 .055-.011l4.281-1.308 10.349-13.085a.039.039 0 0 0 .011-.043.037.037 0 0 0-.037-.037h-.002ZM6.45 17.55l2.311.758 8.399-10.627-2.315-.757Z"/></svg></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sucesso</span>
+                  <span class="text-dark-500">19/08 14:32</span>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  19/08 15:00 (Schedule)
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-1">
+                  <a href="workflow-editor.html" class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Editar">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  </a>
+                  <button class="p-1.5 text-dark-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="Duplicar" onclick="event.stopPropagation(); duplicateWorkflow('wf-1')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  </button>
+                  <button class="p-1.5 text-dark-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Excluir" onclick="event.stopPropagation(); deleteWorkflow('wf-1')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.865-1.142L5 7m5 4v6m4-6v6m1-10H9a1 1 0 00-1 1v2h4a1 1 0 001-1V7a1 1 0 00-1-1h-2a1 1 0 00-1 1v2h2a1 1 0 001-1z"></path></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row 2: Active -->
+            <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-workflow-id="wf-2">
+              <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500 row-checkbox"></td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                    <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  </div>
+                  <div>
+                    <p class="font-medium text-dark-900">Notificação de Pagamento</p>
+                    <p class="text-xs text-dark-500 font-mono">#wf_def456</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <span class="status-badge status-active flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                  Ativo
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-dark-700">5 nodes</span>
+                  <div class="flex -space-x-2">
+                    <div class="w-6 h-6 bg-primary-100 rounded-full border-2 border-white flex items-center justify-center" title="Webhook"><span class="text-xs font-bold text-primary-600">W</span></div>
+                    <div class="w-6 h-6 bg-amber-100 rounded-full border-2 border-white flex items-center justify-center" title="IF"><span class="text-xs font-bold text-amber-600">IF</span></div>
+                    <div class="w-6 h-6 bg-purple-100 rounded-full border-2 border-white flex items-center justify-center" title="HTTP GET"><span class="text-xs font-bold text-purple-600">HT</span></div>
+                    <div class="w-6 h-6 bg-purple-100 rounded-full border-2 border-white flex items-center justify-center" title="Send Email"><span class="text-xs font-bold text-purple-600">HT</span></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sucesso</span>
+                  <span class="text-dark-500">19/08 14:28</span>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  Webhook-triggered
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-1">
+                  <a href="workflow-editor.html" class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Editar">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  </a>
+                  <button class="p-1.5 text-dark-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="Duplicar" onclick="event.stopPropagation(); duplicateWorkflow('wf-2')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  </button>
+                  <button class="p-1.5 text-dark-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Excluir" onclick="event.stopPropagation(); deleteWorkflow('wf-2')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.865-1.142L5 7m5 4v6m4-6v6m1-10H9a1 1 0 00-1 1v2h4a1 1 0 001-1V7a1 1 0 00-1-1h-2a1 1 0 00-1 1v2h2a1 1 0 001-1z"></path></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row 3: Error -->
+            <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-workflow-id="wf-3">
+              <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500 row-checkbox"></td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                    <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  </div>
+                  <div>
+                    <p class="font-medium text-dark-900">Relatório de Vendas</p>
+                    <p class="text-xs text-dark-500 font-mono">#wf_ghi789</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <span class="status-badge status-error flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+                  Erro
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-dark-700">4 nodes</span>
+                  <div class="flex -space-x-2">
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Postgres"><span class="text-xs font-bold text-green-600">DB</span></div>
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Code"><span class="text-xs font-bold text-green-600">JS</span></div>
+                    <div class="w-6 h-6 bg-red-100 rounded-full border-2 border-white flex items-center justify-center" title="HTTP (Failed)"><span class="text-xs font-bold text-red-600">HT</span></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">Erro</span>
+                  <span class="text-dark-500">19/08 13:45</span>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  19/08 14:00 (Schedule)
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-1">
+                  <a href="workflow-editor.html" class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Editar">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  </a>
+                  <a href="executions.html" class="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Ver execuções">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  </a>
+                  <button class="p-1.5 text-dark-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="Duplicar" onclick="event.stopPropagation(); duplicateWorkflow('wf-3')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  </button>
+                  <button class="p-1.5 text-dark-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Excluir" onclick="event.stopPropagation(); deleteWorkflow('wf-3')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.865-1.142L5 7m5 4v6m4-6v6m1-10H9a1 1 0 00-1 1v2h4a1 1 0 001-1V7a1 1 0 00-1-1h-2a1 1 0 00-1 1v2h2a1 1 0 001-1z"></path></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row 4: Active (Running) -->
+            <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-workflow-id="wf-4">
+              <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500 row-checkbox"></td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                    <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  </div>
+                  <div>
+                    <p class="font-medium text-dark-900">Sincronização CRM</p>
+                    <p class="text-xs text-dark-500 font-mono">#wf_jkl012</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <span class="status-badge status-active flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                  Executando
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-dark-700">5 nodes</span>
+                  <div class="flex -space-x-2">
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="HTTP GET"><span class="text-xs font-bold text-green-600">HT</span></div>
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Code"><span class="text-xs font-bold text-green-600">JS</span></div>
+                    <div class="w-6 h-6 bg-blue-100 rounded-full border-2 border-white flex items-center justify-center animate-pulse" title="HTTP POST (Running)"><span class="text-xs font-bold text-blue-600">HT</span></div>
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Postgres"><span class="text-xs font-bold text-green-600">DB</span></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full animate-pulse">Em andamento</span>
+                  <span class="text-dark-500">19/08 14:33</span>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  19/08 15:00 (Schedule)
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-1">
+                  <a href="workflow-editor.html" class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Editar">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  </a>
+                  <a href="executions.html" class="p-1.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Acompanhar">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  </a>
+                  <button class="p-1.5 text-dark-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="Duplicar" onclick="event.stopPropagation(); duplicateWorkflow('wf-4')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  </button>
+                  <button class="p-1.5 text-dark-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Excluir" onclick="event.stopPropagation(); deleteWorkflow('wf-4')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.865-1.142L5 7m5 4v6m4-6v6m1-10H9a1 1 0 00-1 1v2h4a1 1 0 001-1V7a1 1 0 00-1-1h-2a1 1 0 00-1 1v2h2a1 1 0 001-1z"></path></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row 5: Draft -->
+            <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-workflow-id="wf-5">
+              <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500 row-checkbox"></td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                    <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  </div>
+                  <div>
+                    <p class="font-medium text-dark-900">Envio de Newsletter</p>
+                    <p class="text-xs text-dark-500 font-mono">#wf_mno345</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <span class="status-badge status-draft flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+                  Rascunho
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-dark-700">4 nodes</span>
+                  <div class="flex -space-x-2">
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Schedule"><span class="text-xs font-bold text-green-600">⏰</span></div>
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Postgres"><span class="text-xs font-bold text-green-600">DB</span></div>
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Loop"><span class="text-xs font-bold text-green-600">↻</span></div>
+                    <div class="w-6 h-6 bg-purple-100 rounded-full border-2 border-white flex items-center justify-center" title="Send Email"><span class="text-xs font-bold text-purple-600">HT</span></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-500">—</td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  19/08 11:00 (Schedule)
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-1">
+                  <a href="workflow-editor.html" class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Editar">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  </a>
+                  <button class="p-1.5 text-dark-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="Duplicar" onclick="event.stopPropagation(); duplicateWorkflow('wf-5')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  </button>
+                  <button class="p-1.5 text-dark-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Excluir" onclick="event.stopPropagation(); deleteWorkflow('wf-5')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.865-1.142L5 7m5 4v6m4-6v6m1-10H9a1 1 0 00-1 1v2h4a1 1 0 001-1V7a1 1 0 00-1-1h-2a1 1 0 00-1 1v2h2a1 1 0 001-1z"></path></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row 6: Inactive -->
+            <tr class="hover:bg-dark-50 cursor-pointer row-hover opacity-60" data-workflow-id="wf-6">
+              <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500 row-checkbox"></td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
+                    <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  </div>
+                  <div>
+                    <p class="font-medium text-dark-900">Backup Diário (Antigo)</p>
+                    <p class="text-xs text-dark-500 font-mono">#wf_old789</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <span class="status-badge status-inactive flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-gray-500 rounded-full"></span>
+                  Inativo
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-dark-700">3 nodes</span>
+                  <div class="flex -space-x-2">
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Schedule"><span class="text-xs font-bold text-green-600">⏰</span></div>
+                    <div class="w-6 h-6 bg-green-100 rounded-full border-2 border-white flex items-center justify-center" title="Postgres"><span class="text-xs font-bold text-green-600">DB</span></div>
+                    <div class="w-6 h-6 bg-blue-100 rounded-full border-2 border-white flex items-center justify-center" title="S3 Upload"><span class="text-xs font-bold text-blue-600">S3</span></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-500">15/08 03:00</td>
+              <td class="px-6 py-4 text-sm text-dark-500">—</td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-1">
+                  <a href="workflow-editor.html" class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Editar">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  </a>
+                  <button class="p-1.5 text-dark-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="Duplicar" onclick="event.stopPropagation(); duplicateWorkflow('wf-6')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  </button>
+                  <button class="p-1.5 text-dark-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Excluir" onclick="event.stopPropagation(); deleteWorkflow('wf-6')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.865-1.142L5 7m5 4v6m4-6v6m1-10H9a1 1 0 00-1 1v2h4a1 1 0 001-1V7a1 1 0 00-1-1h-2a1 1 0 00-1 1v2h2a1 1 0 001-1z"></path></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row 7: Active -->
+            <tr class="hover:bg-dark-50 cursor-pointer row-hover" data-workflow-id="wf-7">
+              <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 text-primary-600 border-dark-300 rounded focus:ring-primary-500 row-checkbox"></td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                    <svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  </div>
+                  <div>
+                    <p class="font-medium text-dark-900">Webhook Recebedor Genérico</p>
+                    <p class="text-xs text-dark-500 font-mono">#wf_pqr678</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <span class="status-badge status-active flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                  Ativo
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-dark-700">3 nodes</span>
+                  <div class="flex -space-x-2">
+                    <div class="w-6 h-6 bg-primary-100 rounded-full border-2 border-white flex items-center justify-center" title="Webhook"><span class="text-xs font-bold text-primary-600">W</span></div>
+                    <div class="w-6 h-6 bg-purple-100 rounded-full border-2 border-white flex items-center justify-center" title="HTTP"><span class="text-xs font-bold text-purple-600">HT</span></div>
+                    <div class="w-6 h-6 bg-blue-100 rounded-full border-2 border-white flex items-center justify-center" title="Telegram"><svg class="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 24 24"><path d="M23.973 4.97a.039.039 0 0 0-.043.044L11.313 19.982a.197.197 0 0 1-.09.049.21.21 0 0 1-.104-.021l-3.886-1.279a.23.23 0 0 1-.08-.139L.02 9.47a.042.042 0 0 0-.011-.074.039.039 0 0 0 .055-.011l4.281-1.308 10.349-13.085a.039.039 0 0 0 .011-.043.037.037 0 0 0-.037-.037h-.002ZM6.45 17.55l2.311.758 8.399-10.627-2.315-.757Z"/></svg></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Sucesso</span>
+                  <span class="text-dark-500">19/08 10:15</span>
+                </div>
+              </td>
+              <td class="px-6 py-4 text-sm text-dark-700">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  Webhook-triggered
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-1">
+                  <a href="workflow-editor.html" class="p-1.5 text-dark-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition" title="Editar">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                  </a>
+                  <button class="p-1.5 text-dark-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="Duplicar" onclick="event.stopPropagation(); duplicateWorkflow('wf-7')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  </button>
+                  <button class="p-1.5 text-dark-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Excluir" onclick="event.stopPropagation(); deleteWorkflow('wf-7')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.865-1.142L5 7m5 4v6m4-6v6m1-10H9a1 1 0 00-1 1v2h4a1 1 0 001-1V7a1 1 0 00-1-1h-2a1 1 0 00-1 1v2h2a1 1 0 001-1z"></path></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Bulk Actions Bar (hidden by default) -->
+    <div id="bulk-actions" class="hidden mt-4 bg-white rounded-xl border border-dark-200 p-4 flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <span class="text-sm text-dark-600" id="selected-count">0 selecionados</span>
+        <button class="px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition" onclick="activateSelected()">Ativar</button>
+        <button class="px-3 py-1.5 text-sm font-medium text-white bg-gray-600 rounded-lg hover:bg-gray-700 transition" onclick="deactivateSelected()">Desativar</button>
+        <button class="px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition" onclick="deleteSelected()">Excluir</button>
+        <button class="px-3 py-1.5 text-sm font-medium text-dark-700 border border-dark-300 rounded-lg hover:bg-dark-50 transition" onclick="exportSelected()">Exportar</button>
+      </div>
+      <button class="p-2 text-dark-400 hover:text-dark-600" onclick="clearSelection()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+    </div>
+
+    <!-- Pagination -->
+    <div class="mt-6 flex items-center justify-between px-6 py-4 border-t border-dark-200">
+      <div class="flex items-center gap-3 text-sm text-dark-600">
+        <span>Mostrando 1-7 de 7 workflows</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition disabled:opacity-50" disabled>
+          Anterior
+        </button>
+        <div class="flex items-center gap-1">
+          <button class="px-3 py-1 bg-primary-600 text-white rounded-lg">1</button>
+        </div>
+        <button class="px-3 py-1 border border-dark-300 rounded-lg hover:bg-dark-50 transition disabled:opacity-50" disabled>
+          Próxima
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-dark-200 mt-12">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div class="flex items-center justify-between">
+        <p class="text-dark-500 text-sm">AgentFlow v1.0.0 — Wireframes para migração n8n</p>
+        <div class="flex items-center gap-4 text-sm text-dark-400">
+          <a href="#" class="hover:text-dark-600">Documentação</a>
+          <a href="#" class="hover:text-dark-600">API Reference</a>
+          <a href="#" class="hover:text-dark-600">Comunidade</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Select all checkbox
+    const selectAll = document.getElementById('select-all');
+    const rowCheckboxes = document.querySelectorAll('.row-checkbox');
+    const bulkActions = document.getElementById('bulk-actions');
+    const selectedCount = document.getElementById('selected-count');
+
+    function updateBulkActions() {
+      const checked = document.querySelectorAll('.row-checkbox:checked').length;
+      if (checked > 0) {
+        bulkActions.classList.remove('hidden');
+        selectedCount.textContent = `${checked} selecionado${checked > 1 ? 's' : ''}`;
+      } else {
+        bulkActions.classList.add('hidden');
+      }
+      selectAll.indeterminate = checked > 0 && checked < rowCheckboxes.length;
+      selectAll.checked = checked === rowCheckboxes.length && checked > 0;
+    }
+
+    selectAll.addEventListener('change', () => {
+      rowCheckboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+      });
+      updateBulkActions();
+    });
+
+    rowCheckboxes.forEach(cb => {
+      cb.addEventListener('change', updateBulkActions);
+    });
+
+    function clearSelection() {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+      rowCheckboxes.forEach(cb => cb.checked = false);
+      updateBulkActions();
+    }
+
+    function duplicateWorkflow(id) {
+      alert(`Duplicar workflow ${id} - navegar para editor com cópia`);
+    }
+
+    function deleteWorkflow(id) {
+      if (confirm(`Tem certeza que deseja excluir o workflow ${id}?`)) {
+        alert(`Workflow ${id} excluído`);
+      }
+    }
+
+    function activateSelected() {
+      const checked = document.querySelectorAll('.row-checkbox:checked');
+      if (confirm(`Ativar ${checked.length} workflow(s)?`)) {
+        alert(`${checked.length} workflow(s) ativado(s)`);
+        clearSelection();
+      }
+    }
+
+    function deactivateSelected() {
+      const checked = document.querySelectorAll('.row-checkbox:checked');
+      if (confirm(`Desativar ${checked.length} workflow(s)?`)) {
+        alert(`${checked.length} workflow(s) desativado(s)`);
+        clearSelection();
+      }
+    }
+
+    function deleteSelected() {
+      const checked = document.querySelectorAll('.row-checkbox:checked');
+      if (confirm(`Excluir permanentemente ${checked.length} workflow(s)?`)) {
+        alert(`${checked.length} workflow(s) excluído(s)`);
+        clearSelection();
+      }
+    }
+
+    function exportSelected() {
+      const checked = document.querySelectorAll('.row-checkbox:checked');
+      alert(`Exportar ${checked.length} workflow(s) como .json`);
+    }
+  </script>
+</body>
+</html>

@@ -95,9 +95,9 @@ describe("Code Sandbox & Security", () => {
     });
 
     expect(resultItem.items).toEqual([
-      { json: { itemValue: 10 } },
-      { json: { itemValue: 20 } },
-      { json: { itemValue: 30 } },
+      { json: { itemValue: 10 }, pairedItem: { item: 0 } },
+      { json: { itemValue: 20 }, pairedItem: { item: 1 } },
+      { json: { itemValue: 30 }, pairedItem: { item: 2 } },
     ]);
 
     // Mode 2: runOnceForAllItems
@@ -115,6 +115,6 @@ describe("Code Sandbox & Security", () => {
       input: [{ val: 1 }, { val: 2 }, { val: 3 }],
     });
 
-    expect(resultAll.items).toEqual([{ json: { totalCount: 3 } }]);
+    expect(resultAll.items).toEqual([{ json: { totalCount: 3 }, pairedItem: { item: 0 } }]);
   });
 });

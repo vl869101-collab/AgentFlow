@@ -1,0 +1,34 @@
+/**
+ * Payload para node OpenAI Chat (conversação com histórico)
+ * Node: OpenAI (Chat Completion)
+ * Campos: messages (array com role: system/user/assistant), model, temperature
+ */
+{
+  "model": "gpt-4o-mini",
+  "temperature": 0.7,
+  "maxTokens": 1000,
+  "messages": [
+    {
+      "role": "system",
+      "content": "Você é um assistente de vendas especializado em cursos de marketing digital. Responda de forma amigável, profissional e direta. Foque em converter o lead em cliente."
+    },
+    {
+      "role": "user",
+      "content": "Olá! Vi o anúncio do curso de marketing digital. Quanto custa e o que está incluso?"
+    },
+    {
+      "role": "assistant",
+      "content": "Olá! O Curso Completo de Marketing Digital custa R$ 299,90 (ou 12x de R$ 29,90). Inclui: 40h de aulas gravadas, acesso vitalício, certificado, comunidade exclusiva no Discord, templates prontos de anúncios e suporte por 6 meses. Quer saber mais detalhes?"
+    },
+    {
+      "role": "user",
+      "content": "Tem garantia? Como funciona o suporte?"
+    }
+  ],
+  "metadata": {
+    "conversationId": "conv_20260819_004567",
+    "userId": "usr_lead_001",
+    "source": "website_chat",
+    "intent": "sales_inquiry"
+  }
+}

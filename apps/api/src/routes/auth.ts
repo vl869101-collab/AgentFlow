@@ -10,7 +10,9 @@ const refreshRequestSchema = z.object({ refreshToken: z.string().min(1).max(4096
 const refreshJwtSchema = z.object({ sub: z.string().min(1), type: z.string(), jti: z.string().min(1) });
 
 export async function authRoutes(app: FastifyInstance) {
-  app.post("/register", { config: { rateLimit: { max: 10, timeWindow: "1 hour" } } }, async (request, reply) => {
+  const isTest = process.env.NODE_ENV === "test";
+
+  app.post("/register", { config: { rateLimit: { max: isTest ? 10000 : 10, timeWindow: "1 hour" } } }, async (request, reply) => {
     const body = signupSchema.parse(request.body);
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
     if (existing) return reply.code(201).send({ message: GENERIC_REGISTER_MESSAGE });
@@ -43,7 +45,7 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.code(201).send({ message: GENERIC_REGISTER_MESSAGE });
   });
 
-  app.post("/login", { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } }, async (request, reply) => {
+  app.post("/login", { config: { rateLimit: { max: isTest ? 10000 : 20, timeWindow: "15 minutes" } } }, async (request, reply) => {
     const body = loginSchema.parse(request.body);
     const user = await prisma.user.findUnique({ where: { email: body.email } });
     if (!user) return reply.code(401).send({ error: "Invalid credentials", code: "INVALID_CREDENTIALS" });
