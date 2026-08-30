@@ -13,6 +13,12 @@ export function formatDate(date: string | Date) {
   }).format(new Date(date));
 }
 
+export function formatDuration(milliseconds: number) {
+  if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`;
+  if (milliseconds < 60000) return `${Math.round(milliseconds / 100) / 10}s`;
+  return `${Math.floor(milliseconds / 60000)}m ${Math.round((milliseconds % 60000) / 1000)}s`;
+}
+
 export function formatRelativeTime(date: string | Date) {
   const diff = Date.now() - new Date(date).getTime();
   const minutes = Math.floor(diff / 60000);
