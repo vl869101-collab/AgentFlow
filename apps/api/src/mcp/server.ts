@@ -15,11 +15,14 @@ import {
 import { randomUUID } from "node:crypto";
 import { MCP_TOOLS, callTool } from "./tools.js";
 import { isMcpEnabled, registerSession, touchSession } from "./state.js";
+import { recordAuditEvent } from "../services/audit-ledger.js";
 
 export type McpContext = {
   orgId?: string;
   userId?: string;
   scopes?: string[];
+  ip?: string;
+  userAgent?: string;
 };
 
 export async function handleMcpMessage(
@@ -41,6 +44,24 @@ export async function handleMcpMessage(
     case "initialize": {
       const assigned = sessionId ?? `mcp-${randomUUID()}`;
       registerSession(assigned);
+
+      if (ctx.orgId) {
+        void recordAuditEvent({
+          orgId: ctx.orgId,
+          userId: ctx.userId ?? "system",
+          action: "mcp.session.open",
+          resource: "mcp_session",
+          resourceId: assigned,
+          metadata: {
+            sessionId: assigned,
+            protocolVersion: MCP_PROTOCOL_VERSION,
+            clientInfo: message.params,
+          },
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
+        }).catch(() => undefined);
+      }
+
       return {
         sessionId: assigned,
         responses: [

@@ -13,6 +13,7 @@ import {
 } from "./protocol.js";
 import { randomUUID, createHash, createHmac } from "node:crypto";
 import { decryptCredential, encryptCredential } from "../lib/crypto.js";
+import { recordAuditEvent } from "../services/audit-ledger.js";
 
 // Google Node Handlers
 import { executeGoogleSheets } from "../services/nodes/google-sheets.js";
@@ -33,6 +34,8 @@ export type ToolContext = {
   orgId?: string;
   userId?: string;
   scopes?: string[];
+  ip?: string;
+  userAgent?: string;
 };
 
 function asInt(value: unknown, fallback: number): number {
@@ -2065,9 +2068,30 @@ export async function callTool(name: string, args: Record<string, unknown>, ctx:
     }
   }
 
+  let result: McpToolResult;
   try {
-    return await handler(args ?? {}, ctx);
+    result = await handler(args ?? {}, ctx);
   } catch (error) {
-    return errorResult(error instanceof Error ? error.message : String(error));
+    result = errorResult(error instanceof Error ? error.message : String(error));
   }
+
+  // 3. Record AuditLog with Merkle Hash Chaining for MCP tool execution
+  if (ctx.orgId) {
+    void recordAuditEvent({
+      orgId: ctx.orgId,
+      userId: ctx.userId ?? "system",
+      action: "mcp.tool.call",
+      resource: "mcp_tool",
+      resourceId: name,
+      metadata: {
+        tool: name,
+        isError: result.isError ?? false,
+        arguments: args ?? {},
+      },
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+    }).catch(() => undefined);
+  }
+
+  return result;
 }
