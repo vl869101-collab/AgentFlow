@@ -80,9 +80,11 @@ test("Item 10: BullMQ DLQ configuration, retry 3x backoff and Bull Board dashboa
   const expectedConcurrency = Math.max(2, expectedCpus * 2);
 
   // 3. Test Bull Board HTML dashboard
+  const adminToken = await register("admin-trio10@example.com");
   const htmlRes = await app.inject({
     method: "GET",
     url: "/admin/queues",
+    headers: { authorization: `Bearer ${adminToken}` },
   });
   assert.equal(htmlRes.statusCode, 200);
   assert.ok(htmlRes.headers["content-type"]?.includes("text/html"));
@@ -91,7 +93,7 @@ test("Item 10: BullMQ DLQ configuration, retry 3x backoff and Bull Board dashboa
   assert.ok(htmlRes.body.includes("workflows"));
 
   // 4. Test Bull Board JSON stats endpoint
-  const statsRes = await request("GET", "/admin/queues/stats");
+  const statsRes = await request("GET", "/admin/queues/stats", undefined, adminToken);
   assert.equal(statsRes.response.statusCode, 200);
   assert.ok(statsRes.body.queues);
   assert.ok(statsRes.body.queues.workflows);
@@ -99,24 +101,24 @@ test("Item 10: BullMQ DLQ configuration, retry 3x backoff and Bull Board dashboa
   assert.equal(statsRes.body.concurrency, expectedConcurrency);
 
   // 5. Test Bull Board REST API endpoints
-  const apiQueues = await request("GET", "/admin/queues/api/queues");
+  const apiQueues = await request("GET", "/admin/queues/api/queues", undefined, adminToken);
   assert.equal(apiQueues.response.statusCode, 200);
   assert.ok(Array.isArray(apiQueues.body.queues));
   assert.equal(apiQueues.body.queues.length, 2);
 
-  const retryAll = await request("POST", "/admin/queues/api/workflows/retry-all");
+  const retryAll = await request("POST", "/admin/queues/api/workflows/retry-all", undefined, adminToken);
   assert.equal(retryAll.response.statusCode, 200);
   assert.equal(retryAll.body.ok, true);
 
-  const clean = await request("POST", "/admin/queues/api/workflows/clean");
+  const clean = await request("POST", "/admin/queues/api/workflows/clean", undefined, adminToken);
   assert.equal(clean.response.statusCode, 200);
   assert.equal(clean.body.ok, true);
 
-  const pause = await request("POST", "/admin/queues/api/workflows/pause");
+  const pause = await request("POST", "/admin/queues/api/workflows/pause", undefined, adminToken);
   assert.equal(pause.response.statusCode, 200);
   assert.equal(pause.body.status, "paused");
 
-  const resume = await request("POST", "/admin/queues/api/workflows/resume");
+  const resume = await request("POST", "/admin/queues/api/workflows/resume", undefined, adminToken);
   assert.equal(resume.response.statusCode, 200);
   assert.equal(resume.body.status, "resumed");
 });

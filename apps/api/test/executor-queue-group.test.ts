@@ -517,9 +517,34 @@ test("TASK-07: Dead Letter Queue (DLQ) — isolation, listing, replay, purge, me
   await sendToDLQ("exec-dlq-api-1", "API Failure", { workflowId: "wf-1" });
   const app = await buildApp({ logger: false });
 
+  // Register an admin user to get auth token
+  const regRes = await app.inject({
+    method: "POST",
+    url: "/api/auth/register",
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify({
+      email: "admin-dlq-test@agentflow.io",
+      password: "StrongPassword123!",
+      name: "Admin DLQ",
+    }),
+  });
+  const regBody = JSON.parse(regRes.body);
+  const loginRes = await app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify({
+      email: "admin-dlq-test@agentflow.io",
+      password: "StrongPassword123!",
+    }),
+  });
+  const adminToken = JSON.parse(loginRes.body).token;
+  const adminHeaders = { authorization: `Bearer ${adminToken}` };
+
   const listRes = await app.inject({
     method: "GET",
     url: "/api/admin/dlq",
+    headers: adminHeaders,
   });
   assert.equal(listRes.statusCode, 200);
   const listData = JSON.parse(listRes.body);
@@ -529,6 +554,7 @@ test("TASK-07: Dead Letter Queue (DLQ) — isolation, listing, replay, purge, me
   const searchRes = await app.inject({
     method: "GET",
     url: "/api/admin/dlq?search=API%20Failure",
+    headers: adminHeaders,
   });
   assert.equal(searchRes.statusCode, 200);
   const searchData = JSON.parse(searchRes.body);
@@ -539,6 +565,7 @@ test("TASK-07: Dead Letter Queue (DLQ) — isolation, listing, replay, purge, me
   const incListRes = await app.inject({
     method: "GET",
     url: "/api/admin/dlq/incidents",
+    headers: adminHeaders,
   });
   assert.equal(incListRes.statusCode, 200);
   const incListData = JSON.parse(incListRes.body);
@@ -548,6 +575,7 @@ test("TASK-07: Dead Letter Queue (DLQ) — isolation, listing, replay, purge, me
   const incDetailRes = await app.inject({
     method: "GET",
     url: `/api/admin/dlq/incidents/${firstIncident.id}`,
+    headers: adminHeaders,
   });
   assert.equal(incDetailRes.statusCode, 200);
   const incDetail = JSON.parse(incDetailRes.body);
@@ -557,7 +585,7 @@ test("TASK-07: Dead Letter Queue (DLQ) — isolation, listing, replay, purge, me
   const incPatchRes = await app.inject({
     method: "PATCH",
     url: `/api/admin/dlq/incidents/${firstIncident.id}`,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...adminHeaders },
     payload: JSON.stringify({ status: "INVESTIGATING" }),
   });
   assert.equal(incPatchRes.statusCode, 200);
@@ -567,6 +595,7 @@ test("TASK-07: Dead Letter Queue (DLQ) — isolation, listing, replay, purge, me
   const metricsRes = await app.inject({
     method: "GET",
     url: "/api/admin/dlq/metrics",
+    headers: adminHeaders,
   });
   assert.equal(metricsRes.statusCode, 200);
   const metricsData = JSON.parse(metricsRes.body);
@@ -575,6 +604,7 @@ test("TASK-07: Dead Letter Queue (DLQ) — isolation, listing, replay, purge, me
   const purgeRes = await app.inject({
     method: "DELETE",
     url: "/api/admin/dlq/purge",
+    headers: adminHeaders,
   });
   assert.equal(purgeRes.statusCode, 200);
 });

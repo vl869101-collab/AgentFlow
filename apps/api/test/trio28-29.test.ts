@@ -102,8 +102,14 @@ test("TASK 28: Load test scripts (k6 and autocannon) exist and specify 100 RPS p
 });
 
 test("TASK 28: BullBoard dashboard and queue monitoring endpoints", async () => {
+  const adminToken = await register("admin-trio28@example.com");
+
   // 1. HTML Dashboard
-  const htmlRes = await app.inject({ method: "GET", url: "/admin/queues" });
+  const htmlRes = await app.inject({
+    method: "GET",
+    url: "/admin/queues",
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
   assert.equal(htmlRes.statusCode, 200);
   assert.ok(htmlRes.headers["content-type"]?.includes("text/html"));
   assert.ok(htmlRes.body.includes("AgentFlow Queue Dashboard (Bull Board)"));
@@ -112,7 +118,7 @@ test("TASK 28: BullBoard dashboard and queue monitoring endpoints", async () => 
   assert.ok(htmlRes.body.includes("Retry Strategy"));
 
   // 2. JSON stats endpoint
-  const statsRes = await request("GET", "/admin/queues/stats");
+  const statsRes = await request("GET", "/admin/queues/stats", undefined, adminToken);
   assert.equal(statsRes.response.statusCode, 200);
   assert.ok(statsRes.body.queues);
   assert.ok(statsRes.body.queues.workflows);
@@ -122,24 +128,24 @@ test("TASK 28: BullBoard dashboard and queue monitoring endpoints", async () => 
   assert.equal(typeof statsRes.body.status, "string");
 
   // 3. REST API for queue management
-  const queuesRes = await request("GET", "/admin/queues/api/queues");
+  const queuesRes = await request("GET", "/admin/queues/api/queues", undefined, adminToken);
   assert.equal(queuesRes.response.statusCode, 200);
   assert.ok(Array.isArray(queuesRes.body.queues));
   assert.equal(queuesRes.body.queues.length, 2);
 
-  const retryRes = await request("POST", "/admin/queues/api/workflows/retry-all");
+  const retryRes = await request("POST", "/admin/queues/api/workflows/retry-all", undefined, adminToken);
   assert.equal(retryRes.response.statusCode, 200);
   assert.equal(retryRes.body.ok, true);
 
-  const cleanRes = await request("POST", "/admin/queues/api/workflows/clean");
+  const cleanRes = await request("POST", "/admin/queues/api/workflows/clean", undefined, adminToken);
   assert.equal(cleanRes.response.statusCode, 200);
   assert.equal(cleanRes.body.ok, true);
 
-  const pauseRes = await request("POST", "/admin/queues/api/workflows/pause");
+  const pauseRes = await request("POST", "/admin/queues/api/workflows/pause", undefined, adminToken);
   assert.equal(pauseRes.response.statusCode, 200);
   assert.equal(pauseRes.body.status, "paused");
 
-  const resumeRes = await request("POST", "/admin/queues/api/workflows/resume");
+  const resumeRes = await request("POST", "/admin/queues/api/workflows/resume", undefined, adminToken);
   assert.equal(resumeRes.response.statusCode, 200);
   assert.equal(resumeRes.body.status, "resumed");
 });
@@ -152,7 +158,7 @@ test("TASK 28: In-memory burst load simulation achieves p95 < 300ms and records 
     { method: "GET" as const, url: "/health" },
     { method: "GET" as const, url: "/metrics" },
     { method: "GET" as const, url: "/api/telemetry/stats" },
-    { method: "GET" as const, url: "/admin/queues/stats" },
+    { method: "GET" as const, url: "/admin/queues/stats", token },
     { method: "GET" as const, url: "/api/workflows", token },
   ];
 

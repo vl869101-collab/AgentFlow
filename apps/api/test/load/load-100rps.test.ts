@@ -148,7 +148,7 @@ test("TASK-14 Load Suite: 100 RPS burst load simulation achieves p95 < 300ms SLA
     { method: "GET" as const, url: "/health", weight: 30 },
     { method: "GET" as const, url: "/metrics", weight: 5 },
     { method: "GET" as const, url: "/api/telemetry/stats", weight: 10 },
-    { method: "GET" as const, url: "/admin/queues/stats", weight: 10 },
+    { method: "GET" as const, url: "/admin/queues/stats", weight: 10, token },
     { method: "GET" as const, url: "/api/workflows", weight: 15, token },
     { method: "GET" as const, url: `/api/workflows/${workflowId}`, weight: 10, token },
     {

@@ -65,30 +65,44 @@ test("TASK-14 Chaos Suite: Scenario 1 - Redis failure simulation & in-memory ide
 });
 
 test("TASK-14 Chaos Suite: Scenario 2 - Queue resilience, pause/resume under failure, & DLQ operations", async () => {
+  // Register admin user for protected BullBoard endpoints
+  const regRes = await request("POST", "/api/auth/register", {
+    email: "admin-chaos@agentflow.io",
+    password: "Password123!",
+    name: "Admin Chaos",
+  });
+  assert.equal(regRes.response.statusCode, 201);
+  const loginRes = await request("POST", "/api/auth/login", {
+    email: "admin-chaos@agentflow.io",
+    password: "Password123!",
+  });
+  assert.equal(loginRes.response.statusCode, 200);
+  const adminToken = loginRes.body.token as string;
+
   // 1. Verify queue stats and health
-  const statsRes = await request("GET", "/admin/queues/stats");
+  const statsRes = await request("GET", "/admin/queues/stats", undefined, adminToken);
   assert.equal(statsRes.response.statusCode, 200);
   assert.ok("queues" in statsRes.body);
   assert.ok("workflows" in statsRes.body.queues);
   assert.ok("dlq" in statsRes.body.queues);
 
   // 2. Simulate queue pause under system distress
-  const pauseRes = await request("POST", "/admin/queues/api/workflows/pause");
+  const pauseRes = await request("POST", "/admin/queues/api/workflows/pause", undefined, adminToken);
   assert.equal(pauseRes.response.statusCode, 200);
   assert.equal(pauseRes.body.status, "paused");
 
   // 3. Simulate queue resume after recovery
-  const resumeRes = await request("POST", "/admin/queues/api/workflows/resume");
+  const resumeRes = await request("POST", "/admin/queues/api/workflows/resume", undefined, adminToken);
   assert.equal(resumeRes.response.statusCode, 200);
   assert.equal(resumeRes.body.status, "resumed");
 
   // 4. Test DLQ retry-all operation
-  const retryRes = await request("POST", "/admin/queues/api/workflows/retry-all");
+  const retryRes = await request("POST", "/admin/queues/api/workflows/retry-all", undefined, adminToken);
   assert.equal(retryRes.response.statusCode, 200);
   assert.equal(retryRes.body.ok, true);
 
   // 5. Test queue clean operation
-  const cleanRes = await request("POST", "/admin/queues/api/workflows/clean");
+  const cleanRes = await request("POST", "/admin/queues/api/workflows/clean", undefined, adminToken);
   assert.equal(cleanRes.response.statusCode, 200);
   assert.equal(cleanRes.body.ok, true);
 });

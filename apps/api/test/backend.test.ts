@@ -271,10 +271,12 @@ test("Item 10: BullMQ queue DLQ, retry 3x backoff, concurrency CPU*2, Bull Board
   assert.equal(typeof metrics.workflows.active, "number");
   assert.equal(typeof metrics.dlq.failed, "number");
 
-  // Test Bull Board JSON stats route
+  // Test Bull Board JSON stats route (requires admin token)
+  const adminToken = await register("admin-bullboard@example.com");
   const statsRes = await app.inject({
     method: "GET",
     url: "/admin/queues/stats",
+    headers: { authorization: `Bearer ${adminToken}` },
   });
   assert.equal(statsRes.statusCode, 200);
   const statsBody = JSON.parse(statsRes.body);
@@ -282,10 +284,11 @@ test("Item 10: BullMQ queue DLQ, retry 3x backoff, concurrency CPU*2, Bull Board
   assert.ok(statsBody.concurrency >= 2);
   assert.ok(statsBody.cpus >= 1);
 
-  // Test Bull Board HTML dashboard
+  // Test Bull Board HTML dashboard (requires admin token)
   const dashRes = await app.inject({
     method: "GET",
     url: "/admin/queues",
+    headers: { authorization: `Bearer ${adminToken}` },
   });
   assert.equal(dashRes.statusCode, 200);
   assert.ok(dashRes.headers["content-type"]?.includes("text/html"));
