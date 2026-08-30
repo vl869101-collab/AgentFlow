@@ -23,7 +23,25 @@ import { ErrorTriggerNodeHandler } from "./nodes/error-trigger.js";
 import { WaitNodeHandler } from "./nodes/wait.js";
 import { MergeNodeHandler } from "./nodes/merge.js";
 import { FormNodeHandler } from "./nodes/form.js";
-import { wrapItems, unwrapItems, type NodeItem } from "./nodes/types.js";
+import {
+  wrapItems,
+  unwrapItems,
+  normalizeToItemsContract,
+  normalizeFromItemsContract,
+  extractFieldByPath,
+  setFieldByPath,
+  type NodeItem,
+} from "./nodes/types.js";
+
+export {
+  wrapItems,
+  unwrapItems,
+  normalizeToItemsContract,
+  normalizeFromItemsContract,
+  extractFieldByPath,
+  setFieldByPath,
+  type NodeItem,
+};
 
 export type ExecutionResult = {
   id: string;
