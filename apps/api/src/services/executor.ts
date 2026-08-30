@@ -26,6 +26,10 @@ import { ErrorTriggerNodeHandler } from "./nodes/error-trigger.js";
 import { WaitNodeHandler } from "./nodes/wait.js";
 import { MergeNodeHandler } from "./nodes/merge.js";
 import { FormNodeHandler } from "./nodes/form.js";
+import { AiAgentNodeHandler } from "./nodes/ai-agent.js";
+import { LlmModelNodeHandler } from "./nodes/llm-model.js";
+import { LlmChainNodeHandler } from "./nodes/llm-chain.js";
+import { VectorStoreNodeHandler } from "./nodes/vector-store.js";
 import {
   wrapItems,
   unwrapItems,
@@ -425,7 +429,6 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
     case "manual":
       return input;
     case "ai":
-    case "ai_agent":
       return executeAi(node.config, input);
     case "condition":
       return evaluateCondition(input, node.config);
@@ -678,6 +681,65 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
         nodeConfig: node.config as Record<string, unknown>,
         input,
       });
+    }
+    case "aiAgent":
+    case "ai_agent": {
+      const handler = new AiAgentNodeHandler();
+      const res = await handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+      return res.items;
+    }
+    case "llmModel":
+    case "llm_model":
+    case "lmChatOpenAi":
+    case "lmChatAnthropic":
+    case "lmChatGoogleGemini": {
+      const handler = new LlmModelNodeHandler();
+      const res = await handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+      return res.items;
+    }
+    case "llmChain":
+    case "llm_chain":
+    case "basicLlmChain": {
+      const handler = new LlmChainNodeHandler();
+      const res = await handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+      return res.items;
+    }
+    case "vectorStore":
+    case "vector_store":
+    case "vectorStoreQdrant":
+    case "vectorStorePinecone":
+    case "vectorStorePgvector": {
+      const handler = new VectorStoreNodeHandler();
+      const res = await handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: node.config as Record<string, unknown>,
+        input,
+      });
+      return res.items;
     }
     default:
       throw new Error(`Unsupported workflow node type: ${node.type}`);
