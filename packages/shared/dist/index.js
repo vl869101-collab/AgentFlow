@@ -1,4 +1,5 @@
 import { z } from "zod";
+export { binaryDataSchema, pairedItemRefSchema, pairedItemSchema, nodeItemSchema, nodeItemsArraySchema, normalizePath, extractFieldByPath, setFieldByPath, isNodeItem, ensureNodeItem, wrapItems, unwrapItems, batchItems, mapItems, filterItems, mergeItemBatches, createPairedItem, linkPairedItems, normalizeToItemsContract, normalizeFromItemsContract, } from "./items.js";
 export { computeWorkflowDiff, normalizeSnapshotNodes, normalizeSnapshotEdges, deepEqual, } from "./workflow-diff.js";
 export { importN8nWorkflow, createAgentFlowFromN8n, validateN8nWorkflow, N8N_SDK_CATALOG, } from "./n8n-import.js";
 export { kmsWrappedKeySchema, vaultEnvelopeSchema, } from "./kms.js";
@@ -79,6 +80,7 @@ const workflowNodeTypeValues = [
     "googleDocs",
     "evaluationTrigger",
     "emailReadImap",
+    "errorTrigger",
 ];
 export const workflowNodeTypeSchema = z.enum(workflowNodeTypeValues);
 export const nodeConfigSchema = z.object({
@@ -331,5 +333,6 @@ export const NODE_TYPES = [
     { type: "whatsappTrigger", label: "WhatsApp Trigger", icon: "Zap", color: "#25d366" },
     { type: "googleCalendar", label: "Google Calendar", icon: "Calendar", color: "#4285f4" },
     { type: "googleDocs", label: "Google Docs", icon: "FileText", color: "#4285f4" },
+    { type: "errorTrigger", label: "Error Trigger", icon: "AlertTriangle", color: "#ef4444" },
 ];
 //# sourceMappingURL=index.js.map

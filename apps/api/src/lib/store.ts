@@ -443,8 +443,23 @@ export const store = {
   },
 
   nodeExecution: {
-    async findMany({ where }: { where?: any }) {
-      return findMany(nodeExecutions, where);
+    async findMany({ where, orderBy }: { where?: any; orderBy?: any }) {
+      let result = findMany(nodeExecutions, where);
+      if (orderBy?.startedAt === "desc") {
+        result.sort((a: any, b: any) => toIsoString(b.startedAt).localeCompare(toIsoString(a.startedAt)));
+      } else if (orderBy?.startedAt === "asc") {
+        result.sort((a: any, b: any) => toIsoString(a.startedAt).localeCompare(toIsoString(b.startedAt)));
+      }
+      return result;
+    },
+    async findFirst({ where, orderBy }: { where?: any; orderBy?: any }) {
+      let result = findMany(nodeExecutions, where);
+      if (orderBy?.startedAt === "desc") {
+        result.sort((a: any, b: any) => toIsoString(b.startedAt).localeCompare(toIsoString(a.startedAt)));
+      } else if (orderBy?.startedAt === "asc") {
+        result.sort((a: any, b: any) => toIsoString(a.startedAt).localeCompare(toIsoString(b.startedAt)));
+      }
+      return result[0] ?? null;
     },
     async create({ data }: { data: any }) {
       const nodeExecution = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };

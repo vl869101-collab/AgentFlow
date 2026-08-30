@@ -6,6 +6,13 @@ import {
   GoogleQuotaRetryOptions,
 } from "../../lib/google-quota.js";
 import { isNodeMockEnabled, mergeNodeInput } from "./oauth.js";
+import {
+  NodeExecutionContext,
+  NodeExecutionResult,
+  NodeHandler,
+  NodeItem,
+  wrapItems,
+} from "./types.js";
 
 export const GoogleGmailInputSchema = z.object({
   operation: z.enum([
@@ -191,5 +198,18 @@ export async function executeGoogleGmail(
     }
     default:
       return { success: true };
+  }
+}
+
+export class GoogleGmailNodeHandler implements NodeHandler {
+  type = "gmail";
+  category = "productivity";
+
+  async execute(ctx: NodeExecutionContext): Promise<NodeExecutionResult> {
+    const results: NodeItem[] = [];
+    for (const item of wrapItems(ctx.input)) {
+      results.push({ json: await executeGoogleGmail(ctx.nodeConfig, item.json, ctx.orgId) });
+    }
+    return { items: results, logs: [`Gmail node: processed ${results.length} item(s)`] };
   }
 }

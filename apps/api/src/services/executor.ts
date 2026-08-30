@@ -19,6 +19,9 @@ import { TeamsNodeHandler } from "./nodes/teams.js";
 import { WhatsAppNodeHandler } from "./nodes/whatsapp.js";
 import { GoogleCalendarNodeHandler } from "./nodes/google-calendar.js";
 import { GoogleDocsNodeHandler } from "./nodes/google-docs.js";
+import { GoogleSheetsNodeHandler } from "./nodes/google-sheets.js";
+import { GoogleDriveNodeHandler } from "./nodes/google-drive.js";
+import { GoogleGmailNodeHandler } from "./nodes/google-gmail.js";
 import { ErrorTriggerNodeHandler } from "./nodes/error-trigger.js";
 import { WaitNodeHandler } from "./nodes/wait.js";
 import { MergeNodeHandler } from "./nodes/merge.js";
@@ -500,13 +503,17 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
         _config: { event: params?.event, filters, options },
       };
     }
-    case "googleDrive": {
-      const params = node.config.parameters as Record<string, unknown> | undefined;
-      return {
-        ...asObject(input),
-        _action: "googleDrive",
-        _config: { resource: params?.resource, operation: params?.operation, name: params?.name },
-      };
+    case "googleDrive":
+    case "google_drive": {
+      const handler = new GoogleDriveNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>),
+        input,
+      });
     }
     case "evaluationTrigger":
       return executeEvaluationTrigger(node.config, input);
@@ -520,12 +527,27 @@ async function executeNode(node: WorkflowNode, input: unknown, orgId: string): P
       };
     }
     case "gmail": {
-      const params = node.config.parameters as Record<string, unknown> | undefined;
-      return {
-        ...asObject(input),
-        _action: "gmail",
-        _config: { operation: params?.operation },
-      };
+      const handler = new GoogleGmailNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>),
+        input,
+      });
+    }
+    case "googleSheets":
+    case "google_sheets": {
+      const handler = new GoogleSheetsNodeHandler();
+      return handler.execute({
+        executionId: "",
+        nodeId: node.id,
+        workflowId: "",
+        orgId,
+        nodeConfig: (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>),
+        input,
+      });
     }
     case "switch": {
       const handler = new SwitchNodeHandler();
@@ -739,6 +761,8 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
       "cronTrigger",
       "cron_trigger",
       "manual",
+      "http",
+      "httpRequest",
       "chatTrigger",
       "chat_trigger",
       "formTrigger",
@@ -1125,31 +1149,57 @@ export async function runExecution(
 
     // Trigger errorWorkflow if configured in settings or version snapshot
     try {
-      const version = Array.isArray(workflow.versions) ? workflow.versions[0] : undefined;
-      const snapshot = asObject(parseJson(version?.snapshot, {}));
-      const rawSettings = (workflow as any).settings ?? snapshot.settings;
-      const settings = asObject(parseJson(rawSettings, {}));
-      const errorWorkflowId = (settings.errorWorkflowId ?? settings.errorWorkflow ?? (workflow as any).errorWorkflowId ?? (workflow as any).errorWorkflow) as string | undefined;
+      // Recursion guard: never trigger error workflow if this execution was already triggered as an error handler
+      if (execution.trigger !== "error") {
+        const version = Array.isArray(workflow.versions) ? workflow.versions[0] : undefined;
+        const snapshot = asObject(parseJson(version?.snapshot, {}));
+        const rawSettings = (workflow as any).settings ?? snapshot.settings;
+        const settings = asObject(parseJson(rawSettings, {}));
+        const errorWorkflowId = (settings.errorWorkflowId ?? settings.errorWorkflow ?? (workflow as any).errorWorkflowId ?? (workflow as any).errorWorkflow) as string | undefined;
 
-      if (errorWorkflowId && typeof errorWorkflowId === "string" && errorWorkflowId !== workflow.id) {
-        const errWf = await prisma.workflow.findFirst({
-          where: { id: errorWorkflowId, ...(workflow.orgId ? { orgId: workflow.orgId } : {}) },
-        });
-        if (errWf) {
-          const errExecution = await createWorkflowExecution(errWf.id, {
-            error: {
-              message: errorMessage(error),
+        if (errorWorkflowId && typeof errorWorkflowId === "string" && errorWorkflowId !== workflow.id) {
+          const errWf = await prisma.workflow.findFirst({
+            where: { id: errorWorkflowId, ...(workflow.orgId ? { orgId: workflow.orgId } : {}) },
+          });
+          if (errWf) {
+            const failedNodeExec = await prisma.nodeExecution.findFirst({
+              where: { executionId, status: "FAILED" },
+              orderBy: { startedAt: "desc" },
+            });
+            const failedNode = failedNodeExec ? workflow.nodes.find((n: any) => n.id === failedNodeExec.nodeId) : undefined;
+
+            const errPayload = {
+              errorMessage: errorMessage(error),
+              errorCode: "WORKFLOW_EXECUTION_FAILED",
+              failedNodeId: failedNodeExec?.nodeId ?? "unknown_node",
+              failedNodeType: failedNode?.type ?? "unknown_type",
               workflowId: workflow.id,
               workflowName: workflow.name,
               executionId,
-            },
-            execution: failedExecution,
-          }, { userId: execution.userId, trigger: "error" });
+              inputData: failedNodeExec?.input ?? execution.input,
+              stack: error instanceof Error ? error.stack : undefined,
+              timestamp: new Date().toISOString(),
+              error: {
+                message: errorMessage(error),
+                workflowId: workflow.id,
+                workflowName: workflow.name,
+                executionId,
+                failedNodeId: failedNodeExec?.nodeId,
+                failedNodeType: failedNode?.type,
+                stack: error instanceof Error ? error.stack : undefined,
+                inputData: failedNodeExec?.input ?? execution.input,
+                timestamp: new Date().toISOString(),
+              },
+              execution: failedExecution,
+            };
 
-          const { enqueueExecution } = await import("./queue.js");
-          const enqueued = await enqueueExecution(errExecution.id);
-          if (!enqueued) {
-            void runExecution(errExecution.id).catch((e) => console.error("[errorWorkflow] Async run error:", e));
+            const errExecution = await createWorkflowExecution(errWf.id, errPayload, { userId: execution.userId, trigger: "error" });
+
+            const { enqueueExecution } = await import("./queue.js");
+            const enqueued = await enqueueExecution(errExecution.id);
+            if (!enqueued) {
+              void runExecution(errExecution.id).catch((e) => console.error("[errorWorkflow] Async run error:", e));
+            }
           }
         }
       }

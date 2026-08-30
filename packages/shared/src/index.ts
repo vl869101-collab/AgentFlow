@@ -155,6 +155,7 @@ const workflowNodeTypeValues = [
   "googleDocs",
   "evaluationTrigger",
   "emailReadImap",
+  "errorTrigger",
 ] as const;
 
 export const workflowNodeTypeSchema = z.enum(workflowNodeTypeValues);
@@ -457,6 +458,7 @@ export const NODE_TYPES = [
   { type: "whatsappTrigger", label: "WhatsApp Trigger", icon: "Zap", color: "#25d366" },
   { type: "googleCalendar", label: "Google Calendar", icon: "Calendar", color: "#4285f4" },
   { type: "googleDocs", label: "Google Docs", icon: "FileText", color: "#4285f4" },
+  { type: "errorTrigger", label: "Error Trigger", icon: "AlertTriangle", color: "#ef4444" },
 ] as const;
 
 // ═══════════════════════════════════════════

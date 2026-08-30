@@ -27,7 +27,7 @@ function asObject(value: unknown): CanvasValue {
 }
 
 function canvasKind(type: string): string {
-  if (["webhook", "cron", "gmailTrigger", "evaluationTrigger", "emailReadImap"].includes(type)) return "trigger";
+  if (["webhook", "cron", "gmailTrigger", "evaluationTrigger", "emailReadImap", "errorTrigger"].includes(type)) return "trigger";
   if (["http", "email", "discord", "telegram", "sheets", "googleDrive", "gmail"].includes(type)) return "action";
   if (["condition", "transform", "delay", "code"].includes(type)) return "logic";
   return "advanced";
