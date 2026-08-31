@@ -62,6 +62,10 @@ const workflowNodeTypeValues = [
     "gmailTrigger",
     "ai",
     "ai_agent",
+    "llm_model",
+    "llm_chain",
+    "vector_store",
+    "execute_workflow",
     "condition",
     "transform",
     "delay",
@@ -87,7 +91,7 @@ export const nodeConfigSchema = z.object({
     id: z.string().min(1).max(200).optional(),
     type: workflowNodeTypeSchema,
     label: z.string().optional(),
-    config: z.record(z.unknown()).default({}),
+    config: z.record(z.unknown()).optional(),
     data: z.record(z.unknown()).optional(),
     position: z.object({ x: z.number(), y: z.number() }).default({ x: 0, y: 0 }),
     width: z.number().optional(),
@@ -230,6 +234,36 @@ export const generatedWorkflowSchema = z.object({
     });
 });
 // ═══════════════════════════════════════════
+// Template Schemas
+// ═══════════════════════════════════════════
+export const workflowTemplateSchema = z.object({
+    id: z.string().min(1).max(100),
+    name: z.string().min(1).max(200),
+    description: z.string().min(1).max(2000),
+    category: z.string().min(1).max(100),
+    tags: z.array(z.string()),
+    icon: z.string().optional(),
+    color: z.string().optional(),
+    connectors: z.array(z.string()),
+    difficulty: z.enum(["Iniciante", "Intermediário", "Avançado"]).default("Intermediário"),
+    estimatedSetupMinutes: z.number().int().positive().default(5),
+    featured: z.boolean().optional(),
+    workflow: z.object({
+        name: z.string().min(1).max(200),
+        description: z.string().max(2000).optional().default(""),
+        nodes: z.array(nodeConfigSchema),
+        edges: z.array(edgeConfigSchema),
+    }),
+});
+export const cloneTemplateSchema = z.object({
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).optional(),
+});
+export const importTemplateSchema = z.object({
+    template: z.union([workflowTemplateSchema, z.record(z.unknown())]),
+    name: z.string().min(1).max(200).optional(),
+});
+// ═══════════════════════════════════════════
 // Execution Schemas
 // ═══════════════════════════════════════════
 export const executeWorkflowSchema = z.object({
@@ -251,6 +285,11 @@ export const credentialBucketSchema = z.enum([
     "oauth2",
     "basic",
     "token",
+    "digest_auth",
+    "custom_headers",
+    "aws_iam",
+    "certificate_auth",
+    "database_connection",
 ]);
 export const createCredentialSchema = z.object({
     name: z.string().min(1).max(100),
@@ -311,6 +350,10 @@ export const NODE_TYPES = [
     { type: "delay", label: "Delay", icon: "Timer", color: "#64748b" },
     { type: "code", label: "Code Sandbox", icon: "Code", color: "#0ea5e9" },
     { type: "ai_agent", label: "AI Agent", icon: "Brain", color: "#a855f7" },
+    { type: "llm_model", label: "LLM Model", icon: "Cpu", color: "#a855f7" },
+    { type: "llm_chain", label: "LLM Chain", icon: "Boxes", color: "#8b5cf6" },
+    { type: "vector_store", label: "Vector Store", icon: "Layers", color: "#06b6d4" },
+    { type: "execute_workflow", label: "Execute Workflow", icon: "Workflow", color: "#10b981" },
     { type: "approval", label: "Approval", icon: "CheckCircle", color: "#ef4444" },
     { type: "merge", label: "Merge", icon: "Merge", color: "#06b6d4" },
     { type: "filter", label: "Filter", icon: "Filter", color: "#f97316" },

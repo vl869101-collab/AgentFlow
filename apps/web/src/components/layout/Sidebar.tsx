@@ -36,7 +36,7 @@ const workspaceNav: { label: string; href: string; icon: typeof KeyRound; badge?
 
 const footerNav = [
   { label: "Admin Panel", href: "/settings", icon: Settings },
-  { label: "Templates", href: "/workflows", icon: LayoutGrid },
+  { label: "Templates", href: "/templates", icon: LayoutGrid },
   { label: "Insights", href: "/executions", icon: BarChart3 },
   { label: "Help", href: "/", icon: HelpCircle },
 ];

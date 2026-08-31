@@ -80,8 +80,8 @@ export function N8nImportModal({ open, onClose, onImported }: Props) {
 
       // Update with nodes and edges
       const updated = await workflows.update(created.id, {
-        nodes: preview.converted.nodes,
-        edges: preview.converted.edges,
+        nodes: preview.converted.nodes as any,
+        edges: preview.converted.edges as any,
       });
 
       onImported(updated || created);

@@ -103,65 +103,24 @@ async function executeRefreshToken(): Promise<string> {
   });
 
   if (!res.ok) {
-    const errorMsg = await parseErrorMessage(res);
-    throw new ApiError(res.status, errorMsg || "Failed to refresh token");
+    clearToken();
+    throw new ApiError(401, "Session expired, please log in again");
   }
 
   const data = (await res.json()) as { token: string; refreshToken?: string };
-  if (!data || !data.token) {
-    throw new ApiError(500, "Invalid token refresh response");
-  }
-
   setToken(data.token, data.refreshToken);
   return data.token;
 }
 
-/**
- * Concurrency-safe global token refresh interceptor.
- * If multiple requests receive 401 concurrently, exactly one refresh request
- * is dispatched and all waiting requests wait for and reuse the same fresh token.
- */
-export async function refreshAuthToken(): Promise<string> {
-  if (activeRefreshPromise) {
-    return activeRefreshPromise;
-  }
-
-  activeRefreshPromise = (async () => {
-    try {
-      return await executeRefreshToken();
-    } catch (err) {
-      clearToken();
-      if (typeof window !== "undefined" && window.location && window.location.pathname !== "/login") {
-        window.location.href = "/login";
-      }
-      throw err instanceof ApiError ? err : new ApiError(401, "Session expired");
-    } finally {
-      activeRefreshPromise = null;
-    }
-  })();
-
-  return activeRefreshPromise;
-}
-
-async function requestWithRefresh<T>(path: string, options: ApiOptions = {}, attempt = 0): Promise<T> {
-  const {
-    method = "GET",
-    body,
-    headers: customHeaders = {},
-    skipAuth = false,
-    skipRefresh = false,
-  } = options;
-
+export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const { method = "GET", body, headers: customHeaders = {}, skipAuth = false, skipRefresh = false } = options;
+  const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...customHeaders,
   };
-
-  if (!skipAuth) {
-    const token = getToken();
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
+  if (!skipAuth && token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -170,52 +129,57 @@ async function requestWithRefresh<T>(path: string, options: ApiOptions = {}, att
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  if (res.status === 401 && !skipRefresh && attempt === 0) {
+  // If 401 and we have a token, attempt refresh and retry once
+  if (res.status === 401 && !skipAuth && !skipRefresh && token) {
     try {
-      const newToken = await refreshAuthToken();
-      headers.Authorization = `Bearer ${newToken}`;
-
+      if (!activeRefreshPromise) {
+        activeRefreshPromise = executeRefreshToken().finally(() => {
+          activeRefreshPromise = null;
+        });
+      }
+      const newToken = await activeRefreshPromise;
+      const retryHeaders: Record<string, string> = {
+        ...headers,
+        Authorization: `Bearer ${newToken}`,
+      };
       const retryRes = await fetch(`${API_BASE}${path}`, {
         method,
-        headers,
+        headers: retryHeaders,
         body: body ? JSON.stringify(body) : undefined,
       });
-
       if (retryRes.status === 204) return undefined as T;
-      if (!retryRes.ok) {
-        throw new ApiError(retryRes.status, await parseErrorMessage(retryRes));
-      }
+      if (!retryRes.ok) throw new ApiError(retryRes.status, await parseErrorMessage(retryRes));
       return (await retryRes.json()) as T;
     } catch (refreshErr) {
-      if (refreshErr instanceof ApiError) {
-        throw refreshErr;
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.href = "/login";
       }
-      throw new ApiError(401, "Session expired");
+      throw refreshErr;
     }
   }
 
   if (res.status === 204) return undefined as T;
-  if (!res.ok) {
-    throw new ApiError(res.status, await parseErrorMessage(res));
-  }
-
+  if (!res.ok) throw new ApiError(res.status, await parseErrorMessage(res));
   return (await res.json()) as T;
 }
 
-export async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise<T> {
-  return requestWithRefresh<T>(path, options);
-}
-
-// Auth
+// Auth methods
 export const auth = {
   login: (email: string, password: string) =>
-    rawRequest<{ token: string; refreshToken: string }>("/api/auth/login", { method: "POST", body: { email, password } }),
-  register: (email: string, password: string, name: string) =>
-    rawRequest<{ message: string }>("/api/auth/register", { method: "POST", body: { email, password, name } }),
-  logout: (refreshToken: string) =>
-    rawRequest<void>("/api/auth/logout", { method: "POST", body: { refreshToken } }),
+    rawRequest<{ token: string; refreshToken?: string; user: { id: string; email: string; name?: string } }>(
+      "/api/auth/login",
+      { method: "POST", body: { email, password } }
+    ),
+  register: (email: string, password: string, name?: string) =>
+    rawRequest<{ message: string; token?: string; refreshToken?: string; user?: { id: string; email: string; name?: string } }>(
+      "/api/auth/register",
+      { method: "POST", body: { email, password, name } }
+    ),
   exchangeOAuthCode: (code: string) =>
-    rawRequest<{ token: string; refreshToken: string }>("/api/auth/oauth/exchange", { method: "POST", body: { code } }),
+    rawRequest<{ token: string; refreshToken?: string }>("/api/auth/oauth/exchange", {
+      method: "POST",
+      body: { code },
+    }),
 };
 
 // Workflows
@@ -223,27 +187,43 @@ export interface Workflow {
   id: string;
   name: string;
   description: string;
-  status: string;
-  ownerId: string;
-  orgId: string;
+  status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED";
   createdAt: string;
   updatedAt: string;
-  nodes?: unknown;
-  edges?: unknown;
-}
-
-export interface WorkflowVersionSnapshot {
-  nodes?: Array<Record<string, unknown>>;
-  edges?: Array<Record<string, unknown>>;
-  [key: string]: unknown;
+  nodes?: Array<{
+    id: string;
+    type: string;
+    label?: string;
+    config?: Record<string, unknown>;
+    data?: Record<string, unknown>;
+    position?: { x: number; y: number };
+    width?: number;
+    height?: number;
+  }>;
+  edges?: Array<{
+    id: string;
+    source: string;
+    target: string;
+    sourceNodeId?: string;
+    targetNodeId?: string;
+    sourceHandle?: string;
+    targetHandle?: string;
+    label?: string;
+    condition?: unknown;
+  }>;
 }
 
 export interface WorkflowVersion {
   id: string;
-  workflowId?: string;
+  workflowId: string;
   version: number;
   createdAt: string;
-  snapshot: WorkflowVersionSnapshot;
+  nodesCount?: number;
+  edgesCount?: number;
+  snapshot?: {
+    nodes?: unknown[];
+    edges?: unknown[];
+  };
 }
 
 export interface WorkflowFieldDiff {
@@ -389,12 +369,30 @@ export interface Credential {
   updatedAt: string;
 }
 
+export interface CredentialTestResult {
+  success: boolean;
+  latencyMs: number;
+  message: string;
+  accountDetails?: {
+    name?: string;
+    email?: string;
+    id?: string;
+    username?: string;
+    organization?: string;
+  };
+  error?: string;
+}
+
 export const credentials = {
   list: () => api<Credential[]>("/api/credentials"),
   create: (data: { name: string; provider: string; value: string; type: string }) =>
     api<Credential>("/api/credentials", { method: "POST", body: { name: data.name, provider: data.provider, type: data.type, data: { value: data.value } } }),
   delete: (id: string) =>
     api<void>(`/api/credentials/${id}`, { method: "DELETE" }),
+  test: (data: { provider?: string; type?: string; data: Record<string, any> | string }) =>
+    api<CredentialTestResult>("/api/credentials/test", { method: "POST", body: data }),
+  testById: (id: string) =>
+    api<CredentialTestResult>(`/api/credentials/${id}/test`, { method: "POST" }),
 };
 
 // AI
@@ -418,4 +416,79 @@ export const billing = {
   getSubscription: () => api<Subscription>("/api/billing/subscription"),
   createCheckout: (priceId: string) =>
     api<{ url: string }>("/api/billing/checkout", { method: "POST", body: { priceId } }),
+};
+
+// Templates & Marketplace
+export interface WorkflowTemplateDto {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  icon?: string;
+  color?: string;
+  connectors: string[];
+  difficulty: "Iniciante" | "Intermediário" | "Avançado";
+  estimatedSetupMinutes: number;
+  featured?: boolean;
+  workflow: {
+    name: string;
+    description?: string;
+    nodes: Array<{
+      id?: string;
+      type: string;
+      label?: string;
+      config?: Record<string, unknown>;
+      data?: Record<string, unknown>;
+      position?: { x: number; y: number };
+      width?: number;
+      height?: number;
+    }>;
+    edges: Array<{
+      id?: string;
+      source?: string;
+      target?: string;
+      sourceNodeId?: string;
+      targetNodeId?: string;
+      sourceHandle?: string;
+      targetHandle?: string;
+      label?: string;
+      condition?: unknown;
+    }>;
+  };
+}
+
+export interface TemplateFilterParams {
+  category?: string;
+  search?: string;
+  tag?: string;
+}
+
+export interface TemplatesListResponse {
+  total: number;
+  categories: string[];
+  templates: WorkflowTemplateDto[];
+}
+
+export const templatesApi = {
+  list: (params?: TemplateFilterParams) => {
+    const searchParams = new URLSearchParams();
+    if (params?.category && params.category !== "Todas") searchParams.set("category", params.category);
+    if (params?.search) searchParams.set("search", params.search);
+    if (params?.tag) searchParams.set("tag", params.tag);
+    const qs = searchParams.toString();
+    return api<WorkflowTemplateDto[]>(`/api/templates${qs ? `?${qs}` : ""}`);
+  },
+  get: (id: string) => api<WorkflowTemplateDto>(`/api/templates/${id}`),
+  exportUrl: (id: string) => `${API_BASE}/api/templates/${id}/export`,
+  clone: (id: string, custom?: { name?: string; description?: string }) =>
+    api<{ success: boolean; message: string; workflow: Workflow }>(`/api/templates/${id}/clone`, {
+      method: "POST",
+      body: custom ?? {},
+    }),
+  import: (data: { template: unknown; name?: string }) =>
+    api<{ success: boolean; message: string; workflow: Workflow }>("/api/templates/import", {
+      method: "POST",
+      body: data,
+    }),
 };

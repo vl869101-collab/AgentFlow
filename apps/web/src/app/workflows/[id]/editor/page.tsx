@@ -90,7 +90,7 @@ export default function WorkflowEditorPage() {
   async function saveWorkflow() {
     setSaving(true);
     try {
-      await workflows.update(workflowId, { name, description, nodes: nodes as unknown, edges: edges as unknown });
+      await workflows.update(workflowId, { name, description, nodes: nodes as any, edges: edges as any });
       setSaved(true);
       setToast("Workflow saved");
       window.setTimeout(() => setToast(""), 2200);
