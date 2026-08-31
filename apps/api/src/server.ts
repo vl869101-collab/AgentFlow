@@ -31,6 +31,7 @@ import { chatRoutes } from "./routes/chat.js";
 import { dlqRoutes } from "./routes/dlq.js";
 import { mcpRoutes } from "./routes/mcp.js";
 import { templateRoutes } from "./routes/templates.js";
+import { twelveLabsRoutes } from "./routes/twelvelabs.js";
 import { docsRoutes } from "./docs/openapi.js";
 
 function parseTrustProxy(value: string | boolean | number): number | boolean | string[] {
@@ -374,6 +375,7 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
   await app.register(dlqRoutes, { prefix: "/api/admin/dlq" });
   await app.register(auditRoutes, { prefix: "/api/audit" });
   await app.register(templateRoutes, { prefix: "/api/templates" });
+  await app.register(twelveLabsRoutes, { prefix: "/api/twelvelabs" });
   await app.register(docsRoutes);
 
   return app;

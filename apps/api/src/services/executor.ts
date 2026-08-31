@@ -5,6 +5,8 @@ import { telemetry } from "../lib/otel.js";
 import { httpCircuitBreaker } from "../lib/circuit-breaker.js";
 import { applyHttpAuthentication, type HttpAuthConfig } from "../lib/http-auth.js";
 import { ensureFreshOAuth2Token } from "./vault/oauth-refresh.js";
+import { resolveUniversalCredentials, resolveSingleCredential } from "./vault/universal-resolver.js";
+import { UniversalConnectionInjector } from "./vault/universal-injector.js";
 import { recordUsageEvent } from "./metering.js";
 import { recordAuditEvent } from "./audit-ledger.js";
 
@@ -31,6 +33,7 @@ import { LlmModelNodeHandler } from "./nodes/llm-model.js";
 import { LlmChainNodeHandler } from "./nodes/llm-chain.js";
 import { VectorStoreNodeHandler } from "./nodes/vector-store.js";
 import { ExecuteWorkflowNodeHandler } from "./nodes/execute-workflow.js";
+import { TwelveLabsNodeHandler } from "./nodes/twelvelabs.js";
 import {
   wrapItems,
   unwrapItems,
@@ -375,6 +378,23 @@ async function executeHttp(config: JsonObject, input: unknown, orgId: string): P
     headers = prepared.headers;
   }
 
+  // Universal Connection Injector for declared credentials
+  if (config.credentialId || config.credentials) {
+    try {
+      const credRes = await resolveUniversalCredentials(config, orgId);
+      if (credRes.primary) {
+        const injected = UniversalConnectionInjector.injectHttp(
+          { url: url.toString(), method, headers },
+          credRes.primary
+        );
+        url = new URL(injected.url);
+        headers = injected.headers || headers;
+      }
+    } catch {
+      // Keep existing headers if universal resolution doesn't match
+    }
+  }
+
   const configuredBody = config.body;
   const bodyValue = configuredBody === undefined && method !== "GET" && method !== "HEAD" ? input : configuredBody;
   const body = bodyValue === undefined ? undefined : typeof bodyValue === "string" ? bodyValue : JSON.stringify(bodyValue);
@@ -429,6 +449,33 @@ async function executeNode(
   executionId?: string,
   workflowId?: string
 ): Promise<unknown> {
+  const nodeConfig = (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>);
+  let resolvedCreds: Record<string, any> | undefined;
+  try {
+    const credResolution = await resolveUniversalCredentials(node.config, orgId);
+    resolvedCreds = {
+      ...credResolution.byType,
+      ...credResolution.byProvider,
+      default: credResolution.primary,
+      _token: credResolution.token,
+      _apiKey: credResolution.apiKey,
+      _accessToken: credResolution.accessToken,
+    };
+  } catch (err) {
+    // Non-blocking credential resolution failure fallback
+    resolvedCreds = undefined;
+  }
+
+  const baseContext = {
+    executionId: executionId || "",
+    nodeId: node.id,
+    workflowId: workflowId || "",
+    orgId,
+    nodeConfig,
+    input,
+    credentials: resolvedCreds,
+  };
+
   switch (node.type) {
     case "trigger":
     case "webhook":
@@ -445,14 +492,7 @@ async function executeNode(
       return executeHttp(node.config, input, orgId);
     case "code": {
       const handler = new CodeNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "transform":
       if (getEnv().EXEC_CODE_DISABLED) throw new CodeExecutionDisabledError();
@@ -471,14 +511,7 @@ async function executeNode(
     }
     case "merge": {
       const handler = new MergeNodeHandler();
-      const res = await handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      const res = await handler.execute(baseContext);
       return res.items;
     }
     case "filter": {
@@ -517,14 +550,7 @@ async function executeNode(
     case "googleDrive":
     case "google_drive": {
       const handler = new GoogleDriveNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>),
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "evaluationTrigger":
       return executeEvaluationTrigger(node.config, input);
@@ -539,168 +565,70 @@ async function executeNode(
     }
     case "gmail": {
       const handler = new GoogleGmailNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>),
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "googleSheets":
     case "google_sheets": {
       const handler = new GoogleSheetsNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>),
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "switch": {
       const handler = new SwitchNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "splitInBatches":
     case "split_in_batches": {
       const handler = new SplitInBatchesNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "chatTrigger":
     case "chat_trigger": {
       const handler = new ChatTriggerNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "mcpClient":
     case "mcp_client": {
       const handler = new McpClientNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "teams": {
       const handler = new TeamsNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "whatsapp":
     case "whatsappTrigger": {
       const handler = new WhatsAppNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "googleCalendar":
     case "google_calendar": {
       const handler = new GoogleCalendarNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "googleDocs":
     case "google_docs": {
       const handler = new GoogleDocsNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "errorTrigger":
     case "error_trigger": {
       const handler = new ErrorTriggerNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "wait": {
       const handler = new WaitNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "form":
     case "formTrigger":
     case "form_trigger": {
       const handler = new FormNodeHandler();
-      return handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      return handler.execute(baseContext);
     }
     case "aiAgent":
     case "ai_agent": {
       const handler = new AiAgentNodeHandler();
-      const res = await handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      const res = await handler.execute(baseContext);
       return res.items;
     }
     case "llmModel":
@@ -709,28 +637,14 @@ async function executeNode(
     case "lmChatAnthropic":
     case "lmChatGoogleGemini": {
       const handler = new LlmModelNodeHandler();
-      const res = await handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      const res = await handler.execute(baseContext);
       return res.items;
     }
     case "llmChain":
     case "llm_chain":
     case "basicLlmChain": {
       const handler = new LlmChainNodeHandler();
-      const res = await handler.execute({
-        executionId: "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      const res = await handler.execute(baseContext);
       return res.items;
     }
     case "vectorStore":
@@ -739,14 +653,7 @@ async function executeNode(
     case "vectorStorePinecone":
     case "vectorStorePgvector": {
       const handler = new VectorStoreNodeHandler();
-      const res = await handler.execute({
-        executionId: executionId || "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: node.config as Record<string, unknown>,
-        input,
-      });
+      const res = await handler.execute(baseContext);
       return res.items;
     }
     case "executeWorkflow":
@@ -755,14 +662,15 @@ async function executeNode(
     case "subworkflow":
     case "sub_workflow": {
       const handler = new ExecuteWorkflowNodeHandler();
-      const res = await handler.execute({
-        executionId: executionId || "",
-        nodeId: node.id,
-        workflowId: "",
-        orgId,
-        nodeConfig: (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>),
-        input,
-      });
+      const res = await handler.execute(baseContext);
+      return res.items;
+    }
+    case "twelveLabs":
+    case "twelve_labs":
+    case "twelvelabs":
+    case "twelveLabsVideoAnalysis": {
+      const handler = new TwelveLabsNodeHandler();
+      const res = await handler.execute(baseContext);
       return res.items;
     }
     default:
