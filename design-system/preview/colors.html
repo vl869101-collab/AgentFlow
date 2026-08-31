@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow Design System — Color Palette Preview</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --fg: #fafafa;
+      --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "Geist Mono", "JetBrains Mono", monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      padding: 2.5rem;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    p.lead { color: #a1a1aa; font-size: 0.875rem; margin-bottom: 2rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2.5rem;
+    }
+    .swatch {
+      background: #18181b;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .swatch-color {
+      height: 90px;
+      width: 100%;
+      display: flex;
+      align-items: flex-end;
+      padding: 0.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .swatch-info {
+      padding: 0.75rem;
+    }
+    .swatch-name { font-size: 0.875rem; font-weight: 600; color: #fafafa; }
+    .swatch-role { font-size: 0.75rem; color: #71717a; margin-top: 0.25rem; }
+    .swatch-hex { font-family: var(--font-mono); font-size: 0.75rem; color: #a1a1aa; margin-top: 0.25rem; }
+    .section-title { font-size: 1.125rem; color: #f4f4f5; margin-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Color Palette & Semantic Tokens</h1>
+  <p class="lead">AgentFlow Open Design v2 Canonical Color Architecture</p>
+
+  <h2 class="section-title">Identity & Brand Accents</h2>
+  <div class="grid">
+    <div class="swatch">
+      <div class="swatch-color" style="background: #09090b; color: #fafafa; border-bottom: 1px solid rgba(255,255,255,0.1);">#09090b</div>
+      <div class="swatch-info">
+        <div class="swatch-name">Background (Canvas 950)</div>
+        <div class="swatch-role">Base Viewport & Canvas</div>
+        <div class="swatch-hex">--color-background</div>
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #8b5cf6; color: #ffffff;">#8b5cf6</div>
+      <div class="swatch-info">
+        <div class="swatch-name">Electric Violet 500</div>
+        <div class="swatch-role">Primary Action / Focus Accent</div>
+        <div class="swatch-hex">--color-accent</div>
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #7c3aed; color: #ffffff;">#7c3aed</div>
+      <div class="swatch-info">
+        <div class="swatch-name">Violet Hover 600</div>
+        <div class="swatch-role">Interactive Hover State</div>
+        <div class="swatch-hex">--color-accent-hover</div>
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: linear-gradient(to right, #6366f1, #8b5cf6, #d946ef); color: #ffffff;">Gradient</div>
+      <div class="swatch-info">
+        <div class="swatch-name">Brand Linear Gradient</div>
+        <div class="swatch-role">Primary CTA & Hero Edges</div>
+        <div class="swatch-hex">--gradient-brand</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Structural Dark Zinc Neutrals</h2>
+  <div class="grid">
+    <div class="swatch">
+      <div class="swatch-color" style="background: #18181b; color: #fafafa;">#18181b</div>
+      <div class="swatch-info"><div class="swatch-name">Zinc 900</div><div class="swatch-role">Surface Cards / Node Body</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #202024; color: #fafafa;">#202024</div>
+      <div class="swatch-info"><div class="swatch-name">Zinc 850</div><div class="swatch-role">Elevated Popovers & Modals</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #27272a; color: #fafafa;">#27272a</div>
+      <div class="swatch-info"><div class="swatch-name">Zinc 800</div><div class="swatch-role">Secondary Buttons / Inputs</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #71717a; color: #09090b;">#71717a</div>
+      <div class="swatch-info"><div class="swatch-name">Zinc 500</div><div class="swatch-role">Muted Text / Placeholders</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #a1a1aa; color: #09090b;">#a1a1aa</div>
+      <div class="swatch-info"><div class="swatch-name">Zinc 400</div><div class="swatch-role">Secondary Body Copy</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #fafafa; color: #09090b;">#fafafa</div>
+      <div class="swatch-info"><div class="swatch-name">Zinc 50</div><div class="swatch-role">Primary High-Contrast Text</div></div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Functional Semantic Statuses</h2>
+  <div class="grid">
+    <div class="swatch">
+      <div class="swatch-color" style="background: #10b981; color: #09090b;">#10b981</div>
+      <div class="swatch-info"><div class="swatch-name">Success (Emerald)</div><div class="swatch-role">Workflow Succeeded</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #f59e0b; color: #09090b;">#f59e0b</div>
+      <div class="swatch-info"><div class="swatch-name">Warning (Amber)</div><div class="swatch-role">Running / Condition Branch</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #ef4444; color: #ffffff;">#ef4444</div>
+      <div class="swatch-info"><div class="swatch-name">Error (Red)</div><div class="swatch-role">Execution Failure / Alert</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #3b82f6; color: #ffffff;">#3b82f6</div>
+      <div class="swatch-info"><div class="swatch-name">Info (Blue)</div><div class="swatch-role">Queued / Notification</div></div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #a855f7; color: #ffffff;">#a855f7</div>
+      <div class="swatch-info"><div class="swatch-name">AI Agent (Purple)</div><div class="swatch-role">Autonomous Intelligence Node</div></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow Design System — Typography Preview</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --fg: #fafafa;
+      --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "Geist Mono", "JetBrains Mono", monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      padding: 2.5rem;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    p.lead { color: #a1a1aa; font-size: 0.875rem; margin-bottom: 2rem; }
+    .table-container {
+      background: #18181b;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 2rem;
+    }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th, td { padding: 1rem 1.25rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+    th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #a1a1aa; background: #202024; }
+    .type-sample { color: #fafafa; }
+    .meta { font-family: var(--font-mono); font-size: 0.75rem; color: #71717a; }
+  </style>
+</head>
+<body>
+  <h1>Typography & Type Scale</h1>
+  <p class="lead">Modular Hierarchy: Geist Sans (Interface) & Geist / JetBrains Mono (Telemetry & Code)</p>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Token</th>
+          <th>Size / Line-Height / Tracking</th>
+          <th>Sample Preview</th>
+          <th>Target Usage</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="meta">text-4xl</td>
+          <td class="meta">36px (2.25rem) / 40px / -0.03em</td>
+          <td class="type-sample" style="font-size: 2.25rem; line-height: 2.5rem; font-weight: 700; letter-spacing: -0.03em;">Orquestre Agentes de IA</td>
+          <td class="meta">Hero Headlines</td>
+        </tr>
+        <tr>
+          <td class="meta">text-2xl</td>
+          <td class="meta">24px (1.5rem) / 32px / -0.03em</td>
+          <td class="type-sample" style="font-size: 1.5rem; line-height: 2rem; font-weight: 700; letter-spacing: -0.03em;">Marketplace de Templates</td>
+          <td class="meta">Page Headers</td>
+        </tr>
+        <tr>
+          <td class="meta">text-xl</td>
+          <td class="meta">20px (1.25rem) / 28px / -0.02em</td>
+          <td class="type-sample" style="font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; letter-spacing: -0.02em;">Configuração do Grafo DAG</td>
+          <td class="meta">Panel Titles</td>
+        </tr>
+        <tr>
+          <td class="meta">text-lg</td>
+          <td class="meta">18px (1.125rem) / 28px / -0.02em</td>
+          <td class="type-sample" style="font-size: 1.125rem; line-height: 1.75rem; font-weight: 600; letter-spacing: -0.02em;">Autenticação OAuth 2.0</td>
+          <td class="meta">Card Titles / Modals</td>
+        </tr>
+        <tr>
+          <td class="meta">text-base</td>
+          <td class="meta">16px (1.0rem) / 24px / -0.01em</td>
+          <td class="type-sample" style="font-size: 1.0rem; line-height: 1.5rem; font-weight: 400;">Pipeline de processamento com inferência distribuída em tempo real.</td>
+          <td class="meta">Standard Body Copy</td>
+        </tr>
+        <tr>
+          <td class="meta">text-sm</td>
+          <td class="meta">14px (0.875rem) / 20px / 0</td>
+          <td class="type-sample" style="font-size: 0.875rem; line-height: 1.25rem; font-weight: 500;">Salvar Credencial no Vault</td>
+          <td class="meta">Buttons / Form Fields</td>
+        </tr>
+        <tr>
+          <td class="meta">text-xs</td>
+          <td class="meta">12px (0.75rem) / 16px / +0.02em</td>
+          <td class="type-sample" style="font-size: 0.75rem; line-height: 1rem; font-weight: 500; color: #a1a1aa; text-transform: uppercase;">NÓ DE GATILHO (WEBHOOK)</td>
+          <td class="meta">Field Labels / Hints</td>
+        </tr>
+        <tr>
+          <td class="meta">text-2xs</td>
+          <td class="meta">10px (0.625rem) / 14px / +0.05em</td>
+          <td class="type-sample" style="font-family: var(--font-mono); font-size: 0.625rem; line-height: 0.875rem; font-weight: 600; color: #34d399;">STATUS: 200 OK (14ms)</td>
+          <td class="meta">Diff Tags / Metrics</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow Design System — Components Fixture</title>
+  <style>
+    :root {
+      --color-background: #09090b;
+      --color-foreground: #fafafa;
+      --color-accent: #8b5cf6;
+      --color-accent-hover: #7c3aed;
+      --color-accent-glow: rgba(139, 92, 246, 0.35);
+
+      --zinc-950: #09090b;
+      --zinc-900: #18181b;
+      --zinc-850: #202024;
+      --zinc-800: #27272a;
+      --zinc-750: #2d2d32;
+      --zinc-700: #3f3f46;
+      --zinc-600: #52525b;
+      --zinc-500: #71717a;
+      --zinc-400: #a1a1aa;
+      --zinc-300: #d4d4d8;
+      --zinc-100: #f4f4f5;
+      --zinc-50: #fafafa;
+
+      --color-success: #10b981;
+      --color-success-bg: rgba(16, 185, 129, 0.10);
+      --color-success-border: rgba(16, 185, 129, 0.20);
+      --color-success-text: #34d399;
+
+      --color-warning: #f59e0b;
+      --color-warning-bg: rgba(245, 158, 11, 0.10);
+      --color-warning-border: rgba(245, 158, 11, 0.20);
+      --color-warning-text: #fbbf24;
+
+      --color-error: #ef4444;
+      --color-error-bg: rgba(239, 68, 68, 0.10);
+      --color-error-border: rgba(239, 68, 68, 0.20);
+      --color-error-text: #f87171;
+
+      --color-info: #3b82f6;
+      --color-info-bg: rgba(59, 130, 246, 0.10);
+      --color-info-border: rgba(59, 130, 246, 0.20);
+      --color-info-text: #60a5fa;
+
+      --color-ai: #a855f7;
+      --color-ai-bg: rgba(168, 85, 247, 0.10);
+      --color-ai-border: rgba(168, 85, 247, 0.20);
+      --color-ai-text: #c084fc;
+
+      --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "Geist Mono", "JetBrains Mono", monospace;
+
+      --radius-xs: 4px;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+      --radius-full: 9999px;
+
+      --duration-fast: 150ms;
+      --duration-normal: 200ms;
+      --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--color-background);
+      color: var(--color-foreground);
+      font-family: var(--font-sans);
+      padding: 2.5rem;
+      line-height: 1.5;
+    }
+
+    h1, h2, h3 { color: var(--zinc-50); font-weight: 600; }
+    h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+    p.subtitle { color: var(--zinc-400); margin-bottom: 2.5rem; font-size: 0.875rem; }
+
+    section {
+      background: var(--zinc-900);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: var(--radius-xl);
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+    }
+    section h2 { font-size: 1.125rem; margin-bottom: 1.25rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.75rem; }
+
+    .grid { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; }
+
+    /* Button System */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      font-weight: 500;
+      font-size: 0.875rem;
+      border-radius: var(--radius-md);
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all var(--duration-fast) var(--ease-spring);
+      text-decoration: none;
+      outline: none;
+    }
+    .btn:focus-visible {
+      box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-accent);
+    }
+    .btn-primary {
+      background: linear-gradient(to right, #6366f1, #8b5cf6, #d946ef);
+      color: #ffffff;
+      box-shadow: 0 4px 14px -2px rgba(139, 92, 246, 0.4);
+    }
+    .btn-primary:hover { opacity: 0.92; transform: translateY(-1px); }
+    .btn-primary:active { transform: scale(0.98); }
+
+    .btn-secondary {
+      background: var(--zinc-800);
+      color: var(--zinc-300);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+    .btn-secondary:hover { background: var(--zinc-750); color: var(--zinc-50); border-color: rgba(255, 255, 255, 0.22); }
+    .btn-secondary:active { transform: scale(0.98); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--zinc-400);
+    }
+    .btn-ghost:hover { background: rgba(255, 255, 255, 0.06); color: var(--zinc-50); }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.12);
+      color: var(--color-error-text);
+      border-color: var(--color-error-border);
+    }
+    .btn-danger:hover { background: rgba(239, 68, 68, 0.22); }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.25rem 0.625rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      border-radius: var(--radius-full);
+      border: 1px solid transparent;
+    }
+    .badge .dot {
+      width: 0.375rem;
+      height: 0.375rem;
+      border-radius: var(--radius-full);
+    }
+    .badge-success { background: var(--color-success-bg); color: var(--color-success-text); border-color: var(--color-success-border); }
+    .badge-success .dot { background: var(--color-success); }
+    .badge-warning { background: var(--color-warning-bg); color: var(--color-warning-text); border-color: var(--color-warning-border); }
+    .badge-warning .dot { background: var(--color-warning); }
+    .badge-error { background: var(--color-error-bg); color: var(--color-error-text); border-color: var(--color-error-border); }
+    .badge-error .dot { background: var(--color-error); }
+    .badge-info { background: var(--color-info-bg); color: var(--color-info-text); border-color: var(--color-info-border); }
+    .badge-info .dot { background: var(--color-info); }
+    .badge-ai { background: var(--color-ai-bg); color: var(--color-ai-text); border-color: var(--color-ai-border); }
+    .badge-ai .dot { background: var(--color-ai); }
+
+    /* Inputs */
+    .field { display: flex; flex-direction: column; gap: 0.375rem; width: 100%; max-width: 320px; }
+    .field label { font-size: 0.75rem; font-weight: 500; color: var(--zinc-400); text-transform: uppercase; letter-spacing: 0.05em; }
+    .input {
+      background: var(--zinc-950);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius-md);
+      padding: 0.5rem 0.75rem;
+      color: var(--zinc-50);
+      font-size: 0.875rem;
+      outline: none;
+      transition: all var(--duration-fast) var(--ease-spring);
+    }
+    .input:focus-visible { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-glow); }
+    .input-error { border-color: var(--color-error); }
+    .input-error:focus-visible { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.35); }
+    .field-hint { font-size: 0.75rem; color: var(--zinc-500); }
+    .field-error-msg { font-size: 0.75rem; color: var(--color-error-text); }
+
+    /* Cards */
+    .card {
+      background: rgba(24, 24, 27, 0.7);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem;
+      transition: all var(--duration-fast) var(--ease-spring);
+    }
+    .card:hover { border-color: rgba(255, 255, 255, 0.22); transform: translateY(-2px); }
+
+    /* Tabs */
+    .tablist { display: flex; border-bottom: 1px solid rgba(255, 255, 255, 0.10); gap: 0.5rem; margin-bottom: 1rem; }
+    .tab {
+      background: transparent;
+      border: none;
+      color: var(--zinc-400);
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all var(--duration-fast) var(--ease-spring);
+    }
+    .tab:hover { color: var(--zinc-200); }
+    .tab[aria-selected="true"] {
+      color: var(--zinc-50);
+      border-bottom-color: var(--color-accent);
+    }
+  </style>
+</head>
+<body>
+  <h1>AgentFlow Design System — Components Fixture</h1>
+  <p class="subtitle">Open Design v2 Standalone Master Component & State Verification Testbed</p>
+
+  <section>
+    <h2>1. Buttons (Variants & States)</h2>
+    <div class="grid">
+      <button class="btn btn-primary">Primary Action</button>
+      <button class="btn btn-secondary">Secondary Action</button>
+      <button class="btn btn-ghost">Ghost Action</button>
+      <button class="btn btn-danger">Destructive Action</button>
+      <button class="btn btn-primary" disabled>Disabled State</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Semantic Badges</h2>
+    <div class="grid">
+      <span class="badge badge-success"><span class="dot"></span>Succeeded</span>
+      <span class="badge badge-warning"><span class="dot"></span>Running</span>
+      <span class="badge badge-error"><span class="dot"></span>Failed</span>
+      <span class="badge badge-info"><span class="dot"></span>Queued</span>
+      <span class="badge badge-ai"><span class="dot"></span>AI Agent</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Input Controls (3 Form States)</h2>
+    <div class="grid">
+      <!-- Untouched -->
+      <div class="field">
+        <label for="f-webhook">Gatilho Webhook (Untouched)</label>
+        <input id="f-webhook" class="input" placeholder="https://api.agentflow.ai/webhook/..." />
+        <span class="field-hint">Recebe requisições HTTP POST instantâneas.</span>
+      </div>
+      <!-- Dirty-Valid -->
+      <div class="field">
+        <label for="f-secret">Token de Autenticação (Dirty-Valid)</label>
+        <input id="f-secret" class="input" value="ag_live_9941a80d4f" />
+        <span class="field-hint">Chave validada com segurança AES-256.</span>
+      </div>
+      <!-- Error -->
+      <div class="field">
+        <label for="f-cron">Expressão Cron (Error)</label>
+        <input id="f-cron" class="input input-error" value="*/5 * * *" />
+        <span class="field-error-msg">Formato inválido: esperados 5 campos numéricos.</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Tabs Navigation</h2>
+    <div class="tablist" role="tablist">
+      <button class="tab" role="tab" aria-selected="true">Configurações Gerais</button>
+      <button class="tab" role="tab" aria-selected="false">Chaves de API & Vault</button>
+      <button class="tab" role="tab" aria-selected="false">Histórico de Execuções</button>
+      <button class="tab" role="tab" aria-selected="false">Permissões RBAC</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Surface Cards (5 Surface States)</h2>
+    <div class="grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+      <div class="card">
+        <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">Populated State</h3>
+        <p style="font-size: 0.8125rem; color: var(--zinc-400);">Fluxo autônomo com 12 nós ativos e 99.98% de taxa de sucesso nas últimas 24h.</p>
+      </div>
+      <div class="card" style="border-style: dashed; text-align: center;">
+        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--zinc-300);">Empty State</h3>
+        <p style="font-size: 0.8125rem; color: var(--zinc-500); margin-bottom: 1rem;">Nenhum nó de lógica configurado.</p>
+        <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.375rem 0.75rem;">+ Adicionar Nó</button>
+      </div>
+      <div class="card" style="border-color: var(--color-error-border);">
+        <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--color-error-text);">Error State</h3>
+        <p style="font-size: 0.8125rem; color: var(--zinc-400);">Falha de autenticação no conector Slack (HTTP 401 Unauthorized).</p>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

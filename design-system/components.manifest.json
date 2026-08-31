@@ -1,0 +1,143 @@
+{
+  "name": "AgentFlow Components Manifest",
+  "version": "2.0.0",
+  "classes": [
+    "btn", "btn-primary", "btn-secondary", "btn-ghost", "btn-danger",
+    "badge", "badge-success", "badge-warning", "badge-error", "badge-info", "badge-ai",
+    "field", "input", "input-error", "field-hint", "field-error-msg",
+    "card", "tablist", "tab"
+  ],
+  "selectors": [
+    ".btn",
+    ".btn:hover",
+    ".btn:active",
+    ".btn:focus-visible",
+    ".btn:disabled",
+    ".btn-primary",
+    ".btn-primary:hover",
+    ".btn-primary:active",
+    ".btn-secondary",
+    ".btn-secondary:hover",
+    ".btn-secondary:active",
+    ".btn-ghost",
+    ".btn-ghost:hover",
+    ".btn-danger",
+    ".btn-danger:hover",
+    ".badge",
+    ".badge .dot",
+    ".badge-success",
+    ".badge-warning",
+    ".badge-error",
+    ".badge-info",
+    ".badge-ai",
+    ".field",
+    ".field label",
+    ".input",
+    ".input:focus-visible",
+    ".input-error",
+    ".input-error:focus-visible",
+    ".field-hint",
+    ".field-error-msg",
+    ".card",
+    ".card:hover",
+    ".tablist",
+    ".tab",
+    ".tab:hover",
+    ".tab[aria-selected=\"true\"]"
+  ],
+  "groups": [
+    {
+      "id": "buttons",
+      "label": "Button Primitives",
+      "selectors": [".btn", ".btn-primary", ".btn-secondary", ".btn-ghost", ".btn-danger"],
+      "classes": ["btn", "btn-primary", "btn-secondary", "btn-ghost", "btn-danger"],
+      "elements": ["button", "a"],
+      "tokenReferences": [
+        "--color-accent",
+        "--color-accent-hover",
+        "--zinc-800",
+        "--zinc-750",
+        "--zinc-300",
+        "--zinc-50",
+        "--color-error-text",
+        "--color-error-border",
+        "--radius-md",
+        "--duration-fast",
+        "--ease-spring"
+      ]
+    },
+    {
+      "id": "badges",
+      "label": "Semantic Status Badges",
+      "selectors": [".badge", ".badge-success", ".badge-warning", ".badge-error", ".badge-info", ".badge-ai"],
+      "classes": ["badge", "badge-success", "badge-warning", "badge-error", "badge-info", "badge-ai"],
+      "elements": ["span", "div"],
+      "tokenReferences": [
+        "--color-success", "--color-success-bg", "--color-success-border", "--color-success-text",
+        "--color-warning", "--color-warning-bg", "--color-warning-border", "--color-warning-text",
+        "--color-error", "--color-error-bg", "--color-error-border", "--color-error-text",
+        "--color-info", "--color-info-bg", "--color-info-border", "--color-info-text",
+        "--color-ai", "--color-ai-bg", "--color-ai-border", "--color-ai-text",
+        "--radius-full"
+      ]
+    },
+    {
+      "id": "forms",
+      "label": "Form Controls & Inputs",
+      "selectors": [".field", ".input", ".input:focus-visible", ".input-error", ".field-hint", ".field-error-msg"],
+      "classes": ["field", "input", "input-error", "field-hint", "field-error-msg"],
+      "elements": ["div", "label", "input", "span"],
+      "tokenReferences": [
+        "--zinc-950",
+        "--zinc-400",
+        "--zinc-500",
+        "--zinc-50",
+        "--color-accent",
+        "--color-accent-glow",
+        "--color-error",
+        "--color-error-text",
+        "--radius-md",
+        "--duration-fast",
+        "--ease-spring"
+      ]
+    },
+    {
+      "id": "surfaces",
+      "label": "Cards & Container Surfaces",
+      "selectors": [".card", ".card:hover"],
+      "classes": ["card"],
+      "elements": ["div", "article", "section"],
+      "tokenReferences": [
+        "--zinc-900",
+        "--radius-lg",
+        "--shadow-card",
+        "--duration-fast",
+        "--ease-spring"
+      ]
+    },
+    {
+      "id": "navigation",
+      "label": "Tabs & Navigation Elements",
+      "selectors": [".tablist", ".tab", ".tab[aria-selected=\"true\"]"],
+      "classes": ["tablist", "tab"],
+      "elements": ["div", "button", "nav"],
+      "tokenReferences": [
+        "--zinc-400",
+        "--zinc-200",
+        "--zinc-50",
+        "--color-accent",
+        "--duration-fast",
+        "--ease-spring"
+      ]
+    }
+  ],
+  "literals": {
+    "colorExpressions": 0,
+    "pixelValues": 0,
+    "hardcodedFontFamilies": 0
+  },
+  "statesChecked": {
+    "surfaceStates": ["Loading", "Empty", "Error", "Populated", "Edge"],
+    "formStates": ["Untouched", "Dirty-valid", "Submitted-pending"]
+  }
+}

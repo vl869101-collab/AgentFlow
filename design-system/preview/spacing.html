@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow Design System — Spacing & Radii Preview</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --fg: #fafafa;
+      --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "Geist Mono", "JetBrains Mono", monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      padding: 2.5rem;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    p.lead { color: #a1a1aa; font-size: 0.875rem; margin-bottom: 2rem; }
+    .section-title { font-size: 1.125rem; color: #f4f4f5; margin-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.5rem; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem; }
+    .box {
+      background: #18181b;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .visual-radius {
+      width: 100%;
+      height: 70px;
+      background: rgba(139, 92, 246, 0.15);
+      border: 2px solid #8b5cf6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      color: #fafafa;
+    }
+    .meta { font-family: var(--font-mono); font-size: 0.75rem; color: #a1a1aa; }
+    .name { font-weight: 600; font-size: 0.875rem; color: #fafafa; }
+  </style>
+</head>
+<body>
+  <h1>Spacing Grid & Border Radius Scale</h1>
+  <p class="lead">4px Base Spatial Rhythm & Geometric Hairline Corner Radii</p>
+
+  <h2 class="section-title">Geometric Radii</h2>
+  <div class="grid">
+    <div class="box">
+      <div class="visual-radius" style="border-radius: 4px;">4px (radius-xs)</div>
+      <div class="name">Radius Extra-Small</div>
+      <div class="meta">Handle pills, status tags, badges</div>
+    </div>
+    <div class="box">
+      <div class="visual-radius" style="border-radius: 6px;">6px (radius-sm)</div>
+      <div class="name">Radius Small</div>
+      <div class="meta">Tabs, sub-menu items, nested controls</div>
+    </div>
+    <div class="box">
+      <div class="visual-radius" style="border-radius: 8px;">8px (radius-md)</div>
+      <div class="name">Radius Medium</div>
+      <div class="meta">Buttons, text inputs, search fields</div>
+    </div>
+    <div class="box">
+      <div class="visual-radius" style="border-radius: 12px;">12px (radius-lg)</div>
+      <div class="name">Radius Large</div>
+      <div class="meta">Workflow nodes, modals, standard cards</div>
+    </div>
+    <div class="box">
+      <div class="visual-radius" style="border-radius: 16px;">16px (radius-xl)</div>
+      <div class="name">Radius Extra-Large</div>
+      <div class="meta">Bento hero cards, large dialogs</div>
+    </div>
+    <div class="box">
+      <div class="visual-radius" style="border-radius: 9999px;">9999px (radius-full)</div>
+      <div class="name">Radius Full</div>
+      <div class="meta">Status dots, active tab pill indicators</div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Spatial Hierarchy (4px / 8px Scale)</h2>
+  <div class="box" style="margin-bottom: 2rem;">
+    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+      <div style="display: flex; align-items: center; gap: 1rem;"><div style="width: 4px; height: 16px; background: #8b5cf6;"></div><span class="meta">4px (gap-1) — Micro icon-to-text spacing</span></div>
+      <div style="display: flex; align-items: center; gap: 1rem;"><div style="width: 8px; height: 16px; background: #8b5cf6;"></div><span class="meta">8px (gap-2) — Badge paddings & sub-control gaps</span></div>
+      <div style="display: flex; align-items: center; gap: 1rem;"><div style="width: 12px; height: 16px; background: #8b5cf6;"></div><span class="meta">12px (gap-3) — Node internal compact padding</span></div>
+      <div style="display: flex; align-items: center; gap: 1rem;"><div style="width: 16px; height: 16px; background: #8b5cf6;"></div><span class="meta">16px (gap-4) — Form field vertical rhythm & card insets</span></div>
+      <div style="display: flex; align-items: center; gap: 1rem;"><div style="width: 24px; height: 16px; background: #8b5cf6;"></div><span class="meta">24px (gap-6) — Bento grid gutters & modal body padding</span></div>
+      <div style="display: flex; align-items: center; gap: 1rem;"><div style="width: 32px; height: 16px; background: #8b5cf6;"></div><span class="meta">32px (gap-8) — Page container gutters & section offsets</span></div>
+    </div>
+  </div>
+</body>
+</html>

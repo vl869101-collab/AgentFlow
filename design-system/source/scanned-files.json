@@ -1,0 +1,106 @@
+{
+  "version": "2.0.0",
+  "generatedAt": "2026-08-31T19:18:00Z",
+  "scannedFiles": [
+    {
+      "path": "apps/web/src/styles/globals.css",
+      "type": "css",
+      "role": "Root Theme & Custom Properties"
+    },
+    {
+      "path": "apps/web/src/styles/tokens.css",
+      "type": "css",
+      "role": "Semantic Tokens Specification"
+    },
+    {
+      "path": "apps/web/src/components/ui/Button.tsx",
+      "type": "typescript-react",
+      "role": "Primary & Secondary Action Primitive"
+    },
+    {
+      "path": "apps/web/src/components/ui/Input.tsx",
+      "type": "typescript-react",
+      "role": "Text & Form Input Primitive with ARIA"
+    },
+    {
+      "path": "apps/web/src/components/ui/Badge.tsx",
+      "type": "typescript-react",
+      "role": "Semantic Status Indicator Badge"
+    },
+    {
+      "path": "apps/web/src/components/ui/Modal.tsx",
+      "type": "typescript-react",
+      "role": "Accessible Focus-Trapped Dialog"
+    },
+    {
+      "path": "apps/web/src/components/ui/Tabs.tsx",
+      "type": "typescript-react",
+      "role": "Tablist Navigation Primitive"
+    },
+    {
+      "path": "apps/web/src/components/ui/Card.tsx",
+      "type": "typescript-react",
+      "role": "Backdrop-Blur Surface Container"
+    },
+    {
+      "path": "apps/web/src/components/ui/Drawer.tsx",
+      "type": "typescript-react",
+      "role": "Sliding Drawer Overlay Primitive"
+    },
+    {
+      "path": "apps/web/src/components/ui/Tooltip.tsx",
+      "type": "typescript-react",
+      "role": "Hover Micro-Surface Hint"
+    },
+    {
+      "path": "apps/web/src/components/workflow/WorkflowCanvas.tsx",
+      "type": "typescript-react",
+      "role": "React Flow Workflow Graph Surface"
+    },
+    {
+      "path": "apps/web/src/components/workflow/nodes/BaseNode.tsx",
+      "type": "typescript-react",
+      "role": "Base DAG Node Frame with Glow Handles"
+    },
+    {
+      "path": "apps/web/src/components/workflow/nodes/TriggerNode.tsx",
+      "type": "typescript-react",
+      "role": "Trigger Webhook / Cron Node"
+    },
+    {
+      "path": "apps/web/src/components/workflow/nodes/ActionNode.tsx",
+      "type": "typescript-react",
+      "role": "Action Execution Node"
+    },
+    {
+      "path": "apps/web/src/components/workflow/nodes/LogicNode.tsx",
+      "type": "typescript-react",
+      "role": "Conditional Logic Branching Node"
+    },
+    {
+      "path": "apps/web/src/components/workflow/nodes/AdvancedNode.tsx",
+      "type": "typescript-react",
+      "role": "AI Autonomous Agent Node"
+    },
+    {
+      "path": "apps/web/src/components/workflow/NodeConfigPanel.tsx",
+      "type": "typescript-react",
+      "role": "Node Parameters Property Drawer"
+    },
+    {
+      "path": "design-system/DNA_DESIGN_SYSTEM.md",
+      "type": "markdown",
+      "role": "Foundational Style-Lock Specification"
+    },
+    {
+      "path": "design-system/BRAND_VOICE_GUIDELINES.md",
+      "type": "markdown",
+      "role": "Microcopy & Developer-First Copy Guide"
+    },
+    {
+      "path": "design-system/MEDIA_ICON_INVENTORY.md",
+      "type": "markdown",
+      "role": "Vector Iconography & Media Inventory"
+    }
+  ]
+}

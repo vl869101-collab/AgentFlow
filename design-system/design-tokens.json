@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json.schemastore.org/design-tokens.json",
+  "name": "AgentFlow Design System Tokens",
+  "version": "2.0.0",
+  "description": "Canonical design tokens for AgentFlow UI, derived from tokens.css",
+  "color": {
+    "identity": {
+      "background": { "$value": "#09090b", "$type": "color", "confidence": "observed" },
+      "foreground": { "$value": "#fafafa", "$type": "color", "confidence": "observed" },
+      "accent": { "$value": "#8b5cf6", "$type": "color", "confidence": "observed" },
+      "accentHover": { "$value": "#7c3aed", "$type": "color", "confidence": "observed" },
+      "accentGlow": { "$value": "rgba(139, 92, 246, 0.35)", "$type": "color", "confidence": "observed" }
+    },
+    "zinc": {
+      "950": { "$value": "#09090b", "$type": "color", "confidence": "observed" },
+      "900": { "$value": "#18181b", "$type": "color", "confidence": "observed" },
+      "850": { "$value": "#202024", "$type": "color", "confidence": "observed" },
+      "800": { "$value": "#27272a", "$type": "color", "confidence": "observed" },
+      "750": { "$value": "#2d2d32", "$type": "color", "confidence": "observed" },
+      "700": { "$value": "#3f3f46", "$type": "color", "confidence": "observed" },
+      "600": { "$value": "#52525b", "$type": "color", "confidence": "observed" },
+      "500": { "$value": "#71717a", "$type": "color", "confidence": "observed" },
+      "400": { "$value": "#a1a1aa", "$type": "color", "confidence": "observed" },
+      "300": { "$value": "#d4d4d8", "$type": "color", "confidence": "observed" },
+      "200": { "$value": "#e4e4e7", "$type": "color", "confidence": "observed" },
+      "100": { "$value": "#f4f4f5", "$type": "color", "confidence": "observed" },
+      "50": { "$value": "#fafafa", "$type": "color", "confidence": "observed" }
+    },
+    "semantic": {
+      "success": { "$value": "#10b981", "$type": "color", "confidence": "observed" },
+      "successBg": { "$value": "rgba(16, 185, 129, 0.10)", "$type": "color", "confidence": "observed" },
+      "successBorder": { "$value": "rgba(16, 185, 129, 0.20)", "$type": "color", "confidence": "observed" },
+      "successText": { "$value": "#34d399", "$type": "color", "confidence": "observed" },
+      "warning": { "$value": "#f59e0b", "$type": "color", "confidence": "observed" },
+      "warningBg": { "$value": "rgba(245, 158, 11, 0.10)", "$type": "color", "confidence": "observed" },
+      "warningBorder": { "$value": "rgba(245, 158, 11, 0.20)", "$type": "color", "confidence": "observed" },
+      "warningText": { "$value": "#fbbf24", "$type": "color", "confidence": "observed" },
+      "error": { "$value": "#ef4444", "$type": "color", "confidence": "observed" },
+      "errorBg": { "$value": "rgba(239, 68, 68, 0.10)", "$type": "color", "confidence": "observed" },
+      "errorBorder": { "$value": "rgba(239, 68, 68, 0.20)", "$type": "color", "confidence": "observed" },
+      "errorText": { "$value": "#f87171", "$type": "color", "confidence": "observed" },
+      "info": { "$value": "#3b82f6", "$type": "color", "confidence": "observed" },
+      "infoBg": { "$value": "rgba(59, 130, 246, 0.10)", "$type": "color", "confidence": "observed" },
+      "infoBorder": { "$value": "rgba(59, 130, 246, 0.20)", "$type": "color", "confidence": "observed" },
+      "infoText": { "$value": "#60a5fa", "$type": "color", "confidence": "observed" },
+      "ai": { "$value": "#a855f7", "$type": "color", "confidence": "observed" },
+      "aiBg": { "$value": "rgba(168, 85, 247, 0.10)", "$type": "color", "confidence": "observed" },
+      "aiBorder": { "$value": "rgba(168, 85, 247, 0.20)", "$type": "color", "confidence": "observed" },
+      "aiText": { "$value": "#c084fc", "$type": "color", "confidence": "observed" }
+    }
+  },
+  "borderRadius": {
+    "xs": { "$value": "4px", "$type": "dimension", "confidence": "observed" },
+    "sm": { "$value": "6px", "$type": "dimension", "confidence": "observed" },
+    "md": { "$value": "8px", "$type": "dimension", "confidence": "observed" },
+    "lg": { "$value": "12px", "$type": "dimension", "confidence": "observed" },
+    "xl": { "$value": "16px", "$type": "dimension", "confidence": "observed" },
+    "full": { "$value": "9999px", "$type": "dimension", "confidence": "observed" }
+  },
+  "fontFamily": {
+    "sans": { "$value": "\"Geist\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif", "$type": "fontFamily", "confidence": "observed" },
+    "mono": { "$value": "\"Geist Mono\", \"JetBrains Mono\", \"Fira Code\", monospace", "$type": "fontFamily", "confidence": "observed" }
+  },
+  "shadow": {
+    "card": { "$value": "0 4px 20px -2px rgba(0, 0, 0, 0.5)", "$type": "shadow", "confidence": "observed" },
+    "popover": { "$value": "0 10px 30px -5px rgba(0, 0, 0, 0.7)", "$type": "shadow", "confidence": "observed" },
+    "modal": { "$value": "0 25px 50px -12px rgba(0, 0, 0, 0.85)", "$type": "shadow", "confidence": "observed" },
+    "glowViolet": { "$value": "0 0 25px -4px rgba(139, 92, 246, 0.45)", "$type": "shadow", "confidence": "observed" },
+    "glowRunning": { "$value": "0 0 15px 2px rgba(245, 158, 11, 0.35)", "$type": "shadow", "confidence": "observed" }
+  },
+  "transition": {
+    "durationFast": { "$value": "150ms", "$type": "duration", "confidence": "observed" },
+    "durationNormal": { "$value": "200ms", "$type": "duration", "confidence": "observed" },
+    "durationSlow": { "$value": "300ms", "$type": "duration", "confidence": "observed" },
+    "easeSpring": { "$value": "cubic-bezier(0.16, 1, 0.3, 1)", "$type": "cubicBezier", "confidence": "observed" }
+  }
+}
