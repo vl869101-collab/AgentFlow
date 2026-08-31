@@ -1,0 +1,39 @@
+services:
+  agentflow-bot:
+    build:
+      context: ../..
+      dockerfile: apps/bot/Dockerfile
+    container_name: agentflow-bot-worker
+    restart: unless-stopped
+    shm_size: "2gb" # Crucial for Chromium/Playwright stability
+    environment:
+      - NODE_ENV=production
+      - DISPLAY=:99
+      - RESOLUTION=1920x1080x24
+      - VNC_PORT=5900
+      - NOVNC_PORT=6080
+      - BOT_PORT=8080
+      - AGENTFLOW_API_URL=http://api:4000
+      - AGENTFLOW_API_KEY=${AGENTFLOW_API_KEY:-af_bot_secret_token}
+      - AGENTFLOW_ORG_ID=${AGENTFLOW_ORG_ID:-default-org}
+      - BROWSER_HEADLESS=false
+      - ENABLE_SSH_DEBUG=false
+    ports:
+      - "6080:6080" # noVNC Web UI / WebSocket
+      - "5900:5900" # Raw RFB VNC
+      - "8080:8080" # Bot Agent HTTP & WS API
+    volumes:
+      - bot_browser_data:/app/data/browser_profile
+      - bot_recordings:/app/data/recordings
+      - bot_screenshots:/app/data/screenshots
+    networks:
+      - agentflow-network
+
+volumes:
+  bot_browser_data:
+  bot_recordings:
+  bot_screenshots:
+
+networks:
+  agentflow-network:
+    external: true
