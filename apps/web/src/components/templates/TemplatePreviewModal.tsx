@@ -3,19 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlertCircle,
+  CheckCircle2,
   Clock,
   Download,
-  ExternalLink,
   Layers,
-  Sparkles,
-  Zap,
-  Info,
-  CheckCircle2,
-  AlertCircle,
-  X,
-  Workflow as WorkflowIcon,
-  Tag,
   Share2,
+  Sparkles,
+  Workflow as WorkflowIcon,
+  Zap,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
@@ -85,23 +81,23 @@ export function TemplatePreviewModal({
     <Modal
       open={open}
       onClose={onClose}
-      className="max-w-5xl overflow-hidden !p-0 border-white/10 bg-zinc-950 text-zinc-100"
+      className="max-w-5xl overflow-hidden !p-0 border-white/10 bg-[#09090b] text-zinc-100 shadow-2xl shadow-black/60"
     >
       {/* Modal Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 bg-zinc-900/60 p-6 backdrop-blur-md">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/[0.08] bg-zinc-900/70 p-6 backdrop-blur-xl">
         <div className="flex items-start gap-4">
           <div
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 shadow-inner"
             style={{ backgroundColor: `${template.color || "#6366f1"}20`, borderColor: `${template.color || "#6366f1"}40` }}
           >
-            <Zap className="h-6 w-6" style={{ color: template.color || "#6366f1" }} />
+            <Zap className="h-6 w-6" style={{ color: template.color || "#6366f1" }} aria-hidden="true" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-zinc-50">{template.name}</h2>
               {template.featured && (
                 <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-400 border border-amber-500/20">
-                  <Sparkles className="h-3 w-3" /> Featured
+                  <Sparkles className="h-3 w-3" aria-hidden="true" /> Destaque
                 </span>
               )}
             </div>
@@ -114,38 +110,47 @@ export function TemplatePreviewModal({
             variant="secondary"
             size="sm"
             onClick={handleShare}
-            className="border-white/10 hover:bg-white/5 text-zinc-300 gap-1.5"
+            className="border-white/10 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 gap-1.5 focus-visible:ring-2 focus-visible:ring-violet-500"
             title="Copiar link do template"
+            aria-label={`Copiar link do template ${template.name}`}
           >
-            <Share2 className="h-3.5 w-3.5" />
-            {copied ? "Copiado!" : "Compartilhar"}
+            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+            <span aria-live="polite">{copied ? "Link copiado" : "Compartilhar"}</span>
           </Button>
           <Button
             variant="secondary"
             size="sm"
             onClick={handleExportJson}
-            className="border-white/10 hover:bg-white/5 text-zinc-300 gap-1.5"
-            title="Download do JSON Sanitizado"
+            className="border-white/10 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 gap-1.5 focus-visible:ring-2 focus-visible:ring-violet-500"
+            title="Baixar configuração JSON do template"
+            aria-label={`Exportar ${template.name} em JSON`}
           >
-            <Download className="h-3.5 w-3.5" />
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
             Exportar JSON
           </Button>
           <Button
             size="sm"
             onClick={handleClone}
             disabled={cloning}
-            className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium shadow-lg shadow-violet-500/25 gap-1.5"
+            className="bg-violet-600 hover:bg-violet-500 text-white font-semibold shadow-lg shadow-violet-600/25 gap-1.5 focus-visible:ring-2 focus-visible:ring-violet-500"
+            aria-label={`Usar template ${template.name}`}
           >
-            <WorkflowIcon className="h-3.5 w-3.5" />
+            <WorkflowIcon className="h-3.5 w-3.5" aria-hidden="true" />
             {cloning ? "Clonando..." : "Usar Template"}
           </Button>
         </div>
       </div>
 
       {error && (
-        <div className="flex items-center gap-2 bg-red-500/10 border-b border-red-500/20 px-6 py-2.5 text-xs text-red-400">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{error}</span>
+        <div
+          className="flex items-start gap-2 bg-rose-500/10 border-b border-rose-500/20 px-6 py-3 text-xs text-rose-300"
+          role="alert"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0 mt-px" aria-hidden="true" />
+          <span>
+            <strong className="font-semibold text-rose-200">Não foi possível clonar o template.</strong>{" "}
+            {error} Verifique sua conexão e tente novamente.
+          </span>
         </div>
       )}
 
@@ -156,18 +161,18 @@ export function TemplatePreviewModal({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 text-xs text-zinc-400">
               <span className="flex items-center gap-1 font-medium text-zinc-300">
-                <Layers className="h-3.5 w-3.5 text-violet-400" /> {nodeCount} nós
+                <Layers className="h-3.5 w-3.5 text-violet-400" aria-hidden="true" /> {nodeCount} nós
               </span>
               <span>•</span>
               <span>{edgeCount} conexões</span>
               <span>•</span>
               <span className="flex items-center gap-1">
-                <Clock className="h-3.5 w-3.5 text-zinc-500" /> ~{template.estimatedSetupMinutes} min de setup
+                <Clock className="h-3.5 w-3.5 text-zinc-500" aria-hidden="true" /> ~{template.estimatedSetupMinutes} min de setup
               </span>
             </div>
 
-            <span className="text-xs text-zinc-500 bg-white/5 px-2 py-0.5 rounded border border-white/5">
-              Pré-visualização Interativa (Modo Leitura)
+            <span className="text-[11px] font-medium text-zinc-400 bg-white/5 px-2.5 py-1 rounded-md border border-white/10">
+              Modo leitura
             </span>
           </div>
 
@@ -189,10 +194,12 @@ export function TemplatePreviewModal({
                     key={node.id || idx}
                     type="button"
                     onClick={() => setSelectedNodeIndex(isSelected ? null : idx)}
-                    className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition-all ${
+                    aria-pressed={isSelected}
+                    aria-label={`Inspecionar etapa ${idx + 1}: ${label}`}
+                    className={`flex min-h-9 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${
                       isSelected
                         ? "border-violet-500 bg-violet-500/15 text-violet-200 shadow-md shadow-violet-500/10"
-                        : "border-white/10 bg-zinc-900/60 text-zinc-400 hover:border-white/20 hover:text-zinc-200"
+                        : "border-white/10 bg-zinc-900/60 text-zinc-300 hover:border-white/20 hover:text-zinc-100 hover:bg-zinc-900"
                     }`}
                   >
                     <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-[10px] font-mono">
@@ -230,7 +237,7 @@ export function TemplatePreviewModal({
               <div className="flex flex-wrap gap-1.5">
                 {template.connectors.map((c) => (
                   <span key={c} className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-300">
-                    <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                    <CheckCircle2 className="h-3 w-3 text-emerald-400" aria-hidden="true" />
                     {c}
                   </span>
                 ))}
@@ -289,11 +296,12 @@ export function TemplatePreviewModal({
           {/* Bottom Action inside inspector */}
           <div className="pt-4 border-t border-white/10 space-y-2">
             <Button
-              className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-lg shadow-violet-500/25 py-2.5 font-medium text-sm"
+              className="w-full bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-600/25 py-2.5 font-semibold text-sm focus-visible:ring-2 focus-visible:ring-violet-500"
               onClick={handleClone}
               disabled={cloning}
+              aria-label={`Clonar ${template.name} e abrir no editor`}
             >
-              <WorkflowIcon className="h-4 w-4" />
+              <WorkflowIcon className="h-4 w-4" aria-hidden="true" />
               {cloning ? "Clonando para o Workspace..." : "Clonar e Editar Workflow"}
             </Button>
             <p className="text-center text-[11px] text-zinc-500">

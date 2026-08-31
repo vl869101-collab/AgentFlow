@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, Eye, EyeOff, KeyRound, Plus, Search, Trash2, X, Sparkles, Layers, Info, Shield, ExternalLink } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, KeyRound, Plus, Search, Trash2, X, Sparkles, Layers, Info, Shield, ExternalLink, CheckCircle2, XCircle, Loader2, Zap, Clock, User, Building } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
-import { credentials as credApi, type Credential } from "@/lib/api";
+import { credentials as credApi, type Credential, type CredentialTestResult } from "@/lib/api";
 
 const PROVIDERS = [
   { value: "Action Network API", label: "Action Network API" },
@@ -590,7 +590,11 @@ export default function CredentialsPage() {
   const [open, setOpen] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
-  const [testResult, setTestResult] = useState<{ status: "success" | "error"; message: string } | null>(null);
+  const [testResult, setTestResult] = useState<CredentialTestResult | null>(null);
+
+  // Card-level connection testing state
+  const [testingCardIds, setTestingCardIds] = useState<Record<string, boolean>>({});
+  const [cardTestResults, setCardTestResults] = useState<Record<string, CredentialTestResult>>({});
 
   // modal step 1: select app, step 2: fill value — 760px pixel-perfect modal
   const [step, setStep] = useState<1 | 2>(1);
@@ -698,13 +702,43 @@ export default function CredentialsPage() {
   async function handleTestConnection() {
     setTestingConnection(true);
     setTestResult(null);
-    setTimeout(() => {
-      setTestingConnection(false);
-      setTestResult({
-        status: "success",
-        message: "Connection verified successfully!",
+    try {
+      const res = await credApi.test({
+        provider: selected,
+        type: currentBucket,
+        data: formData,
       });
-    }, 600);
+      setTestResult(res);
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        latencyMs: 0,
+        message: err.message || "Failed to test connection",
+        error: "TEST_FAILED",
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  }
+
+  async function handleTestSavedCredential(id: string) {
+    setTestingCardIds((prev) => ({ ...prev, [id]: true }));
+    try {
+      const res = await credApi.testById(id);
+      setCardTestResults((prev) => ({ ...prev, [id]: res }));
+    } catch (err: any) {
+      setCardTestResults((prev) => ({
+        ...prev,
+        [id]: {
+          success: false,
+          latencyMs: 0,
+          message: err.message || "Connection test failed",
+          error: "ERROR",
+        },
+      }));
+    } finally {
+      setTestingCardIds((prev) => ({ ...prev, [id]: false }));
+    }
   }
 
   async function addCredential(e: React.FormEvent) {
@@ -762,50 +796,124 @@ export default function CredentialsPage() {
           ) : (
             <div className="space-y-2">
               <AnimatePresence mode="popLayout">
-                {creds.map((cred, index) => (
-                  <motion.div key={cred.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ delay: index * 0.04 }}>
-                    <div className="flex items-center justify-between rounded-xl border border-white/5 bg-[#141416] px-5 py-4 transition-colors hover:border-white/10 hover:bg-[#18181b]">
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-600/10 border border-violet-500/20 text-violet-400">
-                          <KeyRound className="h-5 w-5" aria-hidden="true" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-zinc-100">{cred.name}</span>
-                            <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-400 capitalize">
-                              {cred.provider || cred.type}
-                            </span>
+                {creds.map((cred, index) => {
+                  const isTesting = Boolean(testingCardIds[cred.id]);
+                  const cardResult = cardTestResults[cred.id];
+
+                  return (
+                    <motion.div key={cred.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ delay: index * 0.04 }}>
+                      <div className="rounded-xl border border-white/5 bg-[#141416] p-4 sm:px-5 sm:py-4 transition-colors hover:border-white/10 hover:bg-[#18181b] space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-600/10 border border-violet-500/20 text-violet-400 shrink-0">
+                              <KeyRound className="h-5 w-5" aria-hidden="true" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-zinc-100">{cred.name}</span>
+                                <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-400 capitalize">
+                                  {cred.provider || cred.type}
+                                </span>
+
+                                {/* Status badge */}
+                                {cardResult ? (
+                                  cardResult.success ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400 animate-in fade-in">
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      Verified
+                                      {cardResult.latencyMs > 0 && (
+                                        <span className="opacity-80 font-mono text-[10px] ml-0.5">({cardResult.latencyMs}ms)</span>
+                                      )}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/20 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-400 animate-in fade-in">
+                                      <XCircle className="h-3 w-3" />
+                                      Failed
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700/40 bg-zinc-800/40 px-2 py-0.5 text-[11px] font-medium text-zinc-400">
+                                    Untested
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-0.5 text-xs text-zinc-400">
+                                {visible.includes(cred.id) ? (
+                                  <span className="font-mono text-zinc-300">{cred.data ? (typeof cred.data === "string" && cred.data.startsWith("{") ? "Encrypted Vault Payload" : String(cred.data)) : "No raw value"}</span>
+                                ) : (
+                                  "••••••••••••••••••••••••••••••••"
+                                )}
+                              </p>
+                            </div>
                           </div>
-                          <p className="mt-0.5 text-xs text-zinc-400">
-                            {visible.includes(cred.id) ? (
-                              <span className="font-mono text-zinc-300">{cred.data ? (cred.data.startsWith("{") ? "Encrypted Vault Payload" : cred.data) : "No raw value"}</span>
-                            ) : (
-                              "••••••••••••••••••••••••••••••••"
-                            )}
-                          </p>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={isTesting}
+                              onClick={() => handleTestSavedCredential(cred.id)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] text-xs font-medium text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50"
+                              title="Test active connection"
+                            >
+                              {isTesting ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400" />
+                                  <span className="hidden sm:inline">Testing...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Zap className="h-3.5 w-3.5 text-amber-400" />
+                                  <span className="hidden sm:inline">Test</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => toggleVisible(cred.id)}
+                              className="rounded-lg p-2 text-zinc-400 hover:bg-white/5 hover:text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                              aria-label={visible.includes(cred.id) ? "Hide secret" : "Show secret"}
+                            >
+                              {visible.includes(cred.id) ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => deleteCredential(cred.id)}
+                              className="rounded-lg p-2 text-zinc-400 hover:bg-red-500/10 hover:text-red-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                              aria-label={`Delete ${cred.name}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
+
+                        {/* Inline Test Result Details if present */}
+                        {cardResult && (
+                          <div className={`p-2.5 rounded-lg border text-xs animate-in fade-in flex items-center justify-between gap-2 ${
+                            cardResult.success
+                              ? "border-emerald-500/20 bg-emerald-500/[0.03] text-emerald-300"
+                              : "border-rose-500/20 bg-rose-500/[0.03] text-rose-300"
+                          }`}>
+                            <div className="flex items-center gap-2 truncate">
+                              <span className="font-medium">{cardResult.message}</span>
+                              {cardResult.accountDetails && (cardResult.accountDetails.username || cardResult.accountDetails.email || cardResult.accountDetails.name) && (
+                                <span className="text-[11px] opacity-80 truncate">
+                                  ({cardResult.accountDetails.name || cardResult.accountDetails.username || cardResult.accountDetails.email})
+                                </span>
+                              )}
+                            </div>
+                            {cardResult.latencyMs > 0 && (
+                              <span className="font-mono text-[11px] opacity-75 shrink-0">
+                                {cardResult.latencyMs}ms
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => toggleVisible(cred.id)}
-                          className="rounded-lg p-2 text-zinc-400 hover:bg-white/5 hover:text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
-                          aria-label={visible.includes(cred.id) ? "Hide secret" : "Show secret"}
-                        >
-                          {visible.includes(cred.id) ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteCredential(cred.id)}
-                          className="rounded-lg p-2 text-zinc-400 hover:bg-red-500/10 hover:text-red-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-                          aria-label={`Delete ${cred.name}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+                    </motion.div>
+                  );
+                })}
               </AnimatePresence>
               {creds.length === 0 && (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 p-12 text-center">
@@ -1341,21 +1449,105 @@ export default function CredentialsPage() {
                         </div>
                       )}
 
-                      {/* Test Connection Action */}
-                      <div className="pt-3 flex items-center justify-between border-t border-white/[0.08]">
-                        <button
-                          type="button"
-                          disabled={testingConnection}
-                          onClick={handleTestConnection}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-xs font-medium text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
-                        >
-                          <Shield className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
-                          {testingConnection ? "Testing connection..." : "Test Connection"}
-                        </button>
+                      {/* Test Connection Action & Structured Feedback */}
+                      <div className="pt-3 border-t border-white/[0.08] space-y-3">
+                        <div className="flex items-center justify-between">
+                          <button
+                            type="button"
+                            disabled={testingConnection}
+                            onClick={handleTestConnection}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md border border-white/10 bg-white/[0.06] hover:bg-white/[0.1] text-xs font-medium text-zinc-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {testingConnection ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 text-violet-400 animate-spin" aria-hidden="true" />
+                                <span>Testing connection...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Shield className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
+                                <span>Test Connection</span>
+                              </>
+                            )}
+                          </button>
+
+                          {testResult && (
+                            <div className="flex items-center gap-2">
+                              {testResult.success ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400 animate-in fade-in">
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                                  <span>Verified</span>
+                                  {testResult.latencyMs > 0 && (
+                                    <span className="text-[11px] text-emerald-400/80 font-mono flex items-center gap-0.5">
+                                      <Clock className="h-3 w-3" />
+                                      {testResult.latencyMs}ms
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-xs font-medium text-rose-400 animate-in fade-in">
+                                  <XCircle className="h-3.5 w-3.5 text-rose-400" />
+                                  <span>Failed</span>
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Extended Details & Account Payload Banner */}
                         {testResult && (
-                          <span className="text-xs text-emerald-400 font-medium animate-in fade-in">
-                            ✓ {testResult.message}
-                          </span>
+                          <div className={`p-3 rounded-lg border text-xs animate-in fade-in space-y-1.5 ${
+                            testResult.success
+                              ? "border-emerald-500/20 bg-emerald-500/[0.04] text-emerald-300"
+                              : "border-rose-500/20 bg-rose-500/[0.04] text-rose-300"
+                          }`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="font-medium leading-relaxed">{testResult.message}</p>
+                              {testResult.latencyMs > 0 && (
+                                <span className="shrink-0 font-mono text-[11px] opacity-80">
+                                  {testResult.latencyMs}ms latency
+                                </span>
+                              )}
+                            </div>
+
+                            {testResult.accountDetails && Object.keys(testResult.accountDetails).length > 0 && (
+                              <div className="mt-2 pt-2 border-t border-emerald-500/10 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                                {testResult.accountDetails.name && (
+                                  <div className="flex items-center gap-1.5 text-zinc-300">
+                                    <User className="h-3 w-3 text-emerald-400 shrink-0" />
+                                    <span className="text-zinc-500">Name:</span>
+                                    <span className="font-medium text-zinc-200 truncate">{testResult.accountDetails.name}</span>
+                                  </div>
+                                )}
+                                {testResult.accountDetails.username && (
+                                  <div className="flex items-center gap-1.5 text-zinc-300">
+                                    <User className="h-3 w-3 text-emerald-400 shrink-0" />
+                                    <span className="text-zinc-500">User:</span>
+                                    <span className="font-medium text-zinc-200 truncate">@{testResult.accountDetails.username}</span>
+                                  </div>
+                                )}
+                                {testResult.accountDetails.email && (
+                                  <div className="flex items-center gap-1.5 text-zinc-300">
+                                    <span className="text-zinc-500">Email:</span>
+                                    <span className="font-medium text-zinc-200 truncate">{testResult.accountDetails.email}</span>
+                                  </div>
+                                )}
+                                {testResult.accountDetails.organization && (
+                                  <div className="flex items-center gap-1.5 text-zinc-300">
+                                    <Building className="h-3 w-3 text-emerald-400 shrink-0" />
+                                    <span className="text-zinc-500">Org:</span>
+                                    <span className="font-medium text-zinc-200 truncate">{testResult.accountDetails.organization}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {testResult.error && (
+                              <p className="text-[11px] font-mono text-rose-400 opacity-90">
+                                Error details: {testResult.error}
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
 
