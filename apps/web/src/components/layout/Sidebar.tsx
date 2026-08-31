@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  Bot,
   ChevronRight,
   Clock,
   HelpCircle,
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 const topNav = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Agentflowbot", href: "/bot", icon: Bot },
   { label: "Personal", href: "/personal", icon: UserRound },
 ];
 
@@ -63,6 +65,7 @@ const settingsDrawerItems = [
   { label: "OpenTelemetry", href: "/settings/opentelemetry", icon: BarChart3 },
   { label: "Community nodes", href: "/settings/community-nodes", icon: LayoutGrid },
   { label: "Instance-level MCP", href: "/mcp", icon: LayoutGrid },
+  { label: "Agentflowbot Live", href: "/bot", icon: Bot },
   { label: "Chat Preview", href: "/chat", icon: HelpCircle },
   { label: "AI Assistant Preview", href: "/assistant", icon: Sparkles },
 ] as const;

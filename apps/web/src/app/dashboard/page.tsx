@@ -1,160 +1,141 @@
-"use client";
+﻿"use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ListFilter, MoreVertical, Search, UserRound, Workflow as WorkflowIcon, Zap } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { BentoGrid, type DashboardStats } from "@/components/dashboard/BentoGrid";
-import { InfrastructureMonitor } from "@/components/dashboard/InfrastructureMonitor";
-import { McpNodesHub } from "@/components/dashboard/McpNodesHub";
-import { RecentRunsTable } from "@/components/dashboard/RecentRunsTable";
-import { getToken, executions, workflows, type Execution, type Workflow } from "@/lib/api";
-import "@/components/dashboard/dashboard-tokens.css";
+import { formatDate, formatRelativeTime } from "@/lib/utils";
+import { workflows as workflowsApi, executions as executionsApi, type Workflow, type Execution } from "@/lib/api";
+import { AIGeneratorModal } from "@/components/ai/AIGeneratorModal";
 
-function computeStats(runs: Execution[], workflowList: Workflow[]): DashboardStats {
-  const totalExecutions = runs.length;
-  const failedExecutions = runs.filter((run) => run.status === "error").length;
-  const finished = runs.filter((run) => run.status !== "running" && run.status !== "pending");
-  const durations = finished
-    .map((run) => run.duration)
-    .filter((duration): duration is number => typeof duration === "number" && Number.isFinite(duration) && duration >= 0);
-  const avgDurationMs = durations.length > 0 ? durations.reduce((sum, value) => sum + value, 0) / durations.length : 0;
-
-  const sortedByTime = [...runs].sort(
-    (a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime(),
-  );
-
-  const buildTrend = (source: Execution[], predicate: (run: Execution) => boolean): number[] => {
-    const buckets = new Array<number>(12).fill(0);
-    if (source.length === 0) return buckets;
-    const newest = new Date(source[source.length - 1].startedAt).getTime();
-    const oldest = new Date(source[0].startedAt).getTime();
-    const span = Math.max(newest - oldest, 60_000);
-    for (const run of source) {
-      if (!predicate(run)) continue;
-      const offset = new Date(run.startedAt).getTime() - oldest;
-      const bucketIndex = Math.min(11, Math.floor((offset / span) * 12));
-      buckets[bucketIndex] += 1;
-    }
-    return buckets;
-  };
-
-  return {
-    totalExecutions,
-    failedExecutions,
-    failureRate: totalExecutions > 0 ? failedExecutions / totalExecutions : 0,
-    avgDurationMs,
-    activeWorkflows: workflowList.filter((workflow) => workflow.status === "active").length,
-    totalWorkflows: workflowList.length,
-    executionTrend: buildTrend(sortedByTime, () => true),
-    failureTrend: buildTrend(sortedByTime, (run) => run.status === "error"),
-    durationTrend: durations.length > 0 ? buildTrend(sortedByTime, (run) => typeof run.duration === "number") : [],
-  };
+function formatDuration(milliseconds: number) {
+  if (milliseconds < 1000) return `${milliseconds}ms`;
+  return `${Math.round(milliseconds / 100) / 10}s`;
 }
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [authState, setAuthState] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
-  const [runs, setRuns] = useState<Execution[] | null>(null);
-  const [workflowList, setWorkflowList] = useState<Workflow[]>([]);
-  const [aiGeneratorOpen, setAiGeneratorOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [wfList, setWfList] = useState<Workflow[]>([]);
+  const [exList, setExList] = useState<Execution[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
-    if (!getToken()) {
+    if (typeof window !== "undefined" && !localStorage.getItem("agentflow_token")) {
       router.replace("/login");
-      setAuthState("unauthenticated");
       return;
     }
-    setAuthState("authenticated");
-  }, [router]);
-
-  const loadDashboardData = useCallback(async () => {
-    try {
-      const [executionList, fetchedWorkflows] = await Promise.all([executions.list(), workflows.list()]);
-      setRuns(Array.isArray(executionList) ? executionList : []);
-      setWorkflowList(Array.isArray(fetchedWorkflows) ? fetchedWorkflows : []);
-    } catch {
-      setRuns((current) => current ?? []);
-    }
+    setAuthed(true);
+    Promise.all([workflowsApi.list(), executionsApi.list()]).then(([wfs, exs]) => {
+      setWfList(wfs);
+      setExList(exs);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (authState !== "authenticated") return;
-    void loadDashboardData();
-  }, [authState, loadDashboardData]);
-
-  const workflowNames = useMemo(
-    () => new Map(workflowList.map((workflow) => [workflow.id, workflow.name])),
-    [workflowList],
+  const filteredWorkflows = useMemo(
+    () => wfList.filter((workflow) => `${workflow.name} ${workflow.description}`.toLowerCase().includes(query.toLowerCase())),
+    [query, wfList]
   );
 
-  const stats = useMemo(() => computeStats(runs ?? [], workflowList), [runs, workflowList]);
+  if (!authed) return null;
 
-  if (authState === "checking" || authState === "unauthenticated") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950">
-        <p className="text-sm text-zinc-500" role="status">
-          {authState === "checking" ? "Loading dashboard…" : "Redirecting to login…"}
-        </p>
-      </div>
-    );
-  }
+  const prodExecutions = exList.length;
+  const failedExecutions = exList.filter((execution) => execution.status === "FAILED").length;
+  const failureRate = prodExecutions > 0 ? Math.round((failedExecutions / prodExecutions) * 100) : 0;
+  const durations = exList.flatMap((execution) => execution.duration == null ? [] : [execution.duration]);
+  const averageDuration = durations.length > 0 ? durations.reduce((total, duration) => total + duration, 0) / durations.length : 0;
+  const stats = [
+    { label: "Prod. executions", value: String(prodExecutions) },
+    { label: "Failed prod. executions", value: String(failedExecutions) },
+    { label: "Failure rate", value: `${failureRate}%` },
+    { label: "Time saved", value: "—" },
+    { label: "Run time avg.", value: averageDuration > 0 ? formatDuration(averageDuration) : "0s" },
+  ];
 
   return (
     <AppLayout>
-      <div className="af-dash space-y-6 pb-10">
-        <header className="af-dash-reveal flex flex-wrap items-end justify-between gap-4">
+      <div className="animate-in fade-in duration-300">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
           <div>
-            <p className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-violet-400 uppercase">
-              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-              AgentFlow Console
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50">
-              Mission control
-            </h1>
-            <p className="mt-1 text-sm text-zinc-500">
-              Live view of runs, infrastructure and the automation catalog.
-            </p>
+            <h1 className="text-2xl font-semibold text-zinc-50">Overview</h1>
+            <p className="mt-1 text-sm text-zinc-500">All the workflows, credentials and data tables you have access to</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setAiGeneratorOpen((open) => !open)}
-            aria-expanded={aiGeneratorOpen}
-            aria-controls="ai-generator-panel"
-            className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-600/20 transition-colors hover:bg-violet-500 focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 focus-visible:outline-none"
-          >
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-            Generate with AI
-          </button>
-        </header>
-
-        {aiGeneratorOpen ? (
-          <div
-            id="ai-generator-panel"
-            className="af-dash-card af-dash-reveal flex items-center gap-3 p-4 text-sm text-zinc-400"
-          >
-            <Sparkles className="h-4 w-4 shrink-0 text-violet-400" aria-hidden="true" />
-            <p>
-              The AI workflow generator lives in the{" "}
-              <a href="/" className="text-violet-300 underline decoration-dotted underline-offset-2 hover:text-violet-200">
-                workflow editor
-              </a>
-              . Opening it keeps this dashboard lightweight.
-            </p>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/billing" className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90">
+              <Zap className="h-4 w-4" /> Upgrade Now
+            </Link>
+            <button onClick={() => setAiOpen(true)} className="inline-flex items-center gap-2 rounded-md bg-violet-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-600">
+              Create workflow <ChevronDown className="h-4 w-4" />
+            </button>
           </div>
-        ) : null}
-
-        <BentoGrid stats={stats} />
-
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          <div className="xl:col-span-2">
-            <McpNodesHub />
-          </div>
-          <InfrastructureMonitor />
         </div>
 
-        <RecentRunsTable workflowNames={workflowNames} />
+        <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+          {stats.map((stat) => (
+            <div key={stat.label} className="rounded-lg border border-white/10 bg-zinc-900 p-4">
+              <p className="text-xs text-zinc-500">{stat.label}</p>
+              <p className="mt-2 text-xl font-semibold text-white">{loading ? "—" : stat.value}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-8 flex gap-6 overflow-x-auto border-b border-white/10 text-sm">
+          <span className="shrink-0 border-b-2 border-violet-500 pb-3 font-medium text-violet-500">Workflows</span>
+          <Link href="/credentials" className="shrink-0 pb-3 text-zinc-400 transition-colors hover:text-zinc-200">Credentials</Link>
+          <Link href="/executions" className="shrink-0 pb-3 text-zinc-400 transition-colors hover:text-zinc-200">Executions</Link>
+          <span className="shrink-0 pb-3 text-zinc-400">Variables</span>
+          <span className="shrink-0 pb-3 text-zinc-400">Data tables</span>
+        </div>
+
+        <div className="mt-5 flex flex-col justify-end gap-3 sm:flex-row">
+          <label className="relative sm:w-64">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search"
+              className="w-full rounded-md border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-violet-500"
+            />
+          </label>
+          <select defaultValue="updated" className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300 outline-none focus:border-violet-500">
+            <option value="updated">Sort by last updated</option>
+          </select>
+          <button type="button" aria-label="Filter workflows" className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200">
+            <ListFilter className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {loading ? (
+            <div className="rounded-lg border border-white/10 bg-zinc-900 px-4 py-8 text-center text-sm text-zinc-500">Loading workflows...</div>
+          ) : filteredWorkflows.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-500">No workflows found.</div>
+          ) : (
+            filteredWorkflows.map((workflow) => (
+              <Link key={workflow.id} href={`/workflows/${workflow.id}/editor`} className="flex items-center gap-3 rounded-lg border border-white/10 bg-zinc-900 px-4 py-3 transition-colors hover:border-white/20">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-500">
+                  <WorkflowIcon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-zinc-50">{workflow.name}</span>
+                  <span className="block truncate text-xs text-zinc-500">Last updated {formatRelativeTime(workflow.updatedAt)} · Created {formatDate(workflow.createdAt)}</span>
+                </span>
+                <span className="hidden items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-xs text-zinc-300 sm:inline-flex">
+                  <UserRound className="h-3 w-3" /> Personal
+                </span>
+                <MoreVertical className="h-4 w-4 shrink-0 text-zinc-500" />
+              </Link>
+            ))
+          )}
+        </div>
+
+        <p className="mt-4 text-xs text-zinc-600">Total {filteredWorkflows.length} workflows</p>
       </div>
+      <AIGeneratorModal open={aiOpen} onClose={() => setAiOpen(false)} onCreated={() => {}} />
     </AppLayout>
   );
 }
