@@ -1,11 +1,19 @@
 "use client";
 
-import { Clock, Webhook } from "lucide-react";
-import { getNodeMeta } from "@/lib/workflow";
+import { Clock, Webhook, Mail, Sparkles, Inbox } from "lucide-react";
 import { BaseNode, type WorkflowNodeProps } from "./BaseNode";
 
 export function TriggerNode(props: WorkflowNodeProps) {
-  const Icon = props.data.type === "cron" ? Clock : Webhook;
-  getNodeMeta(props.data.type);
+  let Icon = Webhook;
+  if (props.data.type === "cron") {
+    Icon = Clock;
+  } else if (props.data.type === "gmailTrigger") {
+    Icon = Mail;
+  } else if (props.data.type === "emailReadImap") {
+    Icon = Inbox;
+  } else if (props.data.type === "evaluationTrigger") {
+    Icon = Sparkles;
+  }
+
   return <BaseNode {...props} kind="trigger" icon={Icon} />;
 }
