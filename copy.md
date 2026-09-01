@@ -1,10 +1,10 @@
-# AgentFlow Bot — High-Conversion Landing Page & System Copy (`copy.md`)
+# AgentFlow Bot & Unified Platform — High-Conversion Landing Page & System Copy (`copy.md`)
 
-> **Crafted by**: `oc-copywriter` (Scout)  
+> **Crafted by**: `oc-copywriter` (Scout / Copy Architect)  
 > **Mission**: `qKDDvdgOGvWU` ("DESIGN SYSTEM ELITE — Complete Design System")  
-> **Target Deliverables**: `apps/web/src/app/bot/landing` / `apps/web/src/app/landing/bot`  
-> **Frameworks**: Open Design v2, Tailwind CSS, Framer Motion, WCAG 2.2 AA Compliance  
-> **Methodology**: Outcomes over features · Specificity over hype · Real actionable CTAs
+> **Target Deliverables**: `apps/web/src/app/bot/page.tsx`, `apps/web/src/app/bot/landing`, `apps/web/src/app/landing/bot`, `apps/web/src/app/workflows`  
+> **Frameworks**: Open Design v2, Tailwind CSS v4, Framer Motion, WCAG 2.2 AA/AAA Compliance  
+> **Methodology**: Outcomes over features · Specificity over hype · Real actionable CTAs · Verified Pricing `[TO CONFIRM]`
 
 ---
 
@@ -12,8 +12,8 @@
 
 ### Brand Voice Calibration
 - **Tone**: Highly capable, precise, calm, sovereign, engineering-grade, future-forward.
-- **Personality**: An unstoppable senior browser automation engineer operating at machine speed inside a dedicated virtual desktop, backed by sovereign security isolation.
-- **What it IS**: Direct, authoritative, transparent about mechanics (Playwright cluster, Xvfb virtual displays, WebRTC/noVNC streaming, zero-trust token vaults, MCP protocol).
+- **Personality**: An unstoppable senior browser automation engineer operating at machine speed inside a dedicated virtual desktop, backed by sovereign security isolation and instant human takeover.
+- **What it IS**: Direct, authoritative, transparent about mechanics (Playwright cluster, Xvfb virtual displays, WebRTC/noVNC streaming, zero-trust token vaults, MCP protocol, BullMQ distributed execution).
 - **What it is NOT**: Hype-filled, childish, vague ("magic AI"), dismissive of edge cases, or generic template corporate-speak.
 
 ### Audience Personas
