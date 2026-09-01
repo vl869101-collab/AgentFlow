@@ -1,27 +1,104 @@
-import type { BotChatMessage, BrowserAction, BotTask, McpInvocation } from "./bot-types";
+import type {
+  BotChatMessage,
+  BrowserAction,
+  BotTask,
+  McpInvocation,
+  CommandPreset,
+} from "./bot-types";
+
+export const quickCommandPresets: CommandPreset[] = [
+  {
+    id: "cmd-1",
+    label: "Pesquisar concorrentes",
+    prompt: "Pesquise os 3 principais concorrentes no Google, colete preços médios e gere uma tabela comparativa.",
+    icon: "search",
+    category: "recon",
+  },
+  {
+    id: "cmd-2",
+    label: "Extrair preços e SKUs",
+    prompt: "Acesse o e-commerce de teste, inspecione a vitrine de produtos e extraia lista de SKUs com valores em BRL.",
+    icon: "extract",
+    category: "scraping",
+  },
+  {
+    id: "cmd-3",
+    label: "Preencher formulário",
+    prompt: "Navegue até a página de checkout/cadastro, preencha os dados no ambiente de homologação e confirme o envio.",
+    icon: "form",
+    category: "automation",
+  },
+  {
+    id: "cmd-4",
+    label: "Navegar e auditar site",
+    prompt: "Acesse o console de métricas AWS/CloudWatch, verifique instâncias EC2 ativas e capture alarmes pendentes.",
+    icon: "navigate",
+    category: "recon",
+  },
+];
 
 export const initialMockChatMessages: BotChatMessage[] = [
   {
     id: "msg-1",
     sender: "system",
-    content: "Agentflowbot v2.4 inicializado. Sessão do navegador Chromium sandbox conectada via WebRTC/noVNC com isolamento de segurança.",
+    content: "Agentflowbot v2.5 (Grok Engine) inicializado. Sessão Chromium sandbox conectada via WebRTC de ultra-baixa latência com isolamento por contêiner.",
     timestamp: "10:42:01",
   },
   {
     id: "msg-2",
     sender: "user",
-    content: "Por favor, acesse o painel da AWS, verifique as instâncias EC2 ativas na região us-east-1 e faça uma captura dos alarmes em vermelho.",
+    content: "Acesse o painel da AWS, verifique as instâncias EC2 ativas na região us-east-1 e faça uma captura dos alarmes em vermelho.",
     timestamp: "10:42:15",
   },
   {
     id: "msg-3",
     sender: "bot",
-    content: "Com certeza! Estou inicializando a rotina de navegação segura com MCP Puppeteer / Playwright para autenticação e consulta de métricas.",
+    content: "Iniciando plano de navegação autônoma. Vou acessar o console EC2 da AWS, autenticar via credenciais isoladas do Vault e extrair a telemetria dos alarmes ativos.",
     timestamp: "10:42:18",
-    thinking: "Planejando sequência: 1. Navegar até o console AWS 2. Executar login através do Vault MCP 3. Localizar página de instâncias EC2 4. Inspecionar CloudWatch alarms.",
+    reasoningTimeMs: 1450,
+    thinking: "Planejando fluxo de interação: 1. Abrir console AWS us-east-1 2. Verificar tokens de sessão seguros 3. Inspecionar tabela de instâncias 4. Localizar widget de alarmes críticos do CloudWatch e capturar snapshot.",
+    thoughts: [
+      {
+        id: "th-1",
+        type: "plan",
+        title: "Planejamento de Rota de Navegação",
+        detail: "Definido endpoint https://us-east-1.console.aws.amazon.com/ec2/home com espera de networkidle0.",
+        status: "completed",
+        timestamp: "10:42:19",
+        durationMs: 210,
+      },
+      {
+        id: "th-2",
+        type: "navigate",
+        title: "Navegando até o Console EC2",
+        detail: "GET https://console.aws.amazon.com/ec2 [HTTP 200 OK]",
+        status: "completed",
+        timestamp: "10:42:20",
+        durationMs: 840,
+      },
+      {
+        id: "th-3",
+        type: "click",
+        title: "Selecionando Região us-east-1",
+        detail: "Clique no seletor button[data-testid='region-selector']",
+        status: "completed",
+        timestamp: "10:42:32",
+        durationMs: 150,
+      },
+      {
+        id: "th-4",
+        type: "extract",
+        title: "Mapeando Tabela de Instâncias",
+        detail: "Extraídos 4 registros DOM: i-0fa83c799a, i-0129bc944f, i-0994fa1182...",
+        status: "completed",
+        timestamp: "10:42:48",
+        durationMs: 410,
+      },
+    ],
     toolCall: {
       name: "browser_navigate",
-      server: "mcp-puppeteer-cluster",
+      server: "mcp-playwright-cluster",
+      actionType: "navigate",
       args: { url: "https://us-east-1.console.aws.amazon.com/ec2/home", waitUntil: "networkidle0" },
       status: "success",
     },
@@ -29,11 +106,34 @@ export const initialMockChatMessages: BotChatMessage[] = [
   {
     id: "msg-4",
     sender: "bot",
-    content: "Navegação concluída. Identifiquei 4 instâncias em execução e 1 alarme do CloudWatch pendente de atenção (High CPU Utilization em i-0fa83c799a).",
+    content: "Navegação e extração concluídas com sucesso. Foram detectadas 4 instâncias EC2 em execução e 1 alarme crítico ativo no CloudWatch (High CPU em i-0fa83c799a). O snapshot visual foi capturado e indexado no log.",
     timestamp: "10:43:02",
+    reasoningTimeMs: 920,
+    thinking: "Inspecionando dados obtidos: 1 instância atingiu 94.8% de CPU. Preparando alerta formatado e recomendação de remediação.",
+    thoughts: [
+      {
+        id: "th-5",
+        type: "verify",
+        title: "Auditoria de Alarmes CloudWatch",
+        detail: "Métrica CPUUtilization > 90% confirmada durante 5 minutos consecutivos.",
+        status: "completed",
+        timestamp: "10:42:58",
+        durationMs: 310,
+      },
+      {
+        id: "th-6",
+        type: "extract",
+        title: "Captura de Snapshot de Alerta",
+        detail: "Armazenado snapshot em alta resolução na área do incidente.",
+        status: "completed",
+        timestamp: "10:43:01",
+        durationMs: 220,
+      },
+    ],
     toolCall: {
       name: "cloudwatch_get_alarms",
       server: "aws-cloudwatch-mcp",
+      actionType: "extract",
       args: { stateValue: "ALARM", region: "us-east-1" },
       status: "success",
     },
@@ -68,6 +168,15 @@ export const initialMockActions: BrowserAction[] = [
   },
   {
     id: "act-4",
+    type: "type",
+    target: "input#instance-search-filter",
+    value: "state=running",
+    timestamp: "10:42:40",
+    durationMs: 280,
+    status: "completed",
+  },
+  {
+    id: "act-5",
     type: "extract",
     target: "table.instances-grid tbody tr",
     value: "4 instâncias mapeadas",
@@ -76,7 +185,7 @@ export const initialMockActions: BrowserAction[] = [
     status: "completed",
   },
   {
-    id: "act-5",
+    id: "act-6",
     type: "screenshot",
     target: "viewport_full",
     value: "CloudWatch Alarm snapshot salvo",
@@ -85,7 +194,7 @@ export const initialMockActions: BrowserAction[] = [
     status: "completed",
   },
   {
-    id: "act-6",
+    id: "act-7",
     type: "hover",
     target: "div.alarm-badge-danger",
     timestamp: "10:43:10",
@@ -122,7 +231,7 @@ export const initialMockTasks: BotTask[] = [
 export const initialMockMcpInvocations: McpInvocation[] = [
   {
     id: "mcp-inv-1",
-    serverName: "mcp-puppeteer-cluster",
+    serverName: "mcp-playwright-cluster",
     toolName: "browser_navigate",
     arguments: { url: "https://console.aws.amazon.com/ec2", viewport: { width: 1920, height: 1080 } },
     response: { status: 200, pageTitle: "Amazon EC2 Management Console", loadTimeMs: 840 },
@@ -142,7 +251,7 @@ export const initialMockMcpInvocations: McpInvocation[] = [
   },
   {
     id: "mcp-inv-3",
-    serverName: "mcp-puppeteer-cluster",
+    serverName: "mcp-playwright-cluster",
     toolName: "capture_element_screenshot",
     arguments: { selector: "#alarm-widget-critical", format: "webp", quality: 90 },
     response: { url: "storage://snapshots/ec2-alarm-104301.webp", sizeKb: 142 },

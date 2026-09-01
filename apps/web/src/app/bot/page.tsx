@@ -12,6 +12,7 @@ import type {
   BrowserAction,
   McpInvocation,
   StreamProtocol,
+  ThoughtStep,
 } from "@/components/bot/bot-types";
 import {
   initialMockActions,
@@ -40,38 +41,79 @@ export default function BotConsolePage() {
     setMessages((prev) => [...prev, userMsg]);
     setIsStreaming(true);
 
-    // Simulação da resposta inteligente do Agentflowbot
+    // Simulação do pipeline de raciocínio e execução do Grok Bot
     setTimeout(() => {
-      const isSearchOrNavigate = content.toLowerCase().includes("http") || content.toLowerCase().includes("acess") || content.toLowerCase().includes("cliqu");
+      const isSearchOrNavigate =
+        content.toLowerCase().includes("http") ||
+        content.toLowerCase().includes("acess") ||
+        content.toLowerCase().includes("pesquis") ||
+        content.toLowerCase().includes("preço") ||
+        content.toLowerCase().includes("cliqu");
+
+      const nowTime = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
       const newAction: BrowserAction = {
         id: `act-${Date.now()}`,
         type: isSearchOrNavigate ? "navigate" : "click",
-        target: isSearchOrNavigate ? content : "button.primary-action",
-        timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        target: isSearchOrNavigate ? content : "button[type='submit']",
+        value: isSearchOrNavigate ? "URL resolvida e inspecionada" : "Valor submetido",
+        timestamp: nowTime,
         durationMs: 420,
         status: "completed",
       };
 
       setActions((prev) => [newAction, ...prev]);
 
+      const dynamicThoughts: ThoughtStep[] = [
+        {
+          id: `th-${Date.now()}-1`,
+          type: "plan",
+          title: "Interpretação e Quebra de Instrução",
+          detail: `Comando: "${content}" mapeado para o motor de automação Grok.`,
+          status: "completed",
+          timestamp: nowTime,
+          durationMs: 140,
+        },
+        {
+          id: `th-${Date.now()}-2`,
+          type: isSearchOrNavigate ? "navigate" : "click",
+          title: isSearchOrNavigate ? "Navegação até Endpoint" : "Interação com Elemento DOM",
+          detail: isSearchOrNavigate ? "Playwright sandbox executou page.goto" : "Playwright executou page.click()",
+          status: "completed",
+          timestamp: nowTime,
+          durationMs: 380,
+        },
+        {
+          id: `th-${Date.now()}-3`,
+          type: "verify",
+          title: "Validação de Integridade e Snapshot",
+          detail: "Verificação de layout e captura de logs concluídos com êxito.",
+          status: "completed",
+          timestamp: nowTime,
+          durationMs: 190,
+        },
+      ];
+
       const botReply: BotChatMessage = {
         id: `msg-${Date.now() + 1}`,
         sender: "bot",
-        content: `Recebi sua instrução: "${content}". Executando operação de navegação e validando integridade no navegador sandbox.`,
-        timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-        thinking: "Analisando intenção do usuário -> Validando seletores DOM no live canvas -> Disparando chamada MCP Puppeteer com isolamento de contexto.",
+        content: `Instrução processada com sucesso: "${content}". Ações de navegação e inspeção executadas no sandbox com isolamento de segurança.`,
+        timestamp: nowTime,
+        reasoningTimeMs: 710,
+        thinking: `Plano executado: Analisada a intenção do usuário -> Executada ação no DOM -> Verificados seletores -> Registrado log de telemetria.`,
+        thoughts: dynamicThoughts,
         toolCall: {
-          name: "mcp_browser_action",
-          server: "mcp-puppeteer-cluster",
-          args: { command: content, mode: botMode },
+          name: "mcp_playwright_action",
+          server: "mcp-playwright-cluster",
+          actionType: isSearchOrNavigate ? "navigate" : "click",
+          args: { command: content, mode: botMode, protocol: streamProtocol },
           status: "success",
         },
       };
 
       setMessages((prev) => [...prev, botReply]);
       setIsStreaming(false);
-    }, 1200);
+    }, 1100);
   };
 
   const handleTakeoverToggle = () => {
@@ -94,10 +136,10 @@ export default function BotConsolePage() {
   return (
     <AppLayout>
       <div className="flex h-[calc(100vh-4rem)] flex-col bg-zinc-950 overflow-hidden">
-        {/* Layout Split Screen: Chat à esquerda + Live Monitor à direita */}
+        {/* Layout Split Screen: Chat Grok à esquerda + Live Monitor central à direita */}
         <div className="flex flex-1 flex-col lg:flex-row overflow-hidden min-h-0">
           {/* Painel Esquerdo: Chat com a IA (40% largura em desktop) */}
-          <div className="flex-1 lg:max-w-[420px] xl:max-w-[480px] h-full overflow-hidden flex flex-col">
+          <div className="flex-1 lg:max-w-[440px] xl:max-w-[500px] h-full overflow-hidden flex flex-col">
             <BotChatPanel
               messages={messages}
               onSendMessage={handleSendMessage}
@@ -107,7 +149,7 @@ export default function BotConsolePage() {
             />
           </div>
 
-          {/* Painel Direito: Live Monitor com streaming em tempo real (60% largura em desktop) */}
+          {/* Painel Direito: Live Monitor Grok Bot com streaming em tempo real */}
           <div className="flex-1 h-full overflow-hidden flex flex-col border-l border-white/10">
             <BotLiveMonitor
               botMode={botMode}
