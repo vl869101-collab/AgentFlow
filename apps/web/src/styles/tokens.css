@@ -11,6 +11,8 @@
   --color-accent: #8b5cf6;
   --color-accent-hover: #7c3aed;
   --color-accent-glow: rgba(139, 92, 246, 0.35);
+  --color-accent-cool: #6366f1;
+  --color-accent-magenta: #d946ef;
 
   /* Layer A1: Structural Zinc Palette */
   --zinc-950: #09090b;

@@ -24,8 +24,8 @@ function CallbackContent() {
     }
 
     auth.exchangeOAuthCode(code)
-      .then(({ token, refreshToken }) => {
-        setToken(token, refreshToken);
+      .then(({ token, refreshToken }: { token: string; refreshToken?: string }) => {
+        if (token) setToken(token, refreshToken);
         router.replace("/dashboard");
       })
       .catch(() => setError("Unable to complete sign in"));

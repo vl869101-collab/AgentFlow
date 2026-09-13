@@ -10,6 +10,7 @@ export interface TabItem {
   count?: number | string;
   icon?: React.ReactNode;
   disabled?: boolean;
+  panelId?: string;
 }
 
 export interface TabsProps {
@@ -31,6 +32,8 @@ export function Tabs({
 }: TabsProps) {
   const [internalValue, setInternalValue] = React.useState(defaultValue ?? items[0]?.id ?? "");
   const active = value ?? internalValue;
+  const instanceId = React.useId();
+  const tabRefs = React.useRef(new Map<string, HTMLButtonElement>());
 
   const setActive = (next: string, disabled?: boolean) => {
     if (disabled) return;
@@ -38,22 +41,54 @@ export function Tabs({
     onChange?.(next);
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+
+    const enabledItems = items.filter((item) => !item.disabled);
+    if (enabledItems.length === 0) return;
+
+    event.preventDefault();
+    const currentIndex = enabledItems.findIndex((item) => item.id === active);
+    const lastIndex = enabledItems.length - 1;
+    let nextIndex = currentIndex < 0 ? 0 : currentIndex;
+
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = lastIndex;
+    if (event.key === "ArrowRight") nextIndex = currentIndex >= lastIndex ? 0 : currentIndex + 1;
+    if (event.key === "ArrowLeft") nextIndex = currentIndex <= 0 ? lastIndex : currentIndex - 1;
+
+    const nextItem = enabledItems[nextIndex];
+    if (!nextItem) return;
+
+    setActive(nextItem.id);
+    tabRefs.current.get(nextItem.id)?.focus();
+  };
+
   return (
     <div
       className={cn("flex items-center gap-1 border-b border-white/10 overflow-x-auto", className)}
       role="tablist"
       aria-label={ariaLabel}
+      onKeyDown={handleKeyDown}
     >
       {items.map((item) => {
         const selected = item.id === active;
+        const tabId = `${instanceId}-tab-${item.id}`;
+        const panelId = `${instanceId}-tabpanel-${item.id}`;
+
         return (
           <button
             key={item.id}
+            ref={(element) => {
+              if (element) tabRefs.current.set(item.id, element);
+              else tabRefs.current.delete(item.id);
+            }}
             type="button"
             role="tab"
-            id={`tab-${item.id}`}
-            aria-controls={`tabpanel-${item.id}`}
+            id={tabId}
+            aria-controls={panelId}
             aria-selected={selected}
+            tabIndex={selected ? 0 : -1}
             disabled={item.disabled}
             onClick={() => setActive(item.id, item.disabled)}
             className={cn(

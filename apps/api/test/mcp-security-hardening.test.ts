@@ -313,3 +313,173 @@ test("MCP Security - Records Merkle hash chained AuditLog and preserves cryptogr
   assert.ok(integrity.latestHash);
   assert.notEqual(integrity.latestHash, GENESIS_HASH);
 });
+
+test("MCP Security - MEMBER role is blocked from sensitive tools (database:write, code:execute, billing:manage)", async () => {
+  const org = await prisma.organization.create({ data: { name: "Role Test Org" } });
+  const memberUser = await prisma.user.create({
+    data: { email: "member@example.com", name: "Member User", password: "hashed_password" },
+  });
+  await prisma.organizationMember.create({
+    data: { userId: memberUser.id, orgId: org.id, role: "MEMBER" },
+  });
+
+  const rawKey = "af_member_restricted_token_999";
+  await prisma.apiKey.create({
+    data: {
+      name: "Member Key",
+      key: createHash("sha256").update(rawKey).digest("hex"),
+      userId: memberUser.id,
+      orgId: org.id,
+    },
+  });
+
+  // 1. Attempt code_execute_js (requires code:execute)
+  const resCode = await app.inject({
+    method: "POST",
+    url: "/mcp/http",
+    headers: { authorization: `Bearer ${rawKey}` },
+    payload: {
+      jsonrpc: "2.0",
+      id: "call-code-1",
+      method: "tools/call",
+      params: {
+        name: "code_execute_js",
+        arguments: { code: "return 42;" },
+      },
+    },
+  });
+  assert.equal(resCode.statusCode, 200);
+  const bodyCode = JSON.parse(resCode.body);
+  assert.equal(bodyCode.result.isError, true);
+  assert.match(bodyCode.result.content[0].text, /Insufficient scope for tool 'code_execute_js'/);
+
+  // 2. Attempt postgres_insert (requires database:write)
+  const resDb = await app.inject({
+    method: "POST",
+    url: "/mcp/http",
+    headers: { authorization: `Bearer ${rawKey}` },
+    payload: {
+      jsonrpc: "2.0",
+      id: "call-db-1",
+      method: "tools/call",
+      params: {
+        name: "postgres_insert",
+        arguments: { table: "users", data: { email: "hack@example.com" } },
+      },
+    },
+  });
+  assert.equal(resDb.statusCode, 200);
+  const bodyDb = JSON.parse(resDb.body);
+  assert.equal(bodyDb.result.isError, true);
+  assert.match(bodyDb.result.content[0].text, /Insufficient scope for tool 'postgres_insert'/);
+
+  // 3. Attempt stripe_create_charge (requires billing:manage or billing:write)
+  const resBilling = await app.inject({
+    method: "POST",
+    url: "/mcp/http",
+    headers: { authorization: `Bearer ${rawKey}` },
+    payload: {
+      jsonrpc: "2.0",
+      id: "call-bill-1",
+      method: "tools/call",
+      params: {
+        name: "stripe_create_charge",
+        arguments: { amount: 5000, currency: "usd" },
+      },
+    },
+  });
+  assert.equal(resBilling.statusCode, 200);
+  const bodyBilling = JSON.parse(resBilling.body);
+  assert.equal(bodyBilling.result.isError, true);
+  assert.match(bodyBilling.result.content[0].text, /Insufficient scope for tool 'stripe_create_charge'/);
+});
+
+test("MCP Security - Strict deny-by-default when ctx.scopes is missing or empty", async () => {
+  const { callTool } = await import("../src/mcp/tools.js");
+
+  // Call tool with empty context scopes
+  const resultEmpty = await callTool("create_workflow", { name: "Test Flow" }, { scopes: [] });
+  assert.equal(resultEmpty.isError, true);
+  assert.match(resultEmpty.content[0].text, /Insufficient scope for tool 'create_workflow'/);
+  assert.match(resultEmpty.content[0].text, /-32003/);
+
+  // Call tool with undefined scopes in context
+  const resultUndefined = await callTool("execute_workflow", { workflowId: "wf_1" }, {});
+  assert.equal(resultUndefined.isError, true);
+  assert.match(resultUndefined.content[0].text, /Insufficient scope for tool 'execute_workflow'/);
+  assert.match(resultUndefined.content[0].text, /-32003/);
+});
+
+test("MCP Security - Protected /mcp/status requires authentication and admin authorization for updates", async () => {
+  const org = await prisma.organization.create({ data: { name: "Status Auth Org" } });
+  const adminUser = await prisma.user.create({
+    data: { email: "admin-status@example.com", name: "Admin Status", password: "hashed_password" },
+  });
+  await prisma.organizationMember.create({
+    data: { userId: adminUser.id, orgId: org.id, role: "ADMIN" },
+  });
+  const adminRawKey = "af_admin_status_key_111";
+  await prisma.apiKey.create({
+    data: {
+      name: "Admin Status Key",
+      key: createHash("sha256").update(adminRawKey).digest("hex"),
+      userId: adminUser.id,
+      orgId: org.id,
+    },
+  });
+
+  const memberUser = await prisma.user.create({
+    data: { email: "member-status@example.com", name: "Member Status", password: "hashed_password" },
+  });
+  await prisma.organizationMember.create({
+    data: { userId: memberUser.id, orgId: org.id, role: "MEMBER" },
+  });
+  const memberRawKey = "af_member_status_key_222";
+  await prisma.apiKey.create({
+    data: {
+      name: "Member Status Key",
+      key: createHash("sha256").update(memberRawKey).digest("hex"),
+      userId: memberUser.id,
+      orgId: org.id,
+    },
+  });
+
+  // 1. Unauthenticated GET /mcp/status -> 401
+  const resGetUnauth = await app.inject({
+    method: "GET",
+    url: "/mcp/status",
+  });
+  assert.equal(resGetUnauth.statusCode, 401);
+
+  // 2. Authenticated GET /mcp/status -> 200
+  const resGetAuth = await app.inject({
+    method: "GET",
+    url: "/mcp/status",
+    headers: { authorization: `Bearer ${memberRawKey}` },
+  });
+  assert.equal(resGetAuth.statusCode, 200);
+  const bodyGetAuth = JSON.parse(resGetAuth.body);
+  assert.equal(bodyGetAuth.server, "agentflow-mcp");
+
+  // 3. MEMBER attempts POST /mcp/status -> 403 Forbidden
+  const resPostMember = await app.inject({
+    method: "POST",
+    url: "/mcp/status",
+    headers: { authorization: `Bearer ${memberRawKey}` },
+    payload: { enabled: false },
+  });
+  assert.equal(resPostMember.statusCode, 403);
+  const bodyPostMember = JSON.parse(resPostMember.body);
+  assert.equal(bodyPostMember.code, "FORBIDDEN");
+
+  // 4. ADMIN executes POST /mcp/status -> 200 OK
+  const resPostAdmin = await app.inject({
+    method: "POST",
+    url: "/mcp/status",
+    headers: { authorization: `Bearer ${adminRawKey}` },
+    payload: { enabled: true },
+  });
+  assert.equal(resPostAdmin.statusCode, 200);
+  const bodyPostAdmin = JSON.parse(resPostAdmin.body);
+  assert.equal(bodyPostAdmin.enabled, true);
+});

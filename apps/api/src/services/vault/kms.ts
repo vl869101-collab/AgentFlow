@@ -6,6 +6,8 @@ import {
   encryptVaultData,
   registerEncryptionKeyVersion,
   setCurrentKeyVersion,
+  assertKmsKeySecurity,
+  DEFAULT_KEY_HEX,
 } from "./crypto.js";
 import {
   kmsWrappedKeySchema,
@@ -36,11 +38,17 @@ export class LocalKmsProvider implements KmsKeyProvider {
 
   constructor(initialKeyHex?: string, providerName = "local-env") {
     this.name = providerName;
-    const defaultHex =
-      initialKeyHex ||
-      process.env.CREDENTIAL_ENCRYPTION_KEY ||
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    this.registerKey(1, defaultHex);
+    if (process.env.NODE_ENV === "production") {
+      assertKmsKeySecurity(initialKeyHex);
+      const keyHex = initialKeyHex || process.env.CREDENTIAL_ENCRYPTION_KEY!;
+      this.registerKey(1, keyHex);
+    } else {
+      const defaultHex =
+        initialKeyHex ||
+        process.env.CREDENTIAL_ENCRYPTION_KEY ||
+        DEFAULT_KEY_HEX;
+      this.registerKey(1, defaultHex);
+    }
 
     // Also load any environment variables like CREDENTIAL_ENCRYPTION_KEY_V2, V3, etc.
     for (let v = 2; v <= 10; v++) {

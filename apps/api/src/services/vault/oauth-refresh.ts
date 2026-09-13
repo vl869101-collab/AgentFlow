@@ -37,6 +37,9 @@ export const KNOWN_PROVIDER_TOKEN_URLS: Record<string, string> = {
   zendesk: "https://{subdomain}.zendesk.com/oauth/tokens",
 };
 
+// Single-flight in-memory deduplication map for concurrent token refresh requests
+const inFlightRefreshes = new Map<string, Promise<RefreshResult>>();
+
 export function resolveTokenEndpoint(providerId?: string, explicitUrl?: string): string {
   if (explicitUrl && explicitUrl.trim().length > 0) {
     return explicitUrl.trim();
@@ -122,6 +125,29 @@ export async function ensureFreshOAuth2Token(
  * and re-encryption via AES-256-GCM in the Vault.
  */
 export async function refreshOAuth2Credential(
+  credentialId: string,
+  orgId: string,
+  force = false
+): Promise<RefreshResult> {
+  const cacheKey = `${orgId}:${credentialId}`;
+  const existingFlight = inFlightRefreshes.get(cacheKey);
+  if (existingFlight) {
+    return existingFlight;
+  }
+
+  const refreshPromise = (async () => {
+    try {
+      return await executeRefreshOAuth2Credential(credentialId, orgId, force);
+    } finally {
+      inFlightRefreshes.delete(cacheKey);
+    }
+  })();
+
+  inFlightRefreshes.set(cacheKey, refreshPromise);
+  return refreshPromise;
+}
+
+async function executeRefreshOAuth2Credential(
   credentialId: string,
   orgId: string,
   force = false

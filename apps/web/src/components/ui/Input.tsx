@@ -16,11 +16,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   ref,
 ) {
   const generatedId = useId();
-  const inputId = id ?? props.name ?? generatedId;
+  const inputId = id ?? generatedId;
   const helpId = hint ? `${inputId}-hint` : undefined;
   const errorId = error ? `${inputId}-error` : undefined;
-
-  const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
+  const describedBy = [props["aria-describedby"], helpId, errorId]
+    .filter(Boolean)
+    .join(" ") || undefined;
 
   return (
     <div className="w-full space-y-1.5 text-left">
@@ -52,9 +53,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             error && "border-red-500/50 focus:ring-red-500",
             className,
           )}
-          aria-invalid={Boolean(error)}
-          aria-describedby={describedBy}
           {...props}
+          aria-invalid={props["aria-invalid"] ?? (error ? true : undefined)}
+          aria-describedby={describedBy}
         />
         {rightIcon ? (
           <div className="pointer-events-none absolute right-3 flex items-center text-zinc-500" aria-hidden="true">
@@ -62,7 +63,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           </div>
         ) : null}
       </div>
-      {hint && !error ? (
+      {hint ? (
         <p id={helpId} className="text-xs text-zinc-500">
           {hint}
         </p>

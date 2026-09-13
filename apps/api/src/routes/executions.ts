@@ -7,7 +7,12 @@ import { createWorkflowExecution, runExecution } from "../services/executor.js";
 import { enqueueExecution } from "../services/queue.js";
 import { executeWorkflowSchema } from "@agentflow/shared";
 import { telemetry } from "../lib/otel.js";
-import { recordAuditEvent } from "../services/audit-ledger.js";
+import { recordAuditEvent, getExecutionAuditTrail } from "../services/audit-ledger.js";
+import {
+  getEventsAfter,
+  subscribeToExecutionTelemetry,
+  type ExecutionTelemetryEvent,
+} from "../services/execution-telemetry.js";
 
 export async function executionRoutes(app: FastifyInstance) {
   app.addHook("onRequest", requireAuth);
@@ -42,7 +47,18 @@ export async function executionRoutes(app: FastifyInstance) {
     const parsed = executeWorkflowSchema.parse({ input: body.input, trigger: body.trigger ?? "api" });
     const execution = await createWorkflowExecution(body.workflowId, parsed.input, { userId, trigger: parsed.trigger });
     await prisma.usageRecord.create({ data: { type: "execution", quantity: 1, orgId: workflow.orgId, userId } });
-    if (!(await enqueueExecution(execution.id))) void runExecution(execution.id);
+
+    const incomingTraceHeader =
+      (request.headers["traceparent"] as string | undefined) ||
+      (request.headers["x-traceparent"] as string | undefined);
+    const traceInfo = telemetry.getOrCreateTraceParent(incomingTraceHeader);
+
+    if (!(await enqueueExecution(execution.id, { traceparent: traceInfo.traceparent }))) {
+      void runExecution(execution.id, {
+        traceparent: traceInfo.traceparent,
+        parentContext: traceInfo.context,
+      });
+    }
     return reply.status(202).send(execution);
   });
 
@@ -183,6 +199,103 @@ export async function executionRoutes(app: FastifyInstance) {
     };
   });
 
+  app.get("/:id/stream", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const orgId = orgIdFromRequest(request);
+    const execution = await prisma.workflowExecution.findFirst({
+      where: orgId ? { id, orgId } : { id, userId },
+    });
+    if (!execution) {
+      return reply.code(404).send({ error: "Execution not found", code: "NOT_FOUND" });
+    }
+
+    reply.hijack();
+    reply.raw.setHeader("Content-Type", "text/event-stream");
+    reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
+    reply.raw.setHeader("Connection", "keep-alive");
+    reply.raw.setHeader("X-Accel-Buffering", "no");
+    reply.raw.flushHeaders();
+
+    let isAborted = false;
+
+    const sendEvent = (event: ExecutionTelemetryEvent) => {
+      if (isAborted) return;
+      try {
+        reply.raw.write(`id: ${event.id}\nevent: ${event.eventType}\ndata: ${JSON.stringify(event)}\n\n`);
+      } catch {
+        isAborted = true;
+      }
+    };
+
+    const lastEventId =
+      (request.headers["last-event-id"] as string | undefined) ||
+      ((request.query as any)?.lastEventId as string | undefined);
+
+    const replayed = getEventsAfter(id, lastEventId);
+    for (const ev of replayed) {
+      sendEvent(ev);
+    }
+
+    const isTerminal = ["SUCCESS", "COMPLETED", "FAILED", "CANCELLED"].includes(execution.status);
+    const hasDeliveredFinished = replayed.some((e) => e.eventType === "execution_finished");
+
+    if (isTerminal) {
+      if (!hasDeliveredFinished) {
+        sendEvent({
+          id: `${id}:terminal`,
+          seq: replayed.length > 0 ? replayed[replayed.length - 1].seq + 1 : 1,
+          executionId: id,
+          eventType: "execution_finished",
+          status: execution.status,
+          duration: execution.duration ?? undefined,
+          timestamp: (execution.finishedAt ?? new Date()).toISOString(),
+          output: execution.output,
+          error: execution.error ?? undefined,
+        });
+      }
+      setTimeout(() => {
+        if (!isAborted) {
+          try {
+            reply.raw.end();
+          } catch {}
+        }
+      }, 50);
+      return;
+    }
+
+    const unsubscribe = await subscribeToExecutionTelemetry(id, (event) => {
+      if (isAborted) return;
+      sendEvent(event);
+      if (event.eventType === "execution_finished") {
+        setTimeout(() => {
+          if (!isAborted) {
+            try {
+              reply.raw.end();
+            } catch {}
+          }
+        }, 500);
+      }
+    });
+
+    const heartbeat = setInterval(() => {
+      if (!isAborted) {
+        try {
+          reply.raw.write(": keepalive\n\n");
+        } catch {
+          isAborted = true;
+          clearInterval(heartbeat);
+        }
+      }
+    }, 15000);
+
+    request.raw.on("close", () => {
+      isAborted = true;
+      clearInterval(heartbeat);
+      void unsubscribe();
+    });
+  });
+
   app.get("/:id/traces", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = userIdFromRequest(request);
@@ -249,6 +362,73 @@ export async function executionRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  app.post("/:id/retry", { config: { rateLimit: { max: isTest ? 10000 : 30, timeWindow: "1 minute" } }, preHandler: checkQuota }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const orgId = orgIdFromRequest(request);
+
+    const execution = await prisma.workflowExecution.findFirst({
+      where: orgId ? { id, orgId } : { id, userId },
+    });
+    if (!execution) {
+      return reply.code(404).send({ error: "Execution not found", code: "NOT_FOUND" });
+    }
+
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: execution.workflowId, ...(orgId ? { orgId } : { ownerId: userId }) },
+    });
+    if (!workflow) {
+      return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+    }
+
+    const body = (request.body as { input?: unknown } | null | undefined) ?? {};
+    const input = body.input !== undefined ? body.input : execution.input;
+
+    const newExecution = await createWorkflowExecution(execution.workflowId, input, {
+      userId,
+      trigger: "retry",
+      parentExecutionId: execution.id,
+    });
+
+    await prisma.usageRecord.create({
+      data: { type: "execution", quantity: 1, orgId: workflow.orgId, userId },
+    });
+
+    if (execution.orgId) {
+      await recordAuditEvent({
+        orgId: execution.orgId,
+        userId,
+        action: "execution.retry_requested",
+        resource: "execution",
+        resourceId: newExecution.id,
+        metadata: {
+          workflowId: execution.workflowId,
+          parentExecutionId: execution.id,
+          originalTrigger: execution.trigger,
+        },
+        ip: request.ip,
+        userAgent: request.headers["user-agent"] as string | undefined,
+      }).catch(() => {});
+    }
+
+    const incomingTraceHeader =
+      (request.headers["traceparent"] as string | undefined) ||
+      (request.headers["x-traceparent"] as string | undefined);
+    const traceInfo = telemetry.getOrCreateTraceParent(incomingTraceHeader);
+
+    if (!(await enqueueExecution(newExecution.id, { traceparent: traceInfo.traceparent }))) {
+      void runExecution(newExecution.id, {
+        traceparent: traceInfo.traceparent,
+        parentContext: traceInfo.context,
+      });
+    }
+
+    return reply.status(202).send({
+      ...newExecution,
+      parentExecutionId: execution.id,
+    });
+  });
+
   // node-level execution logs — org-scoped to prevent IDOR (see redesign audit H-05)
   app.get("/:id/nodes", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -263,5 +443,18 @@ export async function executionRoutes(app: FastifyInstance) {
       where: { executionId: id },
       orderBy: { startedAt: "asc" },
     });
+  });
+
+  app.get("/:id/audit", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const orgId = orgIdFromRequest(request);
+    const execution = await prisma.workflowExecution.findFirst({
+      where: orgId ? { id, orgId } : { id, userId },
+    });
+    if (!execution) return reply.code(404).send({ error: "Execution not found", code: "NOT_FOUND" });
+
+    const auditTrail = await getExecutionAuditTrail(id);
+    return auditTrail;
   });
 }

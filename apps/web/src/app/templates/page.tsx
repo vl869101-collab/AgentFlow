@@ -363,10 +363,15 @@ function TemplatesMarketplaceContent() {
                 return (
                   <article
                     key={tpl.id}
-                    onClick={() => setPreviewTemplate(tpl)}
-                    className="group relative flex flex-col justify-between rounded-2xl border border-white/10 bg-zinc-900/50 p-5 transition-all duration-200 hover:border-violet-500/50 hover:bg-zinc-900/90 hover:shadow-xl hover:shadow-violet-500/10 cursor-pointer backdrop-blur-sm focus-within:ring-2 focus-within:ring-violet-500"
+                    className="af-template-card group relative flex flex-col justify-between rounded-2xl border border-white/10 bg-zinc-900/50 p-5 transition-all duration-200 hover:border-violet-500/50 hover:bg-zinc-900/90 hover:shadow-xl hover:shadow-violet-500/10 backdrop-blur-sm focus-within:ring-2 focus-within:ring-violet-500"
                   >
                     {/* Card Top: Icon, Tag & Difficulty */}
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTemplate(tpl)}
+                      className="w-full text-left outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 rounded-xl"
+                      aria-label={`Visualizar detalhes do template ${tpl.name}`}
+                    >
                     <div>
                       <div className="flex items-start justify-between gap-3">
                         <div
@@ -412,6 +417,7 @@ function TemplatesMarketplaceContent() {
                         ))}
                       </div>
                     </div>
+                    </button>
 
                     {/* Card Bottom: Metrics and Actions */}
                     <div className="mt-6 pt-4 border-t border-white/10 flex items-center justify-between gap-3">
@@ -551,4 +557,3 @@ export default function TemplatesMarketplacePage() {
     </Suspense>
   );
 }
-

@@ -204,7 +204,9 @@ test("TASK-08: scopeMatches validates granular scopes, aliases and wildcards", (
   // 1. Wildcard matching
   assert.equal(scopeMatches(["*"], ["workflows:read", "executions:write"]), true);
   assert.equal(scopeMatches(["admin"], ["vault:decrypt", "workflows:write"]), true);
-  assert.equal(scopeMatches(["tools:call"], ["any:tool:scope"]), true);
+  // Universal bypass eliminated: tools:call alone does NOT satisfy arbitrary sensitive scopes
+  assert.equal(scopeMatches(["tools:call"], ["any:tool:scope"]), false);
+  assert.equal(scopeMatches(["tools:call"], ["tools:call"]), true);
 
   // 2. Domain prefix matching
   assert.equal(scopeMatches(["workflows:*"], ["workflows:read"]), true);

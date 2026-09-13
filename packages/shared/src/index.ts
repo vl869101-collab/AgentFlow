@@ -1,6 +1,7 @@
 import { z } from "zod";
 export {
   type BinaryData,
+  type BinaryPayloadMeta,
   type PairedItemRef,
   type PairedItem,
   type NodeItem,
@@ -11,10 +12,15 @@ export {
   type ItemExtractionOptions,
   type ItemUnwrapOptions,
   binaryDataSchema,
+  binaryPayloadMetaSchema,
+  BinaryPayloadMetaSchema,
   pairedItemRefSchema,
+  PairedItemRefSchema,
   pairedItemSchema,
   nodeItemSchema,
+  NodeItemSchema,
   nodeItemsArraySchema,
+  NodeItemsSchema,
   normalizePath,
   extractFieldByPath,
   setFieldByPath,
@@ -30,7 +36,7 @@ export {
   linkPairedItems,
   normalizeToItemsContract,
   normalizeFromItemsContract,
-} from "./items.js";
+} from "./items";
 export {
   computeWorkflowDiff,
   normalizeSnapshotNodes,
@@ -46,10 +52,11 @@ export {
   type VisualEdgeDiffMarker,
   type WorkflowVisualDiffMap,
   type WorkflowDiffResult,
-} from "./workflow-diff.js";
+} from "./workflow-diff";
 export {
   importN8nWorkflow,
   createAgentFlowFromN8n,
+  convertN8nToAgentflow,
   validateN8nWorkflow,
   N8N_SDK_CATALOG,
   type N8nWorkflowExport,
@@ -60,7 +67,7 @@ export {
   type N8nValidationError,
   type AgentFlowImportResult,
   type ImportOptions,
-} from "./n8n-import.js";
+} from "./n8n-import";
 export {
   kmsWrappedKeySchema,
   vaultEnvelopeSchema,
@@ -69,7 +76,12 @@ export {
   type KmsKeyMetadata,
   type KmsKeyProvider,
   type KmsProvider,
-} from "./kms.js";
+} from "./kms";
+export {
+  fiveFieldContractSchema,
+  type FiveFieldContract,
+  validateFiveFieldContract,
+} from "./five-field-contract";
 
 // ═══════════════════════════════════════════
 // Auth Schemas
@@ -115,6 +127,7 @@ const workflowNodeTypeValues = [
   "cron",
   "cronTrigger",
   "manual",
+  "manualTrigger",
   "http",
   "httpRequest",
   "postgres",
@@ -141,6 +154,12 @@ const workflowNodeTypeValues = [
   "llm_chain",
   "vector_store",
   "execute_workflow",
+  "executeWorkflow",
+  "executeWorkflowTrigger",
+  "subworkflow",
+  "sub_workflow",
+  "swarm",
+  "swarmNode",
   "condition",
   "transform",
   "delay",
@@ -398,6 +417,24 @@ export const createCredentialSchema = z.object({
   data: z.record(z.any()),
 });
 
+export const updateCredentialSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    type: credentialBucketSchema.or(z.string().min(1).max(50)).optional(),
+    provider: z.string().min(1).max(100).optional(),
+    data: z.record(z.any()).optional(),
+  })
+  .refine(
+    (data) =>
+      data.name !== undefined ||
+      data.data !== undefined ||
+      data.type !== undefined ||
+      data.provider !== undefined,
+    {
+      message: "At least one field (name, data, type, provider) must be provided for update",
+    }
+  );
+
 // ═══════════════════════════════════════════
 // Webhook Schemas
 // ═══════════════════════════════════════════
@@ -454,7 +491,7 @@ export type ApiError = {
 export const PlanEnum = z.enum(["FREE", "STARTER", "BASIC", "GROWTH", "PRO", "ENTERPRISE"]);
 export const MemberRoleEnum = z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]);
 export const WorkflowStatusEnum = z.enum(["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]);
-export const ExecutionStatusEnum = z.enum(["PENDING", "RUNNING", "SUCCESS", "FAILED", "CANCELLED", "WAITING_APPROVAL"]);
+export const ExecutionStatusEnum = z.enum(["PENDING", "RUNNING", "SUCCESS", "FAILED", "CANCELLED", "WAITING_APPROVAL", "WAITING", "SUSPENDED"]);
 
 export type Plan = z.infer<typeof PlanEnum>;
 export type MemberRole = z.infer<typeof MemberRoleEnum>;
@@ -484,6 +521,7 @@ export const NODE_TYPES = [
   { type: "llm_model", label: "LLM Model", icon: "Cpu", color: "#a855f7" },
   { type: "llm_chain", label: "LLM Chain", icon: "Boxes", color: "#8b5cf6" },
   { type: "vector_store", label: "Vector Store", icon: "Layers", color: "#06b6d4" },
+  { type: "swarm", label: "Swarm Agents", icon: "Users", color: "#f59e0b" },
   { type: "execute_workflow", label: "Execute Workflow", icon: "Workflow", color: "#10b981" },
   { type: "approval", label: "Approval", icon: "CheckCircle", color: "#ef4444" },
   { type: "merge", label: "Merge", icon: "Merge", color: "#06b6d4" },
@@ -528,6 +566,7 @@ export type NodeConfigInput = z.infer<typeof nodeConfigSchema>;
 export type EdgeConfigInput = z.infer<typeof edgeConfigSchema>;
 export type ExecuteWorkflowInput = z.infer<typeof executeWorkflowSchema>;
 export type CreateCredentialInput = z.infer<typeof createCredentialSchema>;
+export type UpdateCredentialInput = z.infer<typeof updateCredentialSchema>;
 export type CredentialBucket = z.infer<typeof credentialBucketSchema>;
 export type CreateWebhookInput = z.infer<typeof createWebhookSchema>;
 export type GenerateWorkflowInput = z.infer<typeof generateWorkflowSchema>;
@@ -639,3 +678,13 @@ export interface ExecutionTrace {
   duration?: number | null;
   traces: NodeTrace[];
 }
+
+// ═══════════════════════════════════════════
+// Provider Defaults & Auth Schemes
+// ═══════════════════════════════════════════
+
+export {
+  type ProviderAuthDefaults,
+  OFFICIAL_PROVIDER_DEFAULTS,
+  resolveProviderDefaults,
+} from "./provider-defaults";

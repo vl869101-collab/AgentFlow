@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 export interface ApiOptions {
   method?: string;
@@ -333,6 +333,14 @@ export const executions = {
   get: (id: string) => api<Execution>(`/api/executions/${id}`),
   trigger: (workflowId: string, input?: unknown) =>
     api<Execution>("/api/executions/trigger", { method: "POST", body: { workflowId, input } }),
+  getStreamUrl: (id: string, lastEventId?: string) => {
+    const token = getToken();
+    const params = new URLSearchParams();
+    if (token) params.set("token", token);
+    if (lastEventId) params.set("lastEventId", lastEventId);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return `${API_BASE}/api/executions/${id}/stream${qs}`;
+  },
 };
 
 // Approvals

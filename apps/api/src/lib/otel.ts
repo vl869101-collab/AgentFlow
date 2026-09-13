@@ -181,10 +181,36 @@ class TelemetryManager {
   parseTraceParent(header?: string | null): TraceContext | null {
     if (!header || typeof header !== "string") return null;
     const parts = header.trim().split("-");
-    if (parts.length < 4) return null;
+    if (parts.length !== 4) return null;
     const [version, traceId, spanId, traceFlags] = parts;
-    if (version !== "00" || traceId.length !== 32 || spanId.length !== 16) return null;
-    return { traceId, spanId, traceFlags };
+    if (version !== "00") return null;
+    if (!/^[0-9a-fA-F]{32}$/.test(traceId) || /^0{32}$/.test(traceId)) return null;
+    if (!/^[0-9a-fA-F]{16}$/.test(spanId) || /^0{16}$/.test(spanId)) return null;
+    if (!/^[0-9a-fA-F]{2}$/.test(traceFlags)) return null;
+    return {
+      traceId: traceId.toLowerCase(),
+      spanId: spanId.toLowerCase(),
+      traceFlags: traceFlags.toLowerCase(),
+    };
+  }
+
+  getOrCreateTraceParent(header?: string | null): { traceparent: string; context: TraceContext } {
+    const parsed = this.parseTraceParent(header);
+    if (parsed) {
+      return {
+        traceparent: this.formatTraceParent(parsed),
+        context: parsed,
+      };
+    }
+    const context: TraceContext = {
+      traceId: this.generateTraceId(),
+      spanId: this.generateSpanId(),
+      traceFlags: "01",
+    };
+    return {
+      traceparent: this.formatTraceParent(context),
+      context,
+    };
   }
 
   formatTraceParent(ctx: TraceContext | Span): string {

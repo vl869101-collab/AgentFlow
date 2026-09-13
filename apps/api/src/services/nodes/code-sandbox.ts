@@ -1,16 +1,14 @@
 /**
- * Sandbox seguro para execucao de codigo JavaScript em nodes do tipo `code`.
+ * Sandbox isolado para execucao segura de codigo JavaScript em nodes do tipo `code`.
  *
- * Usa o modulo nativo `vm` do Node.js com um contexto restrito que bloqueia
- * acesso a `require`, `process`, `global`, `eval`, `Function`, `fetch`,
- * `fs`, `net`, `child_process` e outros modulos perigosos.
- *
- * Implementacao inspirada nas premissas do reviewer-relatorio.md (secao 6):
- * - Timeout estrito por execucao
- * - Sem acesso a filesystem, rede, ou processos filhos
- * - Apenas globals seguros expostos (JSON, Array, Math, etc.)
+ * Utiliza o modulo de isolamento em nivel de V8 `isolated-vm` com:
+ * - Limite estrito de memoria por isolate (padrao 64MB)
+ * - Timeout estrito duplo (CPU sincrono via V8 + wall-clock timer para promises pendentes)
+ * - Zero acesso a filesystem, rede, processos filhos ou globals do Node.js host (process, require, Buffer, etc.)
+ * - Camada adicional pre-compilacao com detectDangerousPatterns (defense in depth)
+ * - Bridge bidirecional segura para helpers e variaveis n8n ($input, $helpers, $json, console, etc.)
  */
-import vm from "node:vm";
+import ivm from "isolated-vm";
 import { createCodeExecutionError } from "./types.js";
 
 export const DEFAULT_TIMEOUT_MS = 5_000;
@@ -62,113 +60,116 @@ export function detectDangerousPatterns(code: string): string[] {
   return dangers;
 }
 
-/**
- * Cria um contexto VM restrito com apenas os globals e variaveis n8n
- * que o codigo do usuario precisa.
- *
- * Tudo o que nao esta explicitamente listado aqui e bloqueado.
- */
-export function createSandboxContext(n8nVariables: Record<string, unknown>): vm.Context {
-  const logs: string[] = [];
-
-  const sandbox: Record<string, unknown> = {
-    // n8n variables injetadas
-    ...n8nVariables,
-
-    // JavaScript builtins seguros
-    JSON,
-    Array,
-    Object,
-    Math,
-    Number,
-    String,
-    Boolean,
-    Date,
-    RegExp,
-    Error,
-    TypeError,
-    RangeError,
-    SyntaxError,
-    ReferenceError,
-    Promise,
-    Symbol,
-    Map,
-    Set,
-    WeakMap,
-    WeakSet,
-    Intl,
-    Infinity: Infinity,
-    NaN: NaN,
-    undefined,
-    parseInt: parseInt,
-    parseFloat: parseFloat,
-    isNaN: Number.isNaN,
-    isFinite: Number.isFinite,
-
-    // Console capturado — os logs sao recuperados apos a execucao
-    console: {
-      log: (...args: unknown[]) => {
-        logs.push(args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" "));
-      },
-      error: (...args: unknown[]) => {
-        logs.push(`[ERROR] ${args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ")}`);
-      },
-      warn: (...args: unknown[]) => {
-        logs.push(`[WARN] ${args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ")}`);
-      },
-      info: (...args: unknown[]) => {
-        logs.push(args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" "));
-      },
-      dir: () => {},
-      debug: () => {},
-    },
-
-    // Buffer e outros Node.js globals bloqueados explicitamente
-    require: undefined,
-    process: undefined,
-    global: undefined,
-    globalThis: undefined,
-    Buffer: undefined,
-    __dirname: undefined,
-    __filename: undefined,
-    fetch: undefined,
-    setTimeout: undefined,
-    setInterval: undefined,
-    setImmediate: undefined,
-    clearTimeout: undefined,
-    clearInterval: undefined,
-    clearImmediate: undefined,
-    structuredClone: undefined,
-    TextEncoder: undefined,
-    TextDecoder: undefined,
-
-    // Slot para capturar o resultado
-    __result: undefined,
-    __logs: logs,
-  };
-
-  return vm.createContext(sandbox, {
-    name: "AgentFlow-code-sandbox",
-    code: "allow-async-while-disconnected",
-  } as any);
-}
-
 export interface SandboxResult {
   result: unknown;
   logs: string[];
 }
 
+/** Copia dados seguros para dentro do isolate via ExternalCopy */
+function copyToIsolate(val: unknown): any {
+  if (val === undefined || val === null) return val;
+  const t = typeof val;
+  if (t === "number" || t === "string" || t === "boolean") return val;
+  return new ivm.ExternalCopy(val).copyInto();
+}
+
+/** Injeta variaveis n8n e metodos utilitarios no contexto do isolate */
+function injectVariablesIntoContext(
+  context: ivm.Context,
+  jail: ivm.Reference<Record<number | string | symbol, any>>,
+  vars: Record<string, unknown>,
+): void {
+  for (const [key, val] of Object.entries(vars)) {
+    if (typeof val === "function") {
+      jail.setSync(key, new ivm.Callback((...args: unknown[]) => {
+        const res = (val as (...args: unknown[]) => unknown)(...args);
+        return copyToIsolate(res);
+      }));
+    } else if (Array.isArray(val)) {
+      jail.setSync(key, copyToIsolate(val));
+    } else if (typeof val === "object" && val !== null) {
+      const dataProps: Record<string, unknown> = {};
+      const functionProps: string[] = [];
+
+      for (const [k, v] of Object.entries(val)) {
+        if (typeof v === "function") {
+          functionProps.push(k);
+        } else {
+          dataProps[k] = v;
+        }
+      }
+
+      jail.setSync(key, copyToIsolate(dataProps));
+
+      for (const fnName of functionProps) {
+        const fn = (val as Record<string, (...args: unknown[]) => unknown>)[fnName];
+        const bridgeName = `__bridge_${key.replace(/[^a-zA-Z0-9_]/g, "_")}_${fnName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+        jail.setSync(bridgeName, new ivm.Callback((...args: unknown[]) => {
+          const res = fn(...args);
+          return copyToIsolate(res);
+        }));
+        context.evalSync(`globalThis[${JSON.stringify(key)}][${JSON.stringify(fnName)}] = (...args) => ${bridgeName}(...args);`);
+      }
+    } else {
+      jail.setSync(key, val as any);
+    }
+  }
+}
+
 /**
- * Executa codigo JavaScript dentro de um sandbox VM de forma segura.
+ * Cria um contexto de sandbox com console capturado e variaveis injetadas.
+ */
+export function createSandboxContext(
+  isolateOrVars: ivm.Isolate | Record<string, unknown>,
+  n8nVars?: Record<string, unknown>,
+): { context: ivm.Context; logs: string[] } {
+  let isolate: ivm.Isolate;
+  let vars: Record<string, unknown>;
+
+  if (isolateOrVars instanceof ivm.Isolate) {
+    isolate = isolateOrVars;
+    vars = n8nVars ?? {};
+  } else {
+    isolate = new ivm.Isolate({ memoryLimit: DEFAULT_MEMORY_LIMIT_MB });
+    vars = isolateOrVars ?? {};
+  }
+
+  const context = isolate.createContextSync();
+  const jail = context.global;
+
+  const logs: string[] = [];
+  jail.setSync("__host_log", new ivm.Callback((...args: unknown[]) => {
+    logs.push(args.map((a) => (typeof a === "object" && a !== null ? JSON.stringify(a) : String(a))).join(" "));
+  }));
+  jail.setSync("__host_error", new ivm.Callback((...args: unknown[]) => {
+    logs.push(`[ERROR] ${args.map((a) => (typeof a === "object" && a !== null ? JSON.stringify(a) : String(a))).join(" ")}`);
+  }));
+  jail.setSync("__host_warn", new ivm.Callback((...args: unknown[]) => {
+    logs.push(`[WARN] ${args.map((a) => (typeof a === "object" && a !== null ? JSON.stringify(a) : String(a))).join(" ")}`);
+  }));
+
+  context.evalSync(`
+    globalThis.console = {
+      log: (...args) => __host_log(...args),
+      error: (...args) => __host_error(...args),
+      warn: (...args) => __host_warn(...args),
+      info: (...args) => __host_log(...args),
+      dir: () => {},
+      debug: () => {},
+    };
+  `);
+
+  injectVariablesIntoContext(context, jail, vars);
+  return { context, logs };
+}
+
+/**
+ * Executa codigo JavaScript dentro de um sandbox V8 isolado (isolated-vm) de forma estritamente segura.
  *
- * O codigo do usuario e injetado dentro de uma funcao wrapper para capturar
- * o valor de retorno. Variaveis n8n ($input, $json, etc.) sao injetadas
- * como globals no contexto da VM.
- *
- * Lanca erro se:
- * - O codigo contiver padroes perigosos (require, process, etc.)
- * - O codigo exceder o timeout
- * - O codigo lancar uma excecao
+ * - Limite de memoria configuravel (padrao 64MB)
+ * - Timeout estrito duplo (CPU sincrono + wall-clock)
+ * - Bloqueio de qualquer acesso ao runtime/host do Node.js
+ * - Retorno de dados estruturados com serializacao segura
  */
 export async function executeCodeInSandbox(
   code: string,
@@ -180,6 +181,7 @@ export async function executeCodeInSandbox(
   }
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const memoryLimitMb = options.memoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB;
 
   // Defense in depth: verifica padroes perigosos antes de compilar
   const dangers = detectDangerousPatterns(code);
@@ -190,46 +192,52 @@ export async function executeCodeInSandbox(
     );
   }
 
-  const context = createSandboxContext(n8nVariables);
-
-  // Wrap o codigo do usuario em uma funcao para capturar o retorno.
-  // O codigo n8n usa `return value;` no formato function node.
-  const wrapper = `
-    (function() {
-      try {
-        __result = (function() {
-          ${code}
-        })();
-      } catch (e) {
-        __result = { __error: e instanceof Error ? e.message : String(e) };
-      }
-    })();
-  `;
+  const isolate = new ivm.Isolate({ memoryLimit: memoryLimitMb });
+  let wallClockTimer: NodeJS.Timeout | undefined;
 
   try {
-    vm.runInContext(wrapper, context, {
-      filename: "n8n-code-node",
-      timeout: timeoutMs,
+    const { context, logs } = createSandboxContext(isolate, n8nVariables);
+
+    let script: ivm.Script;
+    try {
+      script = isolate.compileScriptSync(`(async function() {\n${code}\n})()`);
+    } catch (compileErr: unknown) {
+      const msg = compileErr instanceof Error ? compileErr.message : String(compileErr);
+      throw createCodeExecutionError(`CODE_RUNTIME_ERROR: ${msg}`, "CODE_RUNTIME_ERROR");
+    }
+
+    const runPromise = script.run(context, { timeout: timeoutMs, copy: true, promise: true });
+    const timeoutPromise = new Promise((_, reject) => {
+      wallClockTimer = setTimeout(() => {
+        if (!isolate.isDisposed) isolate.dispose();
+        reject(new Error("Script execution timed out."));
+      }, timeoutMs + 100);
     });
+
+    const result = await Promise.race([runPromise, timeoutPromise]);
+    return { result, logs };
   } catch (err: unknown) {
-    if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "ERR_SCRIPT_EXECUTION_TIMEOUT") {
-       throw createCodeExecutionError(
+    if (err && typeof err === "object" && "code" in err && typeof (err as { code: unknown }).code === "string") {
+      throw err;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("Script execution timed out") || msg.includes("timed out")) {
+      throw createCodeExecutionError(
         `CODE_TIMEOUT: code execution timeout after ${timeoutMs}ms`,
         "CODE_TIMEOUT",
       );
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    throw createCodeExecutionError(`CODE_EXECUTION_ERROR: ${msg}`, "CODE_EXECUTION_ERROR");
+    if (msg.includes("memory limit") || msg.includes("Isolate was disposed")) {
+      throw createCodeExecutionError(
+        `CODE_MEMORY_LIMIT: memory limit of ${memoryLimitMb}MB exceeded`,
+        "CODE_MEMORY_LIMIT",
+      );
+    }
+    throw createCodeExecutionError(`CODE_RUNTIME_ERROR: ${msg}`, "CODE_RUNTIME_ERROR");
+  } finally {
+    if (wallClockTimer) clearTimeout(wallClockTimer);
+    if (!isolate.isDisposed) {
+      isolate.dispose();
+    }
   }
-
-  const result = (context as Record<string, unknown>).__result;
-  if (result && typeof result === "object" && "__error" in result) {
-     throw createCodeExecutionError(
-      `CODE_RUNTIME_ERROR: ${(result as { __error: string }).__error}`,
-      "CODE_RUNTIME_ERROR",
-    );
-  }
-
-  const logs = (context as Record<string, unknown>).__logs as string[];
-  return { result, logs };
 }

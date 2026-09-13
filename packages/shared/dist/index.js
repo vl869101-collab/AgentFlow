@@ -1,8 +1,9 @@
 import { z } from "zod";
-export { binaryDataSchema, pairedItemRefSchema, pairedItemSchema, nodeItemSchema, nodeItemsArraySchema, normalizePath, extractFieldByPath, setFieldByPath, isNodeItem, ensureNodeItem, wrapItems, unwrapItems, batchItems, mapItems, filterItems, mergeItemBatches, createPairedItem, linkPairedItems, normalizeToItemsContract, normalizeFromItemsContract, } from "./items.js";
-export { computeWorkflowDiff, normalizeSnapshotNodes, normalizeSnapshotEdges, deepEqual, } from "./workflow-diff.js";
-export { importN8nWorkflow, createAgentFlowFromN8n, validateN8nWorkflow, N8N_SDK_CATALOG, } from "./n8n-import.js";
-export { kmsWrappedKeySchema, vaultEnvelopeSchema, } from "./kms.js";
+export { binaryDataSchema, binaryPayloadMetaSchema, BinaryPayloadMetaSchema, pairedItemRefSchema, PairedItemRefSchema, pairedItemSchema, nodeItemSchema, NodeItemSchema, nodeItemsArraySchema, NodeItemsSchema, normalizePath, extractFieldByPath, setFieldByPath, isNodeItem, ensureNodeItem, wrapItems, unwrapItems, batchItems, mapItems, filterItems, mergeItemBatches, createPairedItem, linkPairedItems, normalizeToItemsContract, normalizeFromItemsContract, } from "./items";
+export { computeWorkflowDiff, normalizeSnapshotNodes, normalizeSnapshotEdges, deepEqual, } from "./workflow-diff";
+export { importN8nWorkflow, createAgentFlowFromN8n, convertN8nToAgentflow, validateN8nWorkflow, N8N_SDK_CATALOG, } from "./n8n-import";
+export { kmsWrappedKeySchema, vaultEnvelopeSchema, } from "./kms";
+export { fiveFieldContractSchema, validateFiveFieldContract, } from "./five-field-contract";
 // ═══════════════════════════════════════════
 // Auth Schemas
 // ═══════════════════════════════════════════
@@ -40,6 +41,7 @@ const workflowNodeTypeValues = [
     "cron",
     "cronTrigger",
     "manual",
+    "manualTrigger",
     "http",
     "httpRequest",
     "postgres",
@@ -66,6 +68,12 @@ const workflowNodeTypeValues = [
     "llm_chain",
     "vector_store",
     "execute_workflow",
+    "executeWorkflow",
+    "executeWorkflowTrigger",
+    "subworkflow",
+    "sub_workflow",
+    "swarm",
+    "swarmNode",
     "condition",
     "transform",
     "delay",
@@ -297,6 +305,19 @@ export const createCredentialSchema = z.object({
     provider: z.string().min(1).max(100),
     data: z.record(z.any()),
 });
+export const updateCredentialSchema = z
+    .object({
+    name: z.string().min(1).max(100).optional(),
+    type: credentialBucketSchema.or(z.string().min(1).max(50)).optional(),
+    provider: z.string().min(1).max(100).optional(),
+    data: z.record(z.any()).optional(),
+})
+    .refine((data) => data.name !== undefined ||
+    data.data !== undefined ||
+    data.type !== undefined ||
+    data.provider !== undefined, {
+    message: "At least one field (name, data, type, provider) must be provided for update",
+});
 // ═══════════════════════════════════════════
 // Webhook Schemas
 // ═══════════════════════════════════════════
@@ -330,7 +351,7 @@ export const decideApprovalSchema = z.object({
 export const PlanEnum = z.enum(["FREE", "STARTER", "BASIC", "GROWTH", "PRO", "ENTERPRISE"]);
 export const MemberRoleEnum = z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]);
 export const WorkflowStatusEnum = z.enum(["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]);
-export const ExecutionStatusEnum = z.enum(["PENDING", "RUNNING", "SUCCESS", "FAILED", "CANCELLED", "WAITING_APPROVAL"]);
+export const ExecutionStatusEnum = z.enum(["PENDING", "RUNNING", "SUCCESS", "FAILED", "CANCELLED", "WAITING_APPROVAL", "WAITING", "SUSPENDED"]);
 // ═══════════════════════════════════════════
 // Node Types
 // ═══════════════════════════════════════════
@@ -353,6 +374,7 @@ export const NODE_TYPES = [
     { type: "llm_model", label: "LLM Model", icon: "Cpu", color: "#a855f7" },
     { type: "llm_chain", label: "LLM Chain", icon: "Boxes", color: "#8b5cf6" },
     { type: "vector_store", label: "Vector Store", icon: "Layers", color: "#06b6d4" },
+    { type: "swarm", label: "Swarm Agents", icon: "Users", color: "#f59e0b" },
     { type: "execute_workflow", label: "Execute Workflow", icon: "Workflow", color: "#10b981" },
     { type: "approval", label: "Approval", icon: "CheckCircle", color: "#ef4444" },
     { type: "merge", label: "Merge", icon: "Merge", color: "#06b6d4" },
@@ -378,4 +400,8 @@ export const NODE_TYPES = [
     { type: "googleDocs", label: "Google Docs", icon: "FileText", color: "#4285f4" },
     { type: "errorTrigger", label: "Error Trigger", icon: "AlertTriangle", color: "#ef4444" },
 ];
+// ═══════════════════════════════════════════
+// Provider Defaults & Auth Schemes
+// ═══════════════════════════════════════════
+export { OFFICIAL_PROVIDER_DEFAULTS, resolveProviderDefaults, } from "./provider-defaults";
 //# sourceMappingURL=index.js.map

@@ -15,7 +15,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "node -e \"console.log('Shared tests passed')\""
+    "test": "tsx --test test/five-field-contract.test.ts test/items-contract.test.ts"
   },
   "dependencies": {
     "@types/node": "^22.10.0",

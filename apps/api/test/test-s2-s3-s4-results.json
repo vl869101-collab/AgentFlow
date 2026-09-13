@@ -1,0 +1,368 @@
+{
+  "timestamp": "2026-09-07T02:07:42.668Z",
+  "target": "http://127.0.0.1:3001",
+  "surfaces": {
+    "s2_workflows_alem_editor": {
+      "passed": 14,
+      "failed": 0,
+      "total": 14,
+      "tests": [
+        {
+          "name": "Listagem de Workflows (GET /api/workflows)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows",
+          "method": "GET",
+          "extra": "Retornou 0 workflows",
+          "durationMs": 10
+        },
+        {
+          "name": "Criação de Workflow (POST /api/workflows)",
+          "status": "PASSED",
+          "statusCode": 201,
+          "endpoint": "/api/workflows",
+          "method": "POST",
+          "extra": "Novo Workflow ID: cmtqlp65j0007wdvciiq302pn",
+          "durationMs": 33
+        },
+        {
+          "name": "Atualização de Metadados (PATCH /api/workflows/:id)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn",
+          "method": "PATCH",
+          "extra": "Nome alterado e status=ACTIVE",
+          "durationMs": 28
+        },
+        {
+          "name": "Atualização Completa (PUT /api/workflows/:id)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn",
+          "method": "PUT",
+          "extra": "Nome atualizado via PUT com sucesso",
+          "durationMs": 20
+        },
+        {
+          "name": "Busca textual de Workflows (?search= e ?q=)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows?search=... & ?q=...",
+          "method": "GET",
+          "extra": "?search= retornou 1, ?q= retornou 1",
+          "durationMs": 17
+        },
+        {
+          "name": "Filtro de Workflows por Status (?status=)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows?status=",
+          "method": "GET",
+          "extra": "ACTIVE: 1, DRAFT: 0",
+          "durationMs": 14
+        },
+        {
+          "name": "Duplicação de Workflow (POST /api/workflows/:id/duplicate)",
+          "status": "PASSED",
+          "statusCode": 404,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn/duplicate",
+          "method": "POST",
+          "extra": "Endpoint /duplicate não implementado no backend (HTTP 404)",
+          "durationMs": 3
+        },
+        {
+          "name": "Detecção de Colisão de Chave Primária em Arestas (PUT /canvas)",
+          "status": "PASSED",
+          "statusCode": 500,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn/canvas",
+          "method": "PUT",
+          "extra": "Confirmada vulnerabilidade de Unique Constraint global em WorkflowEdge.id"
+        },
+        {
+          "name": "Criação de Versões de Canvas (PUT /canvas V1 e V2)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn/canvas",
+          "method": "PUT",
+          "extra": "Criadas com sucesso versões 1 e 2",
+          "durationMs": 1295
+        },
+        {
+          "name": "Histórico e Snapshot de Versões (/versions e /versions/:ver)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn/versions",
+          "method": "GET",
+          "extra": "Total de versões listadas: 2, V1 nós: 2",
+          "durationMs": 391
+        },
+        {
+          "name": "Semantic Diff entre Versões (GET /api/workflows/:id/diff)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn/diff?fromVersion=1&toVersion=2",
+          "method": "GET",
+          "extra": "Nós adicionados: 1, Arestas adicionadas: 1",
+          "durationMs": 55
+        },
+        {
+          "name": "Rollback Atômico de Versão (POST /api/workflows/:id/rollback)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn/rollback",
+          "method": "POST",
+          "extra": "Criada nova versão 3 revertida para V1 (2 nós)",
+          "durationMs": 1160
+        },
+        {
+          "name": "Exportação JSON de Workflow",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn (JSON export)",
+          "method": "GET",
+          "extra": "JSON exportável obtido via GET /api/workflows/:id (2 nós)",
+          "durationMs": 70
+        },
+        {
+          "name": "Exclusão de Workflow (DELETE /api/workflows/:id)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/workflows/cmtqlp65j0007wdvciiq302pn",
+          "method": "DELETE",
+          "extra": "Exclusão confirmada com 404 subsequente",
+          "durationMs": 61
+        }
+      ]
+    },
+    "s3_templates_n8n_migration": {
+      "passed": 9,
+      "failed": 0,
+      "total": 9,
+      "tests": [
+        {
+          "name": "Catálogo de Templates (GET /api/templates)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/templates",
+          "method": "GET",
+          "extra": "Total: 5 templates, 6 categorias",
+          "durationMs": 4
+        },
+        {
+          "name": "Filtros de Categoria e Busca (?category= e ?search=)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/templates?category=... & ?search=...",
+          "method": "GET",
+          "extra": "Categoria IA: 1, Busca 'slack': 1",
+          "durationMs": 5
+        },
+        {
+          "name": "Preview / Detalhe de Template (GET /api/templates/:id)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/templates/rag-pdf-pinecone-ai",
+          "method": "GET",
+          "extra": "Nós: 4, Arestas: 3",
+          "durationMs": 2
+        },
+        {
+          "name": "Exportação de Template (GET /api/templates/:id/export)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/templates/rag-pdf-pinecone-ai/export",
+          "method": "GET",
+          "extra": "Content-Disposition: attachment; filename=\"agentflow-template-rag-pdf-pinecone-ai.json\"",
+          "durationMs": 3
+        },
+        {
+          "name": "Instanciação de Template (POST /api/templates/:id/clone)",
+          "status": "PASSED",
+          "statusCode": 201,
+          "endpoint": "/api/templates/rag-pdf-pinecone-ai/clone",
+          "method": "POST",
+          "extra": "Workflow instanciado ID: cmtqlp8rz000twdvc0rnykfeu",
+          "durationMs": 50
+        },
+        {
+          "name": "Import de Template JSON (POST /api/templates/import)",
+          "status": "PASSED",
+          "statusCode": 201,
+          "endpoint": "/api/templates/import",
+          "method": "POST",
+          "extra": "Workflow importado ID: cmtqlp8te000zwdvcif7xhknj",
+          "durationMs": 38
+        },
+        {
+          "name": "Import de n8n Válido (POST /api/workflows/import)",
+          "status": "PASSED",
+          "statusCode": 201,
+          "endpoint": "/api/workflows/import",
+          "method": "POST",
+          "extra": "Importado com sucesso ID: cmtqlp8ud0015wdvct46mbzlp",
+          "durationMs": 38
+        },
+        {
+          "name": "Detecção de Colisão de Nós n8n (POST /import)",
+          "status": "PASSED",
+          "statusCode": 500,
+          "endpoint": "/api/workflows/import",
+          "method": "POST",
+          "extra": "Confirmada vulnerabilidade de Unique Constraint global em WorkflowNode.id"
+        },
+        {
+          "name": "Rejeição de n8n Inválido (POST /api/workflows/import)",
+          "status": "PASSED",
+          "statusCode": 400,
+          "endpoint": "/api/workflows/import",
+          "method": "POST",
+          "extra": "Payload inválido tratado com HTTP 400",
+          "durationMs": 10
+        }
+      ]
+    },
+    "s4_executions": {
+      "passed": 9,
+      "failed": 0,
+      "total": 9,
+      "tests": [
+        {
+          "name": "Disparo de Execução (POST /api/workflows/:id/run)",
+          "status": "PASSED",
+          "statusCode": 202,
+          "endpoint": "/api/workflows/cmtqlp8xc001jwdvcvsnkskr3/run",
+          "method": "POST",
+          "extra": "Execution ID: cmtqlp99e001rwdvctoy01kbu (HTTP 202 Accepted)",
+          "durationMs": 169
+        },
+        {
+          "name": "Disparo via Endpoint Genérico (POST /api/executions/trigger)",
+          "status": "PASSED",
+          "statusCode": 202,
+          "endpoint": "/api/executions/trigger",
+          "method": "POST",
+          "extra": "Execution ID: cmtqlp9eq001xwdvc2lgl7ik8",
+          "durationMs": 192
+        },
+        {
+          "name": "Detalhes da Execução (GET /api/executions/:id)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/executions/cmtqlp99e001rwdvctoy01kbu",
+          "method": "GET",
+          "extra": "Status: SUCCESS, Nós: 2, Duração: 354ms"
+        },
+        {
+          "name": "Listagem e Filtros de Execução (GET /api/executions?workflowId=&status=)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/executions?workflowId=cmtqlp8xc001jwdvcvsnkskr3&status=SUCCESS",
+          "method": "GET",
+          "extra": "Itens encontrados: 2",
+          "durationMs": 22
+        },
+        {
+          "name": "Logs de Nós da Execução (GET /api/executions/:id/nodes)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/executions/cmtqlp99e001rwdvctoy01kbu/nodes",
+          "method": "GET",
+          "extra": "Registros de nós retornados: 2",
+          "durationMs": 52
+        },
+        {
+          "name": "Traces OpenTelemetry (GET /api/executions/:id/traces)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/executions/cmtqlp99e001rwdvctoy01kbu/traces",
+          "method": "GET",
+          "extra": "TraceId: 4b89f1621a538572531d79b5fc02b5a6, Spans: 2",
+          "durationMs": 18
+        },
+        {
+          "name": "Streaming SSE em Tempo Real (GET /api/executions/:id/stream)",
+          "status": "PASSED",
+          "statusCode": 200,
+          "endpoint": "/api/executions/cmtqlp99e001rwdvctoy01kbu/stream",
+          "method": "GET",
+          "extra": "Eventos recebidos via SSE (1)"
+        },
+        {
+          "name": "Proteção de Cancelamento em Execução Concluída (POST /cancel)",
+          "status": "PASSED",
+          "statusCode": 404,
+          "endpoint": "/api/executions/cmtqlp99e001rwdvctoy01kbu/cancel",
+          "method": "POST",
+          "extra": "Protegido: HTTP 404 (code: NOT_CANCELLABLE)",
+          "durationMs": 11
+        },
+        {
+          "name": "Endpoint de Retry (POST /api/executions/:id/retry)",
+          "status": "PASSED",
+          "statusCode": 404,
+          "endpoint": "/api/executions/cmtqlp99e001rwdvctoy01kbu/retry",
+          "method": "POST",
+          "extra": "Endpoint /retry não implementado no backend (HTTP 404)",
+          "durationMs": 4
+        }
+      ]
+    }
+  },
+  "findings": [
+    {
+      "id": "FINDING-F2-02",
+      "surface": "Workflows além do editor",
+      "severity": "MINOR",
+      "confidence": "HIGH",
+      "title": "Ausência de endpoint nativo de duplicação em /api/workflows/:id/duplicate",
+      "evidence": "POST /api/workflows/cmtqlp65j0007wdvciiq302pn/duplicate -> HTTP 404 (apps/api/src/routes/workflows.ts)",
+      "repro": "Fazer POST em /api/workflows/:id/duplicate com token autenticado",
+      "impact": "Duplicação no frontend exige leitura completa do grafo (GET /:id) seguida de criação de novo workflow (POST /), aumentando round-trips e risco de inconsistência",
+      "suggestedFix": "Implementar POST /api/workflows/:id/duplicate que clone atomicamente o registro, nós, arestas e crie a versão inicial 1 no banco"
+    },
+    {
+      "id": "FINDING-F2-04",
+      "surface": "Workflows além do editor",
+      "severity": "MAJOR",
+      "confidence": "HIGH",
+      "title": "Colisão de chave primária em WorkflowEdge/WorkflowNode quando cliente envia IDs estáticos ('e1')",
+      "evidence": "PUT /api/workflows/cmtqlp65j0007wdvciiq302pn/canvas -> HTTP 500: Unique constraint failed on the fields: (id) em tx.workflowEdge.createMany (apps/api/src/routes/workflows.ts:122)",
+      "repro": "Salvar um canvas contendo edges com IDs estáticos (ex: { id: 'e1' }) repetidos entre workflows diferentes",
+      "impact": "Qualquer usuário ou template que envie IDs comuns de arestas/nós derruba o salvamento de canvas com erro 500 para outros usuários",
+      "suggestedFix": "Em canonicalCanvas, nunca confiar no id bruto de edges/nodes como PK do banco; gerar id único (ex: randomUUID() ou `${workflowId}_${edge.id}`) e mapear referências"
+    },
+    {
+      "id": "FINDING-F2-03",
+      "surface": "Workflows além do editor",
+      "severity": "MINOR",
+      "confidence": "HIGH",
+      "title": "Inconsistência na rota de exportação: /templates/:id/export existe com header attachment, mas /workflows/:id/export retorna 404",
+      "evidence": "GET /api/workflows/:id/export -> HTTP 404 vs GET /api/templates/:id/export -> HTTP 200 attachment",
+      "repro": "Tentar fazer download direto de um workflow via GET /api/workflows/:id/export",
+      "impact": "Exige que o frontend faça download manual via Blob/data-uri no browser após GET /api/workflows/:id, sem padronização de Content-Disposition",
+      "suggestedFix": "Implementar GET /api/workflows/:id/export com Content-Disposition: attachment; filename=agentflow-workflow-{id}.json sanitizado"
+    },
+    {
+      "id": "FINDING-F2-05",
+      "surface": "Templates e n8n migration",
+      "severity": "MAJOR",
+      "confidence": "HIGH",
+      "title": "Colisão de chave primária em WorkflowNode.id durante import de workflows n8n",
+      "evidence": "POST /api/workflows/import -> HTTP 500: Unique constraint failed on the fields: (id) em tx.workflowNode.createMany",
+      "repro": "Importar duas vezes qualquer workflow n8n que possua IDs estáticos (ex: { id: 'start-node' })",
+      "impact": "Usuários não conseguem importar workflows exportados do n8n se outro usuário ou workflow já importou arquivo similar",
+      "suggestedFix": "No n8n-import.ts ou na rota de import, gerar prefixos com uuid ou não reutilizar diretamente o id do n8n como PK do banco de dados"
+    },
+    {
+      "id": "FINDING-F2-01",
+      "surface": "Executions",
+      "severity": "MINOR",
+      "confidence": "HIGH",
+      "title": "Ausência de endpoint dedicado de retry em /api/executions/:id/retry",
+      "evidence": "POST /api/executions/cmtqlp99e001rwdvctoy01kbu/retry -> HTTP 404 (apps/api/src/routes/executions.ts)",
+      "repro": "Fazer POST em /api/executions/:id/retry com token autenticado",
+      "impact": "Impossibilita acionar retry a partir do histórico de execuções com os mesmos parâmetros exatos sem recorrer a um novo disparo manual em /workflows/:id/run ou /executions/trigger",
+      "suggestedFix": "Adicionar rota POST /api/executions/:id/retry em executions.ts que carregue a execução anterior, copie o input original e acione enqueueExecution com novo registro"
+    }
+  ]
+}

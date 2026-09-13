@@ -32,7 +32,12 @@ import { dlqRoutes } from "./routes/dlq.js";
 import { mcpRoutes } from "./routes/mcp.js";
 import { templateRoutes } from "./routes/templates.js";
 import { twelveLabsRoutes } from "./routes/twelvelabs.js";
+import { remoteWorkspaceRoutes } from "./routes/remote-workspaces.js";
+import { remoteBridgeRoutes } from "./routes/remote-bridge.js";
+import { relayRoutes } from "./routes/relay.js";
+import { sessionRoutes } from "./routes/sessions.js";
 import { docsRoutes } from "./docs/openapi.js";
+import { assertKmsKeySecurity } from "./services/vault/crypto.js";
 
 function parseTrustProxy(value: string | boolean | number): number | boolean | string[] {
   if (typeof value === "boolean") return value ? 1 : 0;
@@ -118,6 +123,9 @@ function getPinoLoggerConfig(env: ReturnType<typeof getEnv>, options: { logger?:
 
 export async function buildApp(options: { logger?: boolean | object } = {}): Promise<FastifyInstance> {
   const env = getEnv();
+  if (env.NODE_ENV === "production") {
+    assertKmsKeySecurity();
+  }
   const app = Fastify({
     logger: getPinoLoggerConfig(env, options),
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
@@ -259,6 +267,7 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
       "MISSING_SIGNATURE",
       "IDEMPOTENT_REPLAY",
       "VALIDATION_ERROR",
+      "CYCLIC_SUBWORKFLOW_REFERENCE",
       "INVALID_CREDENTIALS",
       "INVALID_TOKEN",
       "AUTH_FAILED",
@@ -279,6 +288,7 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
       "RESPONSE_TOO_LARGE",
       "CODE_SECURITY_BLOCK",
       "CODE_TIMEOUT",
+      "CODE_MEMORY_LIMIT",
       "CODE_RUNTIME_ERROR",
       "CODE_MISSING_PARAMS",
       "CODE_MISSING_JS",
@@ -351,6 +361,18 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
     return telemetry.exportSpansOTLP();
   });
 
+  // Service index at the API root (avoids a confusing 404 for browser visits).
+  app.get("/", async () => {
+    return {
+      service: "AgentFlow API",
+      status: "ok",
+      docs: "/docs",
+      openapi: "/docs/json",
+      health: "/health",
+      timestamp: new Date().toISOString(),
+    };
+  });
+
   await app.register(healthRoutes);
   await app.register(authRoutes, { prefix: "/api/auth" });
   await app.register(authRoutes, { prefix: "/auth" });
@@ -367,6 +389,7 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
   await app.register(orgRoutes, { prefix: "/api/organizations" });
   await app.register(apiKeyRoutes, { prefix: "/api/api-keys" });
   await app.register(webhookRoutes, { prefix: "/api/webhooks" });
+  await app.register(webhookRoutes, { prefix: "/webhooks" });
   await app.register(oauthRoutes, { prefix: "/api/auth" });
   await app.register(mcpRoutes, { prefix: "/mcp" });
   await app.register(mcpRoutes, { prefix: "/api/mcp" });
@@ -376,6 +399,10 @@ export async function buildApp(options: { logger?: boolean | object } = {}): Pro
   await app.register(auditRoutes, { prefix: "/api/audit" });
   await app.register(templateRoutes, { prefix: "/api/templates" });
   await app.register(twelveLabsRoutes, { prefix: "/api/twelvelabs" });
+  await app.register(remoteWorkspaceRoutes, { prefix: "/api/remote-workspaces" });
+  await app.register(remoteBridgeRoutes, { prefix: "/api/remote-bridge" });
+  await app.register(relayRoutes, { prefix: "/api/relay" });
+  await app.register(sessionRoutes, { prefix: "/api/sessions" });
   await app.register(docsRoutes);
 
   return app;

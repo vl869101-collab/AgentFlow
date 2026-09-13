@@ -2,6 +2,7 @@ import { NodeExecutionContext, NodeExecutionResult, NodeHandler, NodeItem, wrapI
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../../lib/prisma.js";
+import { recordWorkflowAuditEvent } from "../audit-ledger.js";
 
 export interface FormField {
   name: string;
@@ -128,13 +129,27 @@ export class FormNodeHandler implements NodeHandler {
             where: { id: ctx.executionId },
             data: { status: "WAITING_APPROVAL" },
           });
+
+          void recordWorkflowAuditEvent({
+            executionId: ctx.executionId,
+            nodeId: ctx.nodeId,
+            actor: execution.userId || "system",
+            action: "approval.pending",
+            decision: "WAITING_APPROVAL",
+            payload: {
+              approvalId: token,
+              title,
+              timeoutHours,
+              expiresAt,
+            },
+          }).catch(() => {});
         }
       } catch (err) {
         // In memory/offline tests without active execution records, continue gracefully
       }
     }
 
-    const items: NodeItem[] = inputItems.map((item) => ({
+    const items: NodeItem[] = inputItems.map((item: NodeItem) => ({
       json: {
         ...item.json,
         _approvalToken: token,

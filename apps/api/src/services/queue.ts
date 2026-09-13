@@ -2,6 +2,7 @@ import { Queue, type Job } from "bullmq";
 import { getEnv } from "../lib/env.js";
 import { telemetry } from "../lib/otel.js";
 import { deadMansSwitch } from "./dead-mans-switch.js";
+import { getRedisClient } from "../lib/redis.js";
 
 let workflowQueue: Queue | undefined;
 let dlqQueue: Queue | undefined;
@@ -34,6 +35,23 @@ export interface DLQIncidentRecord {
 
 const inMemoryDLQ = new Map<string, DLQRecord>();
 const inMemoryIncidents = new Map<string, DLQIncidentRecord>();
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Heartbeat & Worker Health Tracking (WF-ENG Item 5)
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+export const DEFAULT_HEARTBEAT_TTL_SECONDS = 60;
+export const ORPHAN_HEARTBEAT_THRESHOLD_MS = 120_000;
+
+export interface HeartbeatRecord {
+  executionId: string;
+  timestamp: number;
+  expiresAt: number;
+  metadata?: Record<string, unknown>;
+}
+
+const inMemoryHeartbeats = new Map<string, HeartbeatRecord>();
 
 function getRedisConnection() {
   const redis = new URL(getEnv().REDIS_URL);
@@ -145,19 +163,37 @@ export async function sendToDLQ(executionId: string, error: string, metadata?: R
   return true;
 }
 
-export async function enqueueExecution(executionId: string, metadata: Record<string, unknown> = {}): Promise<boolean> {
+export async function enqueueExecution(
+  executionId: string,
+  metadata: Record<string, unknown> = {},
+  options: { delay?: number; jobId?: string; [key: string]: unknown } = {},
+): Promise<boolean> {
   const queue = getWorkflowQueue();
   if (!queue) return false;
   try {
     const payload: Record<string, unknown> = { executionId, ...metadata };
-    if (!payload.traceparent && !payload.traceParent) {
-      payload.traceparent = telemetry.formatTraceParent({
-        traceId: telemetry.generateTraceId(),
-        spanId: telemetry.generateSpanId(),
-        traceFlags: "01",
-      });
+    const rawTraceParent =
+      typeof payload.traceparent === "string"
+        ? payload.traceparent
+        : typeof payload.traceParent === "string"
+          ? payload.traceParent
+          : undefined;
+
+    const validatedContext = telemetry.parseTraceParent(rawTraceParent);
+    if (validatedContext) {
+      payload.traceparent = telemetry.formatTraceParent(validatedContext);
+      payload.traceParent = payload.traceparent;
+    } else {
+      const generated = telemetry.getOrCreateTraceParent();
+      payload.traceparent = generated.traceparent;
+      payload.traceParent = generated.traceparent;
     }
-    await queue.add("execute", payload, { jobId: executionId, ...DEFAULT_JOB_OPTIONS });
+    const jobOptions = {
+      jobId: options.jobId ?? (options.delay ? `${executionId}-${Date.now()}` : executionId),
+      ...DEFAULT_JOB_OPTIONS,
+      ...options,
+    };
+    await queue.add("execute", payload, jobOptions);
     return true;
   } catch (error) {
     console.error("Unable to enqueue workflow execution", error);
@@ -503,4 +539,135 @@ export async function closeExecutionQueue() {
   await dlqQueue?.close();
   workflowQueue = undefined;
   dlqQueue = undefined;
+}
+
+/**
+ * Records periodic heartbeat for an actively running execution.
+ * Supports dual storage: Redis with TTL + in-memory fallback.
+ */
+export async function recordHeartbeat(
+  executionId: string,
+  ttlSeconds = DEFAULT_HEARTBEAT_TTL_SECONDS,
+  metadata?: Record<string, unknown>,
+): Promise<boolean> {
+  const now = Date.now();
+  const expiresAt = now + ttlSeconds * 1000;
+  const record: HeartbeatRecord = {
+    executionId,
+    timestamp: now,
+    expiresAt,
+    metadata,
+  };
+  inMemoryHeartbeats.set(executionId, record);
+
+  const client = getRedisClient();
+  if (client) {
+    try {
+      const key = `execution:heartbeat:${executionId}`;
+      const payload = JSON.stringify({ executionId, timestamp: now, expiresAt, ...metadata });
+      await client.set(key, payload, "EX", ttlSeconds);
+    } catch (err) {
+      console.warn(`[Queue] Failed to set Redis heartbeat for ${executionId}:`, (err as Error).message);
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Retrieves the heartbeat record for an execution.
+ */
+export async function getHeartbeat(executionId: string): Promise<HeartbeatRecord | null> {
+  const client = getRedisClient();
+  if (client) {
+    try {
+      const key = `execution:heartbeat:${executionId}`;
+      const data = await client.get(key);
+      if (data) {
+        const parsed = JSON.parse(data);
+        const ttl = await client.ttl(key);
+        const now = Date.now();
+        return {
+          executionId,
+          timestamp: Number(parsed.timestamp ?? now),
+          expiresAt: parsed.expiresAt ? Number(parsed.expiresAt) : now + (ttl > 0 ? ttl * 1000 : 0),
+          metadata: parsed,
+        };
+      }
+    } catch (err) {
+      console.warn(`[Queue] Failed to get Redis heartbeat for ${executionId}:`, (err as Error).message);
+    }
+  }
+
+  const memory = inMemoryHeartbeats.get(executionId);
+  if (memory) {
+    if (Date.now() <= memory.expiresAt) {
+      return memory;
+    }
+    inMemoryHeartbeats.delete(executionId);
+  }
+
+  return null;
+}
+
+/**
+ * Returns remaining TTL in seconds for an execution heartbeat (> 0 if active, -1 if expired/missing).
+ */
+export async function getHeartbeatTTL(executionId: string): Promise<number> {
+  const client = getRedisClient();
+  if (client) {
+    try {
+      const key = `execution:heartbeat:${executionId}`;
+      const ttl = await client.ttl(key);
+      if (ttl > 0) return ttl;
+      if (ttl === -2) {
+        // Key does not exist in Redis, fall back to memory
+      } else {
+        return ttl;
+      }
+    } catch (err) {
+      console.warn(`[Queue] Failed to check Redis TTL for ${executionId}:`, (err as Error).message);
+    }
+  }
+
+  const memory = inMemoryHeartbeats.get(executionId);
+  if (!memory) return -1;
+  const now = Date.now();
+  if (now > memory.expiresAt) {
+    inMemoryHeartbeats.delete(executionId);
+    return -1;
+  }
+  return Math.max(0, Math.ceil((memory.expiresAt - now) / 1000));
+}
+
+/**
+ * Returns true if an execution has a valid, non-expired heartbeat.
+ */
+export async function isHeartbeatActive(executionId: string): Promise<boolean> {
+  const ttl = await getHeartbeatTTL(executionId);
+  return ttl > 0;
+}
+
+/**
+ * Clears the heartbeat record when an execution finishes or transitions out of RUNNING.
+ */
+export async function clearHeartbeat(executionId: string): Promise<boolean> {
+  inMemoryHeartbeats.delete(executionId);
+  const client = getRedisClient();
+  if (client) {
+    try {
+      const key = `execution:heartbeat:${executionId}`;
+      await client.del(key);
+    } catch (err) {
+      console.warn(`[Queue] Failed to clear Redis heartbeat for ${executionId}:`, (err as Error).message);
+    }
+  }
+  return true;
+}
+
+/**
+ * Clears all in-memory heartbeats (test cleanup helper).
+ */
+export function resetMemoryHeartbeats(): void {
+  inMemoryHeartbeats.clear();
 }

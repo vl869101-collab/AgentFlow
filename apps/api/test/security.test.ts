@@ -199,26 +199,96 @@ test("Code Sandbox: Executes safe JavaScript computation and handles timeouts", 
   );
 });
 
-test("Per-route rate limiting: Returns 429 when rate limit is exceeded on sensitive routes", async () => {
-  const app = await buildApp({ logger: false });
-
-  // Test rate limiting on auth register (max: 10/hr)
-  let hitRateLimit = false;
-  for (let i = 0; i < 15; i++) {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/auth/register",
-      headers: { "x-forwarded-for": "198.51.100.99" },
-      payload: { email: `ratelimit-${i}@test.com`, name: "Rate Tester", password: "Password123!" },
-    });
-
-    if (res.statusCode === 429) {
-      hitRateLimit = true;
-      assert.equal(res.statusCode, 429);
-      break;
+test("Code Sandbox: Enforces memory limits in isolated-vm", async () => {
+  const memoryHeavyCode = `
+    const arr = [];
+    while (true) {
+      arr.push(new Array(1000000).fill("A"));
     }
-  }
+  `;
 
-  assert.ok(hitRateLimit, "Expected rate limit (429) to be triggered on /api/auth/register");
-  await app.close();
+  await assert.rejects(
+    async () => executeCodeInSandbox(memoryHeavyCode, {}, { memoryLimitMb: 8, timeoutMs: 5000 }),
+    (err: any) => err.code === "CODE_MEMORY_LIMIT" || err.code === "CODE_TIMEOUT",
+    "Expected memory limit or timeout to be enforced"
+  );
+});
+
+test("Code Sandbox: Supports n8n helpers, callbacks, and console logging safely", async () => {
+  const codeWithHelpers = `
+    console.log("Processing input items");
+    const items = $input.all();
+    const doubled = items.map(item => ({ val: item.val * 2 }));
+    return $helpers.returnJsonArray(doubled);
+  `;
+
+  const { result, logs } = await executeCodeInSandbox(codeWithHelpers, {
+    $input: {
+      all: () => [{ val: 1 }, { val: 2 }, { val: 3 }],
+    },
+    $helpers: {
+      returnJsonArray: (arr: unknown) => arr,
+    },
+  });
+
+  assert.deepEqual(result, [{ val: 2 }, { val: 4 }, { val: 6 }]);
+  assert.ok(logs.some((l) => l.includes("Processing input items")));
+});
+
+test("Code Sandbox: Maps runtime syntax and execution errors to CODE_RUNTIME_ERROR", async () => {
+  const syntaxErrorCode = "return { broken: ;";
+  await assert.rejects(
+    async () => executeCodeInSandbox(syntaxErrorCode, {}),
+    (err: any) => err.code === "CODE_RUNTIME_ERROR",
+  );
+
+  const runtimeErrorCode = "const obj = null; return obj.prop;";
+  await assert.rejects(
+    async () => executeCodeInSandbox(runtimeErrorCode, {}),
+    (err: any) => err.code === "CODE_RUNTIME_ERROR",
+  );
+});
+
+test("Per-route rate limiting: Returns 429 when rate limit is exceeded on sensitive routes in production, and relaxes in dev/test", async () => {
+  const origEnv = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = "production";
+    const prodApp = await buildApp({ logger: false });
+
+    // Test rate limiting on auth register in production (max: 10/hr)
+    let hitRateLimit = false;
+    for (let i = 0; i < 15; i++) {
+      const res = await prodApp.inject({
+        method: "POST",
+        url: "/api/auth/register",
+        headers: { "x-forwarded-for": "198.51.100.99" },
+        payload: { email: `ratelimit-${i}@test.com`, name: "Rate Tester", password: "Password123!" },
+      });
+
+      if (res.statusCode === 429) {
+        hitRateLimit = true;
+        assert.equal(res.statusCode, 429);
+        break;
+      }
+    }
+
+    assert.ok(hitRateLimit, "Expected rate limit (429) to be triggered on /api/auth/register in production");
+    await prodApp.close();
+
+    // Test dev/test relaxed rate limit (max: 10000/hr)
+    process.env.NODE_ENV = "development";
+    const devApp = await buildApp({ logger: false });
+    for (let i = 0; i < 15; i++) {
+      const res = await devApp.inject({
+        method: "POST",
+        url: "/api/auth/register",
+        headers: { "x-forwarded-for": "198.51.100.100" },
+        payload: { email: `ratelimit-dev-${i}@test.com`, name: "Rate Tester", password: "Password123!" },
+      });
+      assert.notEqual(res.statusCode, 429, "Dev rate limit should not be triggered after 15 requests");
+    }
+    await devApp.close();
+  } finally {
+    process.env.NODE_ENV = origEnv;
+  }
 });

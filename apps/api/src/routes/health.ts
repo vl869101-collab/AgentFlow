@@ -168,7 +168,11 @@ export async function healthRoutes(app: FastifyInstance) {
     }
 
     // 2. Redis latency & health check
+    // Redis is optional: queues and metering fall back to in-memory when it is
+    // absent (e.g. Render free tier). Only surface a real error when the
+    // operator explicitly configured REDIS_URL but the ping still failed.
     const redisClient = getRedisClient();
+    const redisConfigured = Boolean(process.env.REDIS_URL);
     if (redisClient) {
       const redisStart = performance.now();
       try {
@@ -180,7 +184,7 @@ export async function healthRoutes(app: FastifyInstance) {
         checks.redis = pingRes === "PONG" ? "ok" : "degraded";
       } catch {
         latencyMs.redis = Math.round((performance.now() - redisStart) * 100) / 100;
-        checks.redis = "error";
+        checks.redis = redisConfigured ? "degraded" : "not-configured";
       }
     } else {
       checks.redis = process.env.ALLOW_MEMORY_DB === "1" ? "in-memory" : "not-configured";

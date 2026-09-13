@@ -30,9 +30,16 @@ export default function BotConsolePage() {
   const [streamProtocol, setStreamProtocol] = useState<StreamProtocol>("webrtc");
   const [isStreaming, setIsStreaming] = useState(false);
 
+  const generateUniqueId = (prefix: string) => {
+    const randomSuffix = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 7);
+    return `${prefix}-${Date.now()}-${randomSuffix}`;
+  };
+
   const handleSendMessage = (content: string) => {
     const userMsg: BotChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: generateUniqueId("msg"),
       sender: "user",
       content,
       timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
@@ -53,7 +60,7 @@ export default function BotConsolePage() {
       const nowTime = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
       const newAction: BrowserAction = {
-        id: `act-${Date.now()}`,
+        id: generateUniqueId("act"),
         type: isSearchOrNavigate ? "navigate" : "click",
         target: isSearchOrNavigate ? content : "button[type='submit']",
         value: isSearchOrNavigate ? "URL resolvida e inspecionada" : "Valor submetido",
@@ -66,7 +73,7 @@ export default function BotConsolePage() {
 
       const dynamicThoughts: ThoughtStep[] = [
         {
-          id: `th-${Date.now()}-1`,
+          id: `${generateUniqueId("th")}-1`,
           type: "plan",
           title: "Interpretação e Quebra de Instrução",
           detail: `Comando: "${content}" mapeado para o motor de automação Grok.`,
@@ -75,7 +82,7 @@ export default function BotConsolePage() {
           durationMs: 140,
         },
         {
-          id: `th-${Date.now()}-2`,
+          id: `${generateUniqueId("th")}-2`,
           type: isSearchOrNavigate ? "navigate" : "click",
           title: isSearchOrNavigate ? "Navegação até Endpoint" : "Interação com Elemento DOM",
           detail: isSearchOrNavigate ? "Playwright sandbox executou page.goto" : "Playwright executou page.click()",
@@ -84,7 +91,7 @@ export default function BotConsolePage() {
           durationMs: 380,
         },
         {
-          id: `th-${Date.now()}-3`,
+          id: `${generateUniqueId("th")}-3`,
           type: "verify",
           title: "Validação de Integridade e Snapshot",
           detail: "Verificação de layout e captura de logs concluídos com êxito.",
@@ -95,7 +102,7 @@ export default function BotConsolePage() {
       ];
 
       const botReply: BotChatMessage = {
-        id: `msg-${Date.now() + 1}`,
+        id: generateUniqueId("msg"),
         sender: "bot",
         content: `Instrução processada com sucesso: "${content}". Ações de navegação e inspeção executadas no sandbox com isolamento de segurança.`,
         timestamp: nowTime,
@@ -117,20 +124,19 @@ export default function BotConsolePage() {
   };
 
   const handleTakeoverToggle = () => {
-    setBotMode((prev) => {
-      const nextMode = prev === "ai_autonomous" ? "human_takeover" : "ai_autonomous";
-      const sysMsg: BotChatMessage = {
-        id: `msg-sys-${Date.now()}`,
-        sender: "system",
-        content:
-          nextMode === "human_takeover"
-            ? "Intervenção manual iniciada: O operador assumiu controle do mouse e teclado no sandbox."
-            : "Controle devolvido à IA: Agentflowbot retomou o plano de ação autônomo.",
-        timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-      };
-      setMessages((m) => [...m, sysMsg]);
-      return nextMode;
-    });
+    const nextMode: BotMode = botMode === "ai_autonomous" ? "human_takeover" : "ai_autonomous";
+    setBotMode(nextMode);
+
+    const sysMsg: BotChatMessage = {
+      id: generateUniqueId("msg-sys"),
+      sender: "system",
+      content:
+        nextMode === "human_takeover"
+          ? "Intervenção manual iniciada: O operador assumiu controle do mouse e teclado no sandbox."
+          : "Controle devolvido à IA: Agentflowbot retomou o plano de ação autônomo.",
+      timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    };
+    setMessages((prev) => [...prev, sysMsg]);
   };
 
   return (

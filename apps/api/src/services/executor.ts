@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { getEnv } from "../lib/env.js";
 import { decryptCredential } from "../lib/crypto.js";
@@ -8,7 +9,10 @@ import { ensureFreshOAuth2Token } from "./vault/oauth-refresh.js";
 import { resolveUniversalCredentials, resolveSingleCredential } from "./vault/universal-resolver.js";
 import { UniversalConnectionInjector } from "./vault/universal-injector.js";
 import { recordUsageEvent } from "./metering.js";
-import { recordAuditEvent } from "./audit-ledger.js";
+import { recordAuditEvent, recordWorkflowAuditEvent } from "./audit-ledger.js";
+import { publishTelemetryEvent } from "./execution-telemetry.js";
+import { createConcurrencyPool } from "./executor/concurrency-pool.js";
+import { enqueueExecution } from "./queue.js";
 
 // Native handler (registered via the registry-pending process — Part 2)
 import { executeEvaluationTrigger } from "./nodes/evaluationTrigger.js";
@@ -25,7 +29,7 @@ import { GoogleSheetsNodeHandler } from "./nodes/google-sheets.js";
 import { GoogleDriveNodeHandler } from "./nodes/google-drive.js";
 import { GoogleGmailNodeHandler } from "./nodes/google-gmail.js";
 import { ErrorTriggerNodeHandler } from "./nodes/error-trigger.js";
-import { WaitNodeHandler } from "./nodes/wait.js";
+import { WaitNodeHandler, calculateWaitMs, isWaitNode, type WaitNodeConfig } from "./nodes/wait.js";
 import { MergeNodeHandler } from "./nodes/merge.js";
 import { FormNodeHandler } from "./nodes/form.js";
 import { AiAgentNodeHandler } from "./nodes/ai-agent.js";
@@ -34,6 +38,7 @@ import { LlmChainNodeHandler } from "./nodes/llm-chain.js";
 import { VectorStoreNodeHandler } from "./nodes/vector-store.js";
 import { ExecuteWorkflowNodeHandler } from "./nodes/execute-workflow.js";
 import { TwelveLabsNodeHandler } from "./nodes/twelvelabs.js";
+import { SwarmNodeHandler, SWARM_NODE_TYPES } from "./nodes/swarm.js";
 import {
   wrapItems,
   unwrapItems,
@@ -41,7 +46,11 @@ import {
   normalizeFromItemsContract,
   extractFieldByPath,
   setFieldByPath,
+  isNodeItem,
+  NodeItemsSchema,
+  NodeItemSchema,
   type NodeItem,
+  type NodeExecutionContext,
 } from "./nodes/types.js";
 
 export {
@@ -51,6 +60,9 @@ export {
   normalizeFromItemsContract,
   extractFieldByPath,
   setFieldByPath,
+  isNodeItem,
+  NodeItemsSchema,
+  NodeItemSchema,
   type NodeItem,
 };
 
@@ -75,12 +87,16 @@ type WorkflowNode = {
   id: string;
   type: string;
   config: JsonObject;
+  label?: string;
+  name?: string;
 };
 
 type WorkflowEdge = {
+  id?: string;
   source: string;
   target: string;
   sourceHandle?: string;
+  targetHandle?: string;
   label?: string;
   condition?: unknown;
 };
@@ -107,6 +123,53 @@ function asObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
 }
 
+function isExternalActionConfig(config: JsonObject, parameters: JsonObject): boolean {
+  const contract = asObject(parameters.contract ?? config.contract);
+  const raw =
+    parameters.isExternalAction ??
+    config.isExternalAction ??
+    contract.isExternalAction ??
+    false;
+  return raw === true || String(raw).toLowerCase() === "true";
+}
+
+export function nodeRequiresApproval(node: WorkflowNode): boolean {
+  if (node.type === "approval") return true;
+  const config = asObject(node.config);
+  const parameters = asObject(config.parameters);
+  // EXP-DIF-01: autonomous swarm nodes performing external actions require approval.
+  if ((SWARM_NODE_TYPES as readonly string[]).includes(node.type) && isExternalActionConfig(config, parameters)) {
+    return true;
+  }
+  if (
+    config.requiresApproval === true ||
+    parameters.requiresApproval === true ||
+    String(config.requiresApproval ?? "").toLowerCase() === "true" ||
+    String(parameters.requiresApproval ?? "").toLowerCase() === "true"
+  ) {
+    return true;
+  }
+
+  const action = String(
+    config.action ??
+    parameters.action ??
+    config.operation ??
+    parameters.operation ??
+    config.method ??
+    parameters.method ??
+    ""
+  ).toLowerCase();
+
+  const irreversibleKeywords = ["delete", "drop", "terminate", "charge", "refund", "destroy", "purge", "revoke"];
+  if (action && irreversibleKeywords.some((keyword) => action.includes(keyword))) {
+    if (config.requiresApproval !== false && parameters.requiresApproval !== false) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function normalizeNodes(value: unknown): WorkflowNode[] {
   const nodes = parseJson(value, []);
   if (!Array.isArray(nodes)) throw new Error("Workflow nodes must be an array");
@@ -121,6 +184,8 @@ function normalizeNodes(value: unknown): WorkflowNode[] {
       id: String(node.id ?? node.nodeId ?? `node-${index}`),
       type,
       config: asObject(parseJson(data.config ?? node.config, {})),
+      label: (node.label as string) ?? (data.label as string) ?? undefined,
+      name: (node.name as string) ?? (data.name as string) ?? undefined,
     };
   });
 
@@ -142,9 +207,11 @@ function normalizeEdges(value: unknown): WorkflowEdge[] {
     const target = edge.targetNodeId ?? edge.target;
     if (!source || !target) throw new Error(`Workflow edge ${index} is missing source or target`);
     return {
+      id: edge.id !== undefined ? String(edge.id) : undefined,
       source: String(source),
       target: String(target),
       sourceHandle: edge.sourceHandle === undefined ? undefined : String(edge.sourceHandle),
+      targetHandle: edge.targetHandle === undefined ? undefined : String(edge.targetHandle),
       label: edge.label === undefined ? undefined : String(edge.label),
       condition: parseJson(edge.condition),
     };
@@ -153,6 +220,21 @@ function normalizeEdges(value: unknown): WorkflowEdge[] {
 
 function getField(input: unknown, field: string): unknown {
   if (!field) return input;
+  const direct = extractFieldByPath(input, field, undefined);
+  if (direct !== undefined) return direct;
+
+  if (Array.isArray(input) && input.length > 0) {
+    const first = input[0];
+    if (first && typeof first === "object") {
+      if ("json" in first && first.json && typeof first.json === "object") {
+        const jsonVal = extractFieldByPath(first.json, field, undefined);
+        if (jsonVal !== undefined) return jsonVal;
+      }
+      const itemVal = extractFieldByPath(first, field, undefined);
+      if (itemVal !== undefined) return itemVal;
+    }
+  }
+
   return field.split(".").reduce<unknown>((value, key) => {
     if (value === null || value === undefined || typeof value !== "object") return undefined;
     return (value as JsonObject)[key];
@@ -191,8 +273,39 @@ function evaluateCondition(input: unknown, config: JsonObject): boolean {
   }
 }
 
+function unpackConditionResult(output: unknown): boolean {
+  if (typeof output === "boolean") return output;
+  if (!output) return false;
+  if (Array.isArray(output)) {
+    if (output.length === 0) return false;
+    const first = output[0];
+    if (first && typeof first === "object" && "json" in first) {
+      const json = (first as any).json;
+      if (typeof json === "boolean") return json;
+      if (json && typeof json === "object") {
+        if ("value" in json && typeof json.value === "boolean") return json.value;
+        if ("result" in json && typeof json.result === "boolean") return json.result;
+        if ("value" in json) return Boolean(json.value);
+        if ("result" in json) return Boolean(json.result);
+      }
+    }
+    return Boolean(first);
+  }
+  if (typeof output === "object" && "json" in (output as any)) {
+    const json = (output as any).json;
+    if (typeof json === "boolean") return json;
+    if (json && typeof json === "object") {
+      if ("value" in json && typeof json.value === "boolean") return json.value;
+      if ("result" in json && typeof json.result === "boolean") return json.result;
+      if ("value" in json) return Boolean(json.value);
+      if ("result" in json) return Boolean(json.result);
+    }
+  }
+  return Boolean(output);
+}
+
 function followsConditionEdge(edge: WorkflowEdge, output: unknown): boolean {
-  const result = Boolean(output);
+  const result = unpackConditionResult(output);
   const handle = (edge.sourceHandle ?? edge.label ?? "").toLowerCase();
   if (handle === "true" || handle === "yes") return result;
   if (handle === "false" || handle === "no") return !result;
@@ -354,7 +467,12 @@ async function credentialHeaders(config: JsonObject, orgId: string): Promise<Rec
   return headers;
 }
 
-async function executeHttp(config: JsonObject, input: unknown, orgId: string): Promise<unknown> {
+async function executeHttp(
+  config: JsonObject,
+  input: unknown,
+  orgId: string,
+  nodeSpan?: import("../lib/otel.js").Span,
+): Promise<unknown> {
   let url = assertSafeUrl(config.url);
   const method = String(config.method ?? "GET").toUpperCase();
   if (!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].includes(method)) {
@@ -402,8 +520,8 @@ async function executeHttp(config: JsonObject, input: unknown, orgId: string): P
     headers["Content-Type"] = "application/json";
   }
 
-  // W3C Trace Context propagation for distributed tracing (TASK-10)
-  telemetry.injectTraceContext(headers);
+  // W3C Trace Context propagation for distributed tracing (TASK-10 / WF-ENG Item 7)
+  telemetry.injectTraceContext(headers, nodeSpan);
 
   // TASK-11: Circuit Breaker for HTTP egress
   let hostname = "default-host";
@@ -447,7 +565,9 @@ async function executeNode(
   input: unknown,
   orgId: string,
   executionId?: string,
-  workflowId?: string
+  workflowId?: string,
+  inputBranches?: NodeItem[][],
+  nodeSpan?: import("../lib/otel.js").Span,
 ): Promise<unknown> {
   const nodeConfig = (node.config.parameters as Record<string, unknown>) ?? (node.config as Record<string, unknown>);
   let resolvedCreds: Record<string, any> | undefined;
@@ -466,14 +586,17 @@ async function executeNode(
     resolvedCreds = undefined;
   }
 
-  const baseContext = {
+  const traceparent = nodeSpan ? telemetry.formatTraceParent(nodeSpan) : undefined;
+  const baseContext: NodeExecutionContext = {
     executionId: executionId || "",
     nodeId: node.id,
     workflowId: workflowId || "",
     orgId,
     nodeConfig,
     input,
+    inputBranches,
     credentials: resolvedCreds,
+    traceparent,
   };
 
   switch (node.type) {
@@ -489,7 +612,7 @@ async function executeNode(
       return evaluateCondition(input, node.config);
     case "http":
     case "httpRequest":
-      return executeHttp(node.config, input, orgId);
+      return executeHttp(node.config, input, orgId, nodeSpan);
     case "code": {
       const handler = new CodeNodeHandler();
       return handler.execute(baseContext);
@@ -501,12 +624,24 @@ async function executeNode(
       );
     case "output":
       return input;
-    case "delay": {
-      const duration = Number(node.config.duration ?? 0);
-      const unit = String(node.config.unit ?? "seconds").toLowerCase();
-      const multiplier = unit.startsWith("minute") ? 60_000 : unit.startsWith("hour") ? 3_600_000 : 1_000;
-      const waitMs = Math.min(Math.max(duration * multiplier, 0), NODE_TIMEOUT_MS);
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    case "approval": {
+      const existingApprovals = await prisma.approval.findMany({
+        where: { executionId },
+      });
+      const approval = existingApprovals.find((a: any) => {
+        const ctx = asObject(a.context);
+        return (ctx.nodeId === node.id || a.id === (node.config as any)?.approvalId) && a.status === "APPROVED";
+      });
+      if (approval) {
+        const ctx = asObject(approval.context);
+        if (ctx.submittedData) {
+          return {
+            ...(typeof input === "object" && input !== null ? (input as any) : {}),
+            ...asObject(ctx.submittedData),
+            _approved: true,
+          };
+        }
+      }
       return input;
     }
     case "merge": {
@@ -528,10 +663,39 @@ async function executeNode(
       return input;
     }
     case "set_fields": {
-      // Safely spread fields onto input
-      const fields = node.config as Record<string, unknown>;
-      if (typeof input !== "object" || input === null) return { ...(input as object), ...fields };
-      return { ...input, ...fields } as Record<string, unknown>;
+      // Safely spread fields onto input items or input object
+      const fields = (node.config ?? {}) as Record<string, unknown>;
+      if (Array.isArray(input)) {
+        return input.map((item) => {
+          if (isNodeItem(item)) {
+            const jsonCopy = { ...item.json };
+            if (typeof jsonCopy.value === "boolean" && Object.keys(jsonCopy).length === 1) {
+              delete jsonCopy.value;
+            }
+            return {
+              ...item,
+              json: { ...jsonCopy, ...fields },
+            };
+          }
+          if (typeof item === "object" && item !== null) {
+            return { ...item, ...fields };
+          }
+          return { value: item, ...fields };
+        });
+      }
+      if (isNodeItem(input)) {
+        const item = input as NodeItem;
+        const jsonCopy = { ...item.json };
+        if (typeof jsonCopy.value === "boolean" && Object.keys(jsonCopy).length === 1) {
+          delete jsonCopy.value;
+        }
+        return {
+          ...item,
+          json: { ...jsonCopy, ...fields },
+        };
+      }
+      const base = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
+      return { ...base, ...fields };
     }
     case "respond_webhook": {
       const config = node.config as { statusCode?: number; body?: string };
@@ -615,9 +779,33 @@ async function executeNode(
       const handler = new ErrorTriggerNodeHandler();
       return handler.execute(baseContext);
     }
-    case "wait": {
+    case "wait":
+    case "delay": {
+      const waitApproval = await prisma.approval.findFirst({
+        where: { executionId, nodeId: node.id },
+      });
+      let submittedData: unknown = undefined;
+      let resumeToken: string | undefined = undefined;
+      if (waitApproval?.context) {
+        const ctx = waitApproval.context as Record<string, unknown>;
+        if (ctx.submittedData !== undefined) {
+          submittedData = ctx.submittedData;
+        }
+        if (ctx.resumeToken) {
+          resumeToken = String(ctx.resumeToken);
+        }
+      }
       const handler = new WaitNodeHandler();
-      return handler.execute(baseContext);
+      const execContext: NodeExecutionContext = {
+        ...baseContext,
+        nodeConfig: {
+          ...node.config,
+          _submittedData: submittedData,
+          _resumeToken: resumeToken,
+        },
+      };
+      const res = await handler.execute(execContext);
+      return res.items;
     }
     case "form":
     case "formTrigger":
@@ -670,6 +858,13 @@ async function executeNode(
     case "twelvelabs":
     case "twelveLabsVideoAnalysis": {
       const handler = new TwelveLabsNodeHandler();
+      const res = await handler.execute(baseContext);
+      return res.items;
+    }
+    case "swarm":
+    case "swarmNode":
+    case "swarm_node": {
+      const handler = new SwarmNodeHandler();
       const res = await handler.execute(baseContext);
       return res.items;
     }
@@ -730,7 +925,7 @@ function isCancellationError(error: unknown): boolean {
   return message.includes("cancel") || message.includes("abort");
 }
 
-async function assertExecutionNotCancelled(executionId: string): Promise<void> {
+export async function assertExecutionNotCancelled(executionId: string): Promise<void> {
   const current = await prisma.workflowExecution.findUnique({ where: { id: executionId } });
   if (current?.status === "CANCELLED") throw new Error("Execution cancelled");
 }
@@ -741,7 +936,9 @@ async function executeNodeWithRetry(
   orgId: string,
   executionId: string,
   nodeExecutionId: string,
-  workflowId?: string
+  workflowId?: string,
+  inputBranches?: NodeItem[][],
+  nodeSpan?: import("../lib/otel.js").Span,
 ): Promise<unknown> {
   const policy = getNodeRetryPolicy(node);
   let lastError: unknown;
@@ -750,17 +947,27 @@ async function executeNodeWithRetry(
     await assertExecutionNotCancelled(executionId);
     try {
       const output = await withTimeout(
-        executeNode(node, input, orgId, executionId, workflowId),
+        executeNode(node, input, orgId, executionId, workflowId, inputBranches, nodeSpan),
         NODE_TIMEOUT_MS,
         "Node execution timed out"
       );
+
+      // Validate and envelop output to strict NodeItem[] contract
+      const wrapped = wrapItems(output);
+      const validation = NodeItemsSchema.safeParse(wrapped);
+      if (!validation.success) {
+        throw new Error(
+          `Node output contract validation failed for node "${node.id}" (${node.type}): ${validation.error.message}`
+        );
+      }
+
       if (attempt > 1) {
         await prisma.nodeExecution.update({
           where: { id: nodeExecutionId },
           data: { retryCount: attempt - 1, error: null },
         });
       }
-      return output;
+      return wrapped;
     } catch (error) {
       lastError = error;
       const hasAttemptsLeft = attempt < policy.maxAttempts;
@@ -778,6 +985,14 @@ async function executeNodeWithRetry(
   throw lastError instanceof Error ? lastError : new Error(errorMessage(lastError));
 }
 
+function cleanScopedId(id: unknown, workflowId?: string): string {
+  const str = String(id ?? "");
+  if (workflowId && str.startsWith(`${workflowId}:`)) {
+    return str.slice(workflowId.length + 1);
+  }
+  return str;
+}
+
 function workflowGraph(workflow: any): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
   const version = Array.isArray(workflow.versions) ? workflow.versions[0] : undefined;
   const snapshot = asObject(parseJson(version?.snapshot, {}));
@@ -785,8 +1000,16 @@ function workflowGraph(workflow: any): { nodes: WorkflowNode[]; edges: WorkflowE
   const relationEdges = Array.isArray(workflow.edges) ? workflow.edges : [];
   const rawNodes = relationNodes.length > 0 ? relationNodes : snapshot.nodes ?? [];
   const rawEdges = relationEdges.length > 0 ? relationEdges : snapshot.edges ?? [];
-  const nodes = normalizeNodes(rawNodes);
-  const edges = normalizeEdges(rawEdges);
+  const wId = workflow?.id;
+  const nodes = normalizeNodes(rawNodes).map((node) => ({
+    ...node,
+    id: cleanScopedId(node.id, wId),
+  }));
+  const edges = normalizeEdges(rawEdges).map((edge) => ({
+    ...edge,
+    source: cleanScopedId(edge.source, wId),
+    target: cleanScopedId(edge.target, wId),
+  }));
   const nodeIds = new Set(nodes.map((node) => node.id));
   for (const edge of edges) {
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
@@ -810,6 +1033,29 @@ async function recordExecutionAudit(
   action: string,
   metadata: Record<string, unknown> = {},
 ): Promise<void> {
+  const normalizedAction =
+    action === "execution.started" || action === "execution.start"
+      ? "execution.start"
+      : action === "execution.succeeded" || action === "execution.finish"
+        ? "execution.finish"
+        : action === "execution.failed" || action === "execution.error"
+          ? "execution.error"
+          : action;
+
+  await recordWorkflowAuditEvent({
+    executionId: execution.id,
+    actor: execution.userId ?? "system",
+    action: normalizedAction,
+    decision: (metadata.decision as string) ?? (metadata.status as string) ?? null,
+    payload: {
+      workflowId: execution.workflowId,
+      trigger: execution.trigger ?? "api",
+      ...metadata,
+    },
+  }).catch((error) => {
+    console.error(`[workflow-audit] Failed to record ${action} for execution ${execution.id}:`, error);
+  });
+
   if (!execution.orgId) return;
   await recordAuditEvent({
     orgId: execution.orgId,
@@ -827,7 +1073,12 @@ async function recordExecutionAudit(
   });
 }
 
-async function executeGraph(execution: any, workflow: any, parentSpan?: import("../lib/otel.js").Span): Promise<unknown> {
+export async function executeGraph(
+  execution: any,
+  workflow: any,
+  parentSpan?: import("../lib/otel.js").Span,
+  options?: { maxParallelNodes?: number },
+): Promise<unknown> {
   const { nodes, edges } = workflowGraph(workflow);
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const outgoing = new Map<string, WorkflowEdge[]>();
@@ -860,9 +1111,10 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
     ].includes(node.type),
   );
   if (!trigger) throw new Error("Workflow has no trigger node");
+  const triggerNode = trigger;
 
   const reachable = new Set<string>();
-  const discover = [trigger.id];
+  const discover = [triggerNode.id];
   while (discover.length) {
     const nodeId = discover.pop()!;
     if (reachable.has(nodeId)) continue;
@@ -872,29 +1124,470 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
 
   const remainingIncoming = new Map<string, number>();
   for (const nodeId of reachable) {
-    if (nodeId === trigger.id) continue;
+    if (nodeId === triggerNode.id) continue;
     remainingIncoming.set(nodeId, edges.filter((edge) => edge.target === nodeId && reachable.has(edge.source)).length);
   }
 
-  const queue = [trigger.id];
-  const queued = new Set(queue);
+  // Pre-calculate deterministic edge branch index mapping per target node
+  const edgeBranchIndexMap = new Map<WorkflowEdge, number>();
+  const parseHandleIndex = (handle?: string): number | null => {
+    if (!handle) return null;
+    const match = handle.match(/\d+/);
+    return match ? parseInt(match[0], 10) : null;
+  };
+
+  for (const targetId of reachable) {
+    if (targetId === triggerNode.id) continue;
+    const incoming = edges.filter((e) => e.target === targetId && reachable.has(e.source));
+    if (incoming.length === 0) continue;
+
+    const hasTargetHandle = incoming.some(
+      (e) => e.targetHandle !== undefined && e.targetHandle.trim() !== "",
+    );
+
+    const sorted = [...incoming].sort((a, b) => {
+      if (hasTargetHandle) {
+        const hA = a.targetHandle;
+        const hB = b.targetHandle;
+        if (hA !== undefined && hB !== undefined) {
+          const numA = parseHandleIndex(hA);
+          const numB = parseHandleIndex(hB);
+          if (numA !== null && numB !== null) {
+            if (numA !== numB) return numA - numB;
+          } else if (numA !== null) {
+            return -1;
+          } else if (numB !== null) {
+            return 1;
+          } else {
+            const comp = hA.localeCompare(hB);
+            if (comp !== 0) return comp;
+          }
+        } else if (hA !== undefined) {
+          return -1;
+        } else if (hB !== undefined) {
+          return 1;
+        }
+      }
+      return edges.indexOf(a) - edges.indexOf(b);
+    });
+
+    let currentBranch = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const edge = sorted[i];
+      if (i > 0 && hasTargetHandle) {
+        const prev = sorted[i - 1];
+        if (edge.targetHandle && prev.targetHandle && edge.targetHandle === prev.targetHandle) {
+          edgeBranchIndexMap.set(edge, edgeBranchIndexMap.get(prev)!);
+          continue;
+        }
+      }
+      edgeBranchIndexMap.set(edge, currentBranch++);
+    }
+  }
+
+  const configuredConcurrency = Number(
+    options?.maxParallelNodes ??
+    (workflow as any)?.settings?.maxParallelNodes ??
+    (workflow as any)?.settings?.maxConcurrency ??
+    (workflow as any)?.maxParallelNodes ??
+    process.env.EXECUTOR_MAX_PARALLEL_NODES ??
+    8,
+  );
+  const maxConcurrency = Number.isFinite(configuredConcurrency) && configuredConcurrency > 0
+    ? Math.floor(configuredConcurrency)
+    : 8;
+  const pool = createConcurrencyPool(maxConcurrency);
+
+  const readyQueue: string[] = [trigger.id];
+  const queued = new Set<string>(readyQueue);
   const processed = new Set<string>();
-  const active = new Set([trigger.id]);
+  const active = new Set<string>([trigger.id]);
   const activeIncoming = new Map<string, number>();
   const incomingInputs = new Map<string, unknown[]>();
+  const incomingBranchInputs = new Map<string, Map<number, unknown[]>>();
   let finalOutput: unknown = execution.input;
   let returnedOutput = false;
 
-  while (queue.length) {
-    const current = await prisma.workflowExecution.findUnique({ where: { id: execution.id } });
-    if (current?.status === "CANCELLED") throw new Error("Execution cancelled");
+  const pastNodeExecutions = await prisma.nodeExecution.findMany({
+    where: {
+      executionId: execution.id,
+      status: "SUCCESS",
+    },
+    orderBy: { startedAt: "asc" },
+  });
 
-    const nodeId = queue.shift()!;
-    if (processed.has(nodeId)) continue;
-    processed.add(nodeId);
+  const successfulNodeExecutions = new Map<string, { output: unknown; id: string }>();
+  for (const ne of pastNodeExecutions) {
+    if (!successfulNodeExecutions.has(ne.nodeId)) {
+      successfulNodeExecutions.set(ne.nodeId, { output: ne.output, id: ne.id });
+    }
+  }
+
+  let fatalError: Error | null = null;
+  let suspendedResult: any = null;
+  let inFlight = 0;
+
+  async function executeSingleNode(nodeId: string): Promise<void> {
+    const current = await prisma.workflowExecution.findUnique({ where: { id: execution.id } });
+    if (current?.status === "CANCELLED") {
+      throw new Error("Execution cancelled");
+    }
+
     const node = nodeById.get(nodeId)!;
+
     const values = incomingInputs.get(nodeId) ?? [];
-    const nodeInput = nodeId === trigger.id ? execution.input : values.length === 1 ? values[0] : values;
+    const branchMap = incomingBranchInputs.get(nodeId);
+    let inputBranches: NodeItem[][] | undefined;
+
+    if (branchMap && branchMap.size > 0) {
+      const sortedBranchIndices = Array.from(branchMap.keys()).sort((a, b) => a - b);
+      const maxBranchIdx = sortedBranchIndices.length > 0 ? Math.max(...sortedBranchIndices) : -1;
+      if (maxBranchIdx >= 0) {
+        inputBranches = [];
+        for (let b = 0; b <= maxBranchIdx; b++) {
+          const rawBranchItems = branchMap.get(b) ?? [];
+          const branchItems: NodeItem[] = rawBranchItems.flatMap((val) => wrapItems(val));
+          inputBranches.push(branchItems);
+        }
+      }
+    }
+
+    let nodeInput: unknown;
+    if (nodeId === triggerNode.id) {
+      nodeInput = wrapItems(execution.input);
+    } else if (node.type === "merge") {
+      nodeInput = inputBranches ?? values.map((v) => wrapItems(v));
+    } else if (values.length === 0) {
+      nodeInput = wrapItems(execution.input ?? {});
+    } else if (values.length === 1) {
+      nodeInput = wrapItems(values[0]);
+    } else {
+      nodeInput = values.flatMap((v) => wrapItems(v));
+    }
+
+    // Reversibility Approval Line check (EXP-ESS-01)
+    if (active.has(nodeId) && nodeRequiresApproval(node)) {
+      const existingApprovals = await prisma.approval.findMany({
+        where: { executionId: execution.id },
+      });
+      const approved = existingApprovals.some((a: any) => {
+        const ctx = asObject(a.context);
+        return (ctx.nodeId === nodeId || a.id === (node.config as any)?.approvalId) && a.status === "APPROVED";
+      });
+
+      if (!approved) {
+        const rejected = existingApprovals.some((a: any) => {
+          const ctx = asObject(a.context);
+          return (ctx.nodeId === nodeId || a.id === (node.config as any)?.approvalId) && a.status === "REJECTED";
+        });
+        if (rejected) {
+          await prisma.workflowExecution.update({
+            where: { id: execution.id },
+            data: { status: "CANCELLED", error: "Approval was rejected by user" },
+          });
+          throw new Error("Execution cancelled: Approval was rejected");
+        }
+
+        let pendingApproval = existingApprovals.find((a: any) => {
+          const ctx = asObject(a.context);
+          return ctx.nodeId === nodeId && a.status === "PENDING";
+        });
+
+        const config = asObject(node.config);
+        const parameters = asObject(config.parameters);
+        const timeoutHours = Number(
+          config.approvalTimeoutHours ??
+          parameters.approvalTimeoutHours ??
+          config.timeoutHours ??
+          parameters.timeoutHours ??
+          24,
+        );
+        const timeoutMs = (Number.isFinite(timeoutHours) && timeoutHours > 0 ? timeoutHours : 24) * 3600 * 1000;
+        const expiresAt = new Date(Date.now() + timeoutMs);
+
+        // Check if existing pending approval has timed out
+        if (pendingApproval) {
+          const pCtx = asObject(pendingApproval.context);
+          const pExpiresAt = pCtx.expiresAt ? new Date(pCtx.expiresAt).getTime() : null;
+          if (pExpiresAt && pExpiresAt < Date.now()) {
+            await prisma.approval.update({
+              where: { id: pendingApproval.id },
+              data: { status: "EXPIRED", decidedAt: new Date() },
+            });
+            await prisma.workflowExecution.update({
+              where: { id: execution.id },
+              data: { status: "CANCELLED", error: "Approval timed out after configured duration" },
+            });
+            void recordWorkflowAuditEvent({
+              executionId: execution.id,
+              nodeId,
+              actor: "system",
+              action: "approval.expired",
+              decision: "CANCELLED",
+              payload: {
+                approvalId: pendingApproval.id,
+                nodeId,
+                timeoutHours,
+                reason: "Approval timeout reached",
+              },
+            }).catch(() => {});
+            throw new Error("Execution cancelled: Approval timed out");
+          }
+        }
+
+        if (!pendingApproval) {
+          const approvalId = `appr_${randomUUID().replace(/-/g, "")}`;
+          pendingApproval = await prisma.approval.create({
+            data: {
+              id: approvalId,
+              executionId: execution.id,
+              userId: execution.userId || "system",
+              status: "PENDING",
+              message: String(config.title ?? parameters.title ?? node.label ?? node.name ?? `Approval required for ${node.type}`),
+              context: {
+                nodeId,
+                nodeType: node.type,
+                nodeLabel: node.label ?? node.name ?? nodeId,
+                input: nodeInput,
+                timeoutHours,
+                expiresAt: expiresAt.toISOString(),
+              },
+            },
+          });
+
+          void recordWorkflowAuditEvent({
+            executionId: execution.id,
+            nodeId,
+            actor: execution.userId ?? "system",
+            action: "approval.pending",
+            decision: "WAITING_APPROVAL",
+            payload: {
+              approvalId: pendingApproval.id,
+              nodeId,
+              nodeType: node.type,
+              timeoutHours,
+              expiresAt: expiresAt.toISOString(),
+            },
+          }).catch(() => {});
+        }
+
+        await prisma.workflowExecution.update({
+          where: { id: execution.id },
+          data: { status: "WAITING_APPROVAL" },
+        });
+
+        void publishTelemetryEvent({
+          executionId: execution.id,
+          nodeId,
+          eventType: "node_finished",
+          status: "WAITING_APPROVAL",
+        }).catch(() => {});
+
+        suspendedResult = { _suspended: true, reason: "WAITING_APPROVAL", nodeId, approvalId: pendingApproval.id };
+        readyQueue.length = 0;
+        pool.clearQueue();
+        return;
+      }
+    }
+
+    // Real Execution Yield / Suspension for Wait & Delay Nodes (WF-ENG Item 4)
+    if (active.has(nodeId) && isWaitNode(node.type)) {
+      const config = (node.config ?? {}) as WaitNodeConfig;
+      const mode = String(config.mode ?? "duration").toLowerCase();
+
+      if (mode !== "inline" && config.suspend !== false) {
+        const existingApprovals = await prisma.approval.findMany({
+          where: { executionId: execution.id },
+        });
+        const alreadyApproved = existingApprovals.find((a: any) => {
+          const ctx = asObject(a.context);
+          return (ctx.nodeId === nodeId || a.id === (node.config as any)?.approvalId) && a.status === "APPROVED";
+        });
+
+        if (!alreadyApproved) {
+
+        if (mode === "webhook" || mode === "callback") {
+          let pendingWait = existingApprovals.find((a: any) => {
+            const ctx = asObject(a.context);
+            return ctx.nodeId === nodeId && a.status === "PENDING";
+          });
+
+          let resumeToken: string;
+          if (pendingWait) {
+            resumeToken = pendingWait.id;
+          } else {
+            resumeToken = randomUUID();
+            pendingWait = await prisma.approval.create({
+              data: {
+                id: resumeToken,
+                executionId: execution.id,
+                userId: execution.userId || "system",
+                status: "PENDING",
+                message: `Workflow waiting on webhook callback for node ${node.id}`,
+                context: {
+                  nodeId,
+                  nodeType: node.type,
+                  mode: "webhook",
+                  waitNode: true,
+                  resumeToken,
+                  resumeUrl: `/api/webhooks/resume/${resumeToken}`,
+                  pausedAt: new Date().toISOString(),
+                  input: nodeInput,
+                },
+              },
+            });
+
+            void recordWorkflowAuditEvent({
+              executionId: execution.id,
+              nodeId,
+              actor: execution.userId ?? "system",
+              action: "wait.suspended",
+              decision: "WAITING",
+              payload: {
+                resumeToken,
+                nodeId,
+                mode: "webhook",
+                resumeUrl: `/api/webhooks/resume/${resumeToken}`,
+              },
+            }).catch(() => {});
+          }
+
+          await prisma.workflowExecution.update({
+            where: { id: execution.id },
+            data: { status: "WAITING" as any },
+          });
+
+          void publishTelemetryEvent({
+            executionId: execution.id,
+            nodeId,
+            eventType: "node_finished",
+            status: "WAITING",
+          }).catch(() => {});
+
+          suspendedResult = { _suspended: true, reason: "WAITING", nodeId, resumeToken };
+          readyQueue.length = 0;
+          pool.clearQueue();
+          return;
+        } else {
+          // Duration or fixedDate mode
+          const waitMs = calculateWaitMs(config);
+          const resumeAt = Date.now() + waitMs;
+
+          let pendingWait = existingApprovals.find((a: any) => {
+            const ctx = asObject(a.context);
+            return ctx.nodeId === nodeId && a.status === "PENDING";
+          });
+
+          if (pendingWait) {
+            const ctx = asObject(pendingWait.context);
+            const targetResumeAt = typeof ctx.resumeAt === "number" ? ctx.resumeAt : new Date(String(ctx.resumeAt ?? 0)).getTime();
+            if (Date.now() >= targetResumeAt) {
+              await prisma.approval.update({
+                where: { id: pendingWait.id },
+                data: { status: "APPROVED", decidedAt: new Date() },
+              });
+              // Fall through to normal execution of this node
+            } else {
+              suspendedResult = { _suspended: true, reason: "WAITING", nodeId, waitId: pendingWait.id };
+              readyQueue.length = 0;
+              pool.clearQueue();
+              return;
+            }
+          } else {
+            const waitId = `wait_${randomUUID().replace(/-/g, "")}`;
+            pendingWait = await prisma.approval.create({
+              data: {
+                id: waitId,
+                executionId: execution.id,
+                userId: execution.userId || "system",
+                status: "PENDING",
+                message: `Workflow waiting for ${waitMs}ms on node ${node.id}`,
+                context: {
+                  nodeId,
+                  nodeType: node.type,
+                  mode,
+                  waitNode: true,
+                  waitMs,
+                  resumeAt,
+                  pausedAt: new Date().toISOString(),
+                  input: nodeInput,
+                },
+              },
+            });
+
+            void recordWorkflowAuditEvent({
+              executionId: execution.id,
+              nodeId,
+              actor: execution.userId ?? "system",
+              action: "wait.suspended",
+              decision: "WAITING",
+              payload: {
+                waitId: pendingWait.id,
+                nodeId,
+                mode,
+                waitMs,
+                resumeAt: new Date(resumeAt).toISOString(),
+              },
+            }).catch(() => {});
+
+            await prisma.workflowExecution.update({
+              where: { id: execution.id },
+              data: { status: "WAITING" as any },
+            });
+
+            void publishTelemetryEvent({
+              executionId: execution.id,
+              nodeId,
+              eventType: "node_finished",
+              status: "WAITING",
+            }).catch(() => {});
+
+            // Schedule BullMQ delayed job
+            const enqueued = await enqueueExecution(
+              execution.id,
+              { resumeNodeId: nodeId, waitId: pendingWait.id },
+              { delay: waitMs, jobId: `resume-${execution.id}-${nodeId}-${Date.now()}` }
+            );
+
+            // In test / offline environments where BullMQ queue is disabled, schedule timer fallback
+            if (!enqueued && waitMs >= 0) {
+              const timer = setTimeout(async () => {
+                try {
+                  const currentApp = await prisma.approval.findUnique({
+                    where: { id: pendingWait!.id },
+                  });
+                  if (!currentApp || currentApp.status !== "PENDING") {
+                    return;
+                  }
+                  await prisma.approval.update({
+                    where: { id: pendingWait!.id },
+                    data: { status: "APPROVED", decidedAt: new Date() },
+                  });
+                  await prisma.workflowExecution.update({
+                    where: { id: execution.id },
+                    data: { status: "RUNNING" as any },
+                  });
+                  await runExecution(execution.id);
+                } catch (err) {
+                  console.error("Error in fallback wait resume timer", err);
+                }
+              }, Math.min(waitMs, 2147483647));
+              if (typeof timer.unref === "function") {
+                timer.unref();
+              }
+            }
+
+            suspendedResult = { _suspended: true, reason: "WAITING", nodeId, waitId: pendingWait.id, waitMs };
+            readyQueue.length = 0;
+            pool.clearQueue();
+            return;
+          }
+        }
+      }
+    }
+    }
+
+    processed.add(nodeId);
     const nodeExecution = await prisma.nodeExecution.create({
       data: {
         nodeId,
@@ -905,6 +1598,12 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
       },
     });
     const nodeStartedAt = Date.now();
+    void publishTelemetryEvent({
+      executionId: execution.id,
+      nodeId,
+      eventType: "node_started",
+      status: "RUNNING",
+    }).catch(() => {});
     const itemsCount = Array.isArray(nodeInput) ? nodeInput.length : nodeInput !== undefined && nodeInput !== null ? 1 : 0;
     const parentContext = parentSpan
       ? { traceId: parentSpan.traceId, spanId: parentSpan.spanId, traceFlags: "01" }
@@ -917,7 +1616,7 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
       execution.id,
       execution.orgId,
       { "items.count": itemsCount },
-      parentContext
+      parentContext,
     );
 
     if (!active.has(nodeId)) {
@@ -925,10 +1624,27 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
         where: { id: nodeExecution.id },
         data: { status: "CANCELLED", finishedAt: new Date(), duration: Date.now() - nodeStartedAt },
       });
+      void publishTelemetryEvent({
+        executionId: execution.id,
+        nodeId,
+        eventType: "node_finished",
+        status: "CANCELLED",
+        duration: Date.now() - nodeStartedAt,
+      }).catch(() => {});
       nodeSpan.setAttribute("node.status", "CANCELLED");
       nodeSpan.setStatus("OK");
       nodeSpan.end();
-      continue;
+
+      for (const edge of outgoing.get(nodeId) ?? []) {
+        const target = edge.target;
+        remainingIncoming.set(target, (remainingIncoming.get(target) ?? 0) - 1);
+        if (remainingIncoming.get(target) === 0 && !queued.has(target)) {
+          queued.add(target);
+          if ((activeIncoming.get(target) ?? 0) > 0) active.add(target);
+          readyQueue.push(target);
+        }
+      }
+      return;
     }
 
     try {
@@ -938,7 +1654,9 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
         execution.orgId,
         execution.id,
         nodeExecution.id,
-        workflow.id
+        workflow.id,
+        inputBranches,
+        nodeSpan,
       );
       const nodeDuration = Date.now() - nodeStartedAt;
       await prisma.nodeExecution.update({
@@ -950,6 +1668,31 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
           duration: nodeDuration,
         },
       });
+      void publishTelemetryEvent({
+        executionId: execution.id,
+        nodeId,
+        eventType: "node_finished",
+        status: "SUCCESS",
+        duration: nodeDuration,
+        output,
+      }).catch(() => {});
+      void recordWorkflowAuditEvent({
+        executionId: execution.id,
+        nodeId,
+        actor: execution.userId ?? "system",
+        action: "node.decision",
+        decision:
+          node.type === "condition"
+            ? String(unpackConditionResult(output))
+            : output && typeof output === "object" && (output as any).decision
+              ? String((output as any).decision)
+              : "COMPLETED",
+        payload: {
+          nodeType: node.type,
+          duration: nodeDuration,
+          output: output === undefined ? null : output,
+        },
+      }).catch(() => {});
       nodeSpan.setAttribute("node.status", "SUCCESS");
       nodeSpan.setAttribute("node.duration_ms", nodeDuration);
       nodeSpan.setStatus("OK");
@@ -958,7 +1701,9 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
       finalOutput = output;
       if (node.type === "output") {
         returnedOutput = true;
-        break;
+        readyQueue.length = 0;
+        pool.clearQueue();
+        return;
       }
 
       for (const edge of outgoing.get(nodeId) ?? []) {
@@ -968,11 +1713,20 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
         if (follows) {
           activeIncoming.set(target, (activeIncoming.get(target) ?? 0) + 1);
           incomingInputs.set(target, [...(incomingInputs.get(target) ?? []), output]);
+
+          const branchIdx = edgeBranchIndexMap.get(edge) ?? 0;
+          let targetBranches = incomingBranchInputs.get(target);
+          if (!targetBranches) {
+            targetBranches = new Map<number, unknown[]>();
+            incomingBranchInputs.set(target, targetBranches);
+          }
+          const existingBranchItems = targetBranches.get(branchIdx) ?? [];
+          targetBranches.set(branchIdx, [...existingBranchItems, output]);
         }
         if (remainingIncoming.get(target) === 0 && !queued.has(target)) {
           queued.add(target);
           if ((activeIncoming.get(target) ?? 0) > 0) active.add(target);
-          queue.push(target);
+          readyQueue.push(target);
         }
       }
     } catch (error) {
@@ -985,6 +1739,14 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
           where: { id: nodeExecution.id },
           data: { status: "SUCCESS", output: fallbackOutput, finishedAt: new Date(), duration: nodeDuration },
         });
+        void publishTelemetryEvent({
+          executionId: execution.id,
+          nodeId,
+          eventType: "node_finished",
+          status: "SUCCESS",
+          duration: nodeDuration,
+          output: fallbackOutput,
+        }).catch(() => {});
         nodeSpan.setAttribute("node.status", "HANDLED_ERROR");
         nodeSpan.setStatus("OK");
         nodeSpan.end();
@@ -997,14 +1759,24 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
             remainingIncoming.set(target, (remainingIncoming.get(target) ?? 0) - 1);
             activeIncoming.set(target, (activeIncoming.get(target) ?? 0) + 1);
             incomingInputs.set(target, [...(incomingInputs.get(target) ?? []), fallbackOutput]);
+
+            const branchIdx = edgeBranchIndexMap.get(edge) ?? 0;
+            let targetBranches = incomingBranchInputs.get(target);
+            if (!targetBranches) {
+              targetBranches = new Map<number, unknown[]>();
+              incomingBranchInputs.set(target, targetBranches);
+            }
+            const existingBranchItems = targetBranches.get(branchIdx) ?? [];
+            targetBranches.set(branchIdx, [...existingBranchItems, fallbackOutput]);
+
             if (remainingIncoming.get(target) === 0 && !queued.has(target)) {
               queued.add(target);
               if ((activeIncoming.get(target) ?? 0) > 0) active.add(target);
-              queue.push(target);
+              readyQueue.push(target);
             }
           }
         }
-        continue;
+        return;
       }
 
       if (onError === "routetoerrorbranch" || onError === "errorbranch") {
@@ -1020,6 +1792,14 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
           where: { id: nodeExecution.id },
           data: { status: "SUCCESS", output: errorOutput, finishedAt: new Date(), duration: nodeDuration },
         });
+        void publishTelemetryEvent({
+          executionId: execution.id,
+          nodeId,
+          eventType: "node_finished",
+          status: "SUCCESS",
+          duration: nodeDuration,
+          output: errorOutput,
+        }).catch(() => {});
         nodeSpan.setAttribute("node.status", "HANDLED_ERROR");
         nodeSpan.setStatus("OK");
         nodeSpan.end();
@@ -1032,14 +1812,23 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
           if (isErrorEdge) {
             activeIncoming.set(target, (activeIncoming.get(target) ?? 0) + 1);
             incomingInputs.set(target, [...(incomingInputs.get(target) ?? []), errorOutput]);
+
+            const branchIdx = edgeBranchIndexMap.get(edge) ?? 0;
+            let targetBranches = incomingBranchInputs.get(target);
+            if (!targetBranches) {
+              targetBranches = new Map<number, unknown[]>();
+              incomingBranchInputs.set(target, targetBranches);
+            }
+            const existingBranchItems = targetBranches.get(branchIdx) ?? [];
+            targetBranches.set(branchIdx, [...existingBranchItems, errorOutput]);
           }
           if (remainingIncoming.get(target) === 0 && !queued.has(target)) {
             queued.add(target);
             if ((activeIncoming.get(target) ?? 0) > 0) active.add(target);
-            queue.push(target);
+            readyQueue.push(target);
           }
         }
-        continue;
+        return;
       }
 
       // Check if workflow has an errorTrigger node
@@ -1049,6 +1838,14 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
           where: { id: nodeExecution.id },
           data: { status: "FAILED", error: errorMessage(error), finishedAt: new Date(), duration: nodeDuration },
         });
+        void publishTelemetryEvent({
+          executionId: execution.id,
+          nodeId,
+          eventType: "node_finished",
+          status: "FAILED",
+          duration: nodeDuration,
+          error: errorMessage(error),
+        }).catch(() => {});
         nodeSpan.setAttribute("node.status", "FAILED");
         nodeSpan.recordException(error);
         nodeSpan.setStatus("ERROR", errorMessage(error));
@@ -1067,26 +1864,156 @@ async function executeGraph(execution: any, workflow: any, parentSpan?: import("
 
         queued.add(errorTriggerNode.id);
         active.add(errorTriggerNode.id);
-        queue.length = 0;
-        queue.push(errorTriggerNode.id);
+        readyQueue.length = 0;
+        pool.clearQueue();
+        readyQueue.push(errorTriggerNode.id);
         incomingInputs.set(errorTriggerNode.id, [errorPayload]);
-        continue;
+        return;
       }
 
       await prisma.nodeExecution.update({
         where: { id: nodeExecution.id },
         data: { status: "FAILED", error: errorMessage(error), finishedAt: new Date(), duration: nodeDuration },
       });
+      void publishTelemetryEvent({
+        executionId: execution.id,
+        nodeId,
+        eventType: "node_finished",
+        status: "FAILED",
+        duration: nodeDuration,
+        error: errorMessage(error),
+      }).catch(() => {});
       nodeSpan.setAttribute("node.status", "FAILED");
       nodeSpan.setAttribute("node.duration_ms", nodeDuration);
       nodeSpan.recordException(error);
       nodeSpan.setStatus("ERROR", errorMessage(error));
       nodeSpan.end();
+      void recordWorkflowAuditEvent({
+        executionId: execution.id,
+        nodeId,
+        actor: execution.userId ?? "system",
+        action: "node.error",
+        decision: "FAILED",
+        payload: {
+          nodeType: node.type,
+          duration: nodeDuration,
+          error: errorMessage(error),
+        },
+      }).catch(() => {});
+
+      if (!fatalError) {
+        fatalError = error instanceof Error ? error : new Error(String(error));
+        readyQueue.length = 0;
+        pool.clearQueue(fatalError);
+      }
       throw error;
     }
   }
 
-  if (!returnedOutput && processed.size !== reachable.size) throw new Error("Workflow graph contains a cycle or an unreachable branch");
+  // Reactive work-stealing dispatcher
+  await new Promise<void>((resolve, reject) => {
+    let isDone = false;
+
+    const checkCompletion = () => {
+      if (isDone) return;
+      if (inFlight > 0) return;
+
+      if (fatalError) {
+        isDone = true;
+        reject(fatalError);
+        return;
+      }
+      if (suspendedResult || returnedOutput || readyQueue.length === 0) {
+        isDone = true;
+        resolve();
+        return;
+      }
+    };
+
+    const scheduleNext = () => {
+      if (isDone || fatalError || suspendedResult || returnedOutput) {
+        checkCompletion();
+        return;
+      }
+
+      while (
+        readyQueue.length > 0 &&
+        pool.activeCount < pool.concurrency &&
+        !isDone &&
+        !fatalError &&
+        !suspendedResult &&
+        !returnedOutput
+      ) {
+        const nodeId = readyQueue.shift()!;
+        if (processed.has(nodeId)) continue;
+
+        // Checkpoint restoration: replay in-memory if already successfully executed
+        if (successfulNodeExecutions.has(nodeId)) {
+          const existing = successfulNodeExecutions.get(nodeId)!;
+          processed.add(nodeId);
+          finalOutput = existing.output;
+          const node = nodeById.get(nodeId)!;
+          if (node?.type === "output") {
+            returnedOutput = true;
+            readyQueue.length = 0;
+            pool.clearQueue();
+            checkCompletion();
+            return;
+          }
+          for (const edge of outgoing.get(nodeId) ?? []) {
+            const target = edge.target;
+            const follows = followsEdge(node, edge, existing.output);
+            remainingIncoming.set(target, (remainingIncoming.get(target) ?? 0) - 1);
+            if (follows) {
+              activeIncoming.set(target, (activeIncoming.get(target) ?? 0) + 1);
+              incomingInputs.set(target, [...(incomingInputs.get(target) ?? []), existing.output]);
+              const branchIndex = edgeBranchIndexMap.get(edge) ?? 0;
+              const branchMap = incomingBranchInputs.get(target) ?? new Map<number, unknown[]>();
+              const existingBranchItems = branchMap.get(branchIndex) ?? [];
+              branchMap.set(branchIndex, [...existingBranchItems, existing.output]);
+              incomingBranchInputs.set(target, branchMap);
+            }
+            if (remainingIncoming.get(target) === 0 && !queued.has(target)) {
+              queued.add(target);
+              if ((activeIncoming.get(target) ?? 0) > 0) active.add(target);
+              readyQueue.push(target);
+            }
+          }
+          continue;
+        }
+
+        inFlight++;
+        void pool.run(async () => {
+          try {
+            await executeSingleNode(nodeId);
+          } catch (err: any) {
+            if (!fatalError) {
+              fatalError = err instanceof Error ? err : new Error(String(err));
+              readyQueue.length = 0;
+              pool.clearQueue(fatalError);
+            }
+          } finally {
+            inFlight--;
+            scheduleNext();
+          }
+        });
+      }
+
+      checkCompletion();
+    };
+
+    // Kick off dispatcher
+    scheduleNext();
+  });
+
+  if (suspendedResult) {
+    return suspendedResult;
+  }
+
+  if (!returnedOutput && processed.size !== reachable.size) {
+    throw new Error("Workflow graph contains a cycle or an unreachable branch");
+  }
+
   return finalOutput;
 }
 
@@ -1154,8 +2081,22 @@ export async function runExecution(
   const startedAt = new Date(execution.startedAt ?? Date.now());
   await updateExecution(executionId, { status: "RUNNING" });
   await recordExecutionAudit(execution, "execution.started", { status: "RUNNING" });
+  void publishTelemetryEvent({
+    executionId,
+    eventType: "execution_started",
+    status: "RUNNING",
+  }).catch(() => {});
   try {
     const output = await withTimeout(executeGraph(execution, workflow, wfSpan), EXECUTION_TIMEOUT_MS, "Execution timed out");
+    if (output && typeof output === "object" && (output as any)._suspended === true) {
+      const suspendedReason = (output as any).reason || "WAITING";
+      wfSpan.setAttribute("execution.status", suspendedReason);
+      wfSpan.setStatus("OK");
+      wfSpan.end();
+      telemetry.decActiveExecutions();
+      const waiting = await prisma.workflowExecution.findUnique({ where: { id: executionId } });
+      return waiting as ExecutionResult;
+    }
     const duration = Date.now() - startedAt.getTime();
     wfSpan.setAttribute("execution.status", "SUCCESS");
     wfSpan.setAttribute("execution.duration_ms", duration);
@@ -1185,13 +2126,25 @@ export async function runExecution(
       }).catch(() => {});
     }
 
+    const unwrappedOutput =
+      Array.isArray(output) && output.every(isNodeItem)
+        ? unwrapItems(output as NodeItem[], { singleObjectIfOne: true, preserveBinary: false })
+        : output;
+
     const completed = await updateExecution(executionId, {
       status: "SUCCESS",
-      output: output === undefined ? null : output,
+      output: unwrappedOutput === undefined ? null : unwrappedOutput,
       finishedAt: new Date(),
       duration,
     });
     await recordExecutionAudit(completed as any, "execution.succeeded", { status: "SUCCESS", duration });
+    void publishTelemetryEvent({
+      executionId,
+      eventType: "execution_finished",
+      status: "SUCCESS",
+      duration,
+      output: unwrappedOutput,
+    }).catch(() => {});
     return completed;
   } catch (error) {
     const duration = Date.now() - startedAt.getTime();
@@ -1203,6 +2156,12 @@ export async function runExecution(
       telemetry.decActiveExecutions();
       telemetry.recordWorkflowExecution("CANCELLED", execution.trigger, execution.orgId, duration);
       await recordExecutionAudit(current as any, "execution.cancelled", { status: "CANCELLED", duration });
+      void publishTelemetryEvent({
+        executionId,
+        eventType: "execution_finished",
+        status: "CANCELLED",
+        duration,
+      }).catch(() => {});
       return current as ExecutionResult;
     }
     wfSpan.setAttribute("execution.status", "FAILED");
@@ -1241,6 +2200,13 @@ export async function runExecution(
       duration,
     });
     await recordExecutionAudit(failedExecution as any, "execution.failed", { status: "FAILED", duration });
+    void publishTelemetryEvent({
+      executionId,
+      eventType: "execution_finished",
+      status: "FAILED",
+      duration,
+      error: errorMessage(error),
+    }).catch(() => {});
 
     // Trigger errorWorkflow if configured in settings or version snapshot
     try {

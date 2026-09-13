@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, Eye, EyeOff, KeyRound, Plus, Search, Trash2, X, Sparkles, Layers, Info, Shield, ExternalLink, CheckCircle2, XCircle, Loader2, Zap, Clock, User, Building } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { credentials as credApi, type Credential, type CredentialTestResult } from "@/lib/api";
+import { resolveProviderDefaults } from "@agentflow/shared";
 
 const PROVIDERS = [
   { value: "Action Network API", label: "Action Network API" },
@@ -534,6 +534,18 @@ type CredentialBucket =
   | "mcp_oauth2"
   | "aws_iam";
 
+const CREDENTIAL_TABS = [
+  { k: "connection", label: "Conexão" },
+  { k: "sharing", label: "Compartilhamento" },
+  { k: "details", label: "Detalhes" },
+] as const;
+
+type CredentialTab = (typeof CREDENTIAL_TABS)[number]["k"];
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function getProviderBucket(providerName: string): CredentialBucket {
   const p = (providerName || "").trim();
   const lower = p.toLowerCase();
@@ -586,6 +598,9 @@ function getProviderBucket(providerName: string): CredentialBucket {
 export default function CredentialsPage() {
   const [creds, setCreds] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savingCredential, setSavingCredential] = useState(false);
   const [visible, setVisible] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
@@ -601,7 +616,8 @@ export default function CredentialsPage() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [detailTab, setDetailTab] = useState<"connection" | "sharing" | "details">("connection");
+  const [activeProviderIndex, setActiveProviderIndex] = useState(0);
+  const [detailTab, setDetailTab] = useState<CredentialTab>("connection");
 
   // Dynamic form state covering all providers
   const [formData, setFormData] = useState<Record<string, string>>({
@@ -632,9 +648,22 @@ export default function CredentialsPage() {
     organizationId: "",
   });
 
-  useEffect(() => {
-    credApi.list().then(setCreds).catch(() => {}).finally(() => setLoading(false));
+  const loadCredentials = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const result = await credApi.list();
+      setCreds(result);
+    } catch (error: unknown) {
+      setLoadError(getErrorMessage(error, "Não foi possível carregar as credenciais do cofre."));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadCredentials();
+  }, [loadCredentials]);
 
   useEffect(() => {
     if (open) {
@@ -642,9 +671,11 @@ export default function CredentialsPage() {
       setSearch("");
       setSelected("");
       setDropdownOpen(true);
+      setActiveProviderIndex(0);
       setDetailTab("connection");
       setShowSecret(false);
       setTestResult(null);
+      setSaveError(null);
       setFormData({
         name: "",
         apiUrl: "",
@@ -683,17 +714,82 @@ export default function CredentialsPage() {
 
   const currentBucket = useMemo(() => getProviderBucket(selected), [selected]);
 
+  function selectProvider(provider: string, label: string) {
+    setSelected(provider);
+    setSearch(label);
+    setDropdownOpen(false);
+  }
+
+  function handleProviderKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setDropdownOpen(false);
+      return;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (filtered.length === 0) return;
+      setDropdownOpen(true);
+      setActiveProviderIndex((current) =>
+        event.key === "ArrowDown"
+          ? (current + 1) % filtered.length
+          : (current - 1 + filtered.length) % filtered.length,
+      );
+      return;
+    }
+
+    if (event.key === "Enter" && dropdownOpen && filtered.length > 0) {
+      event.preventDefault();
+      const provider = filtered[activeProviderIndex] ?? filtered[0];
+      selectProvider(provider.value, provider.label);
+    }
+  }
+
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, currentTab: CredentialTab) {
+    const currentIndex = CREDENTIAL_TABS.findIndex((tab) => tab.k === currentTab);
+    let nextIndex = currentIndex;
+
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % CREDENTIAL_TABS.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + CREDENTIAL_TABS.length) % CREDENTIAL_TABS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = CREDENTIAL_TABS.length - 1;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    const nextTab = CREDENTIAL_TABS[nextIndex].k;
+    setDetailTab(nextTab);
+    document.getElementById(`credential-tab-${nextTab}`)?.focus();
+  }
+
   function toggleVisible(id: string) {
     setVisible((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]));
   }
 
   function handleContinue() {
     if (!selected) return;
+    const defaults = resolveProviderDefaults(selected) || {};
     const isAc = selected === "ActiveCampaign API";
+    const defaultName = isAc ? "ActiveCampaign account" : `${selected} account`;
+
     setFormData((prev) => ({
       ...prev,
-      name: isAc ? "ActiveCampaign account" : `${selected} account`,
-      apiUrl: isAc ? "https://your-account.api-us1.com" : prev.apiUrl,
+      name: prev.name.trim() ? prev.name : defaultName,
+      apiUrl: defaults.apiUrl ?? (isAc ? "https://your-account.api-us1.com" : prev.apiUrl),
+      headerName: defaults.headerName ?? prev.headerName,
+      paramName: defaults.paramName ?? prev.paramName,
+      authUrl: defaults.authUrl ?? prev.authUrl,
+      tokenUrl: defaults.tokenUrl ?? prev.tokenUrl,
+      scopes: defaults.scopes ?? prev.scopes,
+      mcpServerUrl: defaults.mcpServerUrl ?? prev.mcpServerUrl,
+      region: defaults.region ?? prev.region,
+      databasePort: defaults.databasePort ?? prev.databasePort,
+      allowedDomains: defaults.allowedDomains ?? prev.allowedDomains,
     }));
     setTestResult(null);
     setStep(2);
@@ -709,11 +805,11 @@ export default function CredentialsPage() {
         data: formData,
       });
       setTestResult(res);
-    } catch (err: any) {
+    } catch (error: unknown) {
       setTestResult({
         success: false,
         latencyMs: 0,
-        message: err.message || "Failed to test connection",
+        message: getErrorMessage(error, "Não foi possível testar a conexão."),
         error: "TEST_FAILED",
       });
     } finally {
@@ -726,13 +822,13 @@ export default function CredentialsPage() {
     try {
       const res = await credApi.testById(id);
       setCardTestResults((prev) => ({ ...prev, [id]: res }));
-    } catch (err: any) {
+    } catch (error: unknown) {
       setCardTestResults((prev) => ({
         ...prev,
         [id]: {
           success: false,
           latencyMs: 0,
-          message: err.message || "Connection test failed",
+          message: getErrorMessage(error, "Não foi possível testar a conexão."),
           error: "ERROR",
         },
       }));
@@ -745,6 +841,8 @@ export default function CredentialsPage() {
     e.preventDefault();
     if (!selected) return;
 
+    setSavingCredential(true);
+    setSaveError(null);
     try {
       const bucket = currentBucket;
       const isAc = selected === "ActiveCampaign API";
@@ -757,32 +855,45 @@ export default function CredentialsPage() {
       });
       setCreds((prev) => [created, ...prev]);
       setOpen(false);
-    } catch {}
+    } catch (error: unknown) {
+      setSaveError(getErrorMessage(error, "Não foi possível salvar a credencial. Revise os campos e tente novamente."));
+    } finally {
+      setSavingCredential(false);
+    }
   }
 
   async function deleteCredential(id: string) {
+    const credential = creds.find((item) => item.id === id);
+    if (!window.confirm(`Excluir ${credential?.name || "esta credencial"}? Esta ação não pode ser desfeita.`)) return;
+
     try {
       await credApi.delete(id);
       setCreds((prev) => prev.filter((c) => c.id !== id));
-    } catch {}
+    } catch (error: unknown) {
+      setLoadError(getErrorMessage(error, "Não foi possível excluir a credencial."));
+    }
   }
 
-  const inputClass = "h-10 w-full rounded-md border border-[#2e2e32] bg-[#161618] px-3 text-xs text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500 transition-colors";
+  const inputClass = "h-10 w-full rounded-md border border-[#2e2e32] bg-[#161618] px-3 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20";
   const labelClass = "text-xs font-semibold text-zinc-200 block mb-1.5";
 
   return (
     <AppLayout>
       <div className="animate-in fade-in duration-300">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-zinc-50">Credentials</h1>
-            <p className="mt-1 text-sm text-zinc-400">Manage API keys and authentication for external apps</p>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-300">
+              <Shield className="h-3 w-3" aria-hidden="true" />
+              Cofre criptografado
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Credenciais</h1>
+            <p className="mt-1 text-sm text-zinc-400">Gerencie chaves de API e autenticação para serviços externos.</p>
           </div>
           <Button
             onClick={() => setOpen(true)}
             className="bg-violet-600 hover:bg-violet-500 text-white rounded-md px-4 py-2 text-sm font-medium border-0 focus-visible:ring-2 focus-visible:ring-violet-500 shadow-sm"
           >
-            <Plus className="h-4 w-4" aria-hidden="true" /> Add credential
+            <Plus className="h-4 w-4" aria-hidden="true" /> Adicionar credencial
           </Button>
         </div>
 
@@ -793,6 +904,17 @@ export default function CredentialsPage() {
                 <div key={i} className="h-16 animate-pulse rounded-lg border border-white/5 bg-white/5" />
               ))}
             </div>
+          ) : loadError ? (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.04] p-6 text-center" role="alert">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-rose-500/20 bg-rose-500/10 text-rose-400">
+                <XCircle className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <h2 className="mt-3 text-sm font-semibold text-zinc-100">Falha ao carregar o cofre</h2>
+              <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-zinc-400">{loadError}</p>
+              <Button variant="secondary" size="sm" onClick={() => void loadCredentials()} className="mt-4 border-white/10 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
+                Tentar novamente
+              </Button>
+            </div>
           ) : (
             <div className="space-y-2">
               <AnimatePresence mode="popLayout">
@@ -802,13 +924,13 @@ export default function CredentialsPage() {
 
                   return (
                     <motion.div key={cred.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ delay: index * 0.04 }}>
-                      <div className="rounded-xl border border-white/5 bg-[#141416] p-4 sm:px-5 sm:py-4 transition-colors hover:border-white/10 hover:bg-[#18181b] space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
+                      <div className="rounded-xl border border-white/[0.08] bg-[#141416] p-4 sm:px-5 sm:py-4 transition-colors hover:border-violet-500/30 hover:bg-[#18181b] space-y-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex min-w-0 items-center gap-4">
                             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-600/10 border border-violet-500/20 text-violet-400 shrink-0">
                               <KeyRound className="h-5 w-5" aria-hidden="true" />
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-medium text-zinc-100">{cred.name}</span>
                                 <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-400 capitalize">
@@ -819,27 +941,27 @@ export default function CredentialsPage() {
                                 {cardResult ? (
                                   cardResult.success ? (
                                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400 animate-in fade-in">
-                                      <CheckCircle2 className="h-3 w-3" />
-                                      Verified
+                                      <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                                      Verificada
                                       {cardResult.latencyMs > 0 && (
                                         <span className="opacity-80 font-mono text-[10px] ml-0.5">({cardResult.latencyMs}ms)</span>
                                       )}
                                     </span>
                                   ) : (
                                     <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/20 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-400 animate-in fade-in">
-                                      <XCircle className="h-3 w-3" />
-                                      Failed
+                                      <XCircle className="h-3 w-3" aria-hidden="true" />
+                                      Falhou
                                     </span>
                                   )
                                 ) : (
                                   <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700/40 bg-zinc-800/40 px-2 py-0.5 text-[11px] font-medium text-zinc-400">
-                                    Untested
+                                    Não testada
                                   </span>
                                 )}
                               </div>
                               <p className="mt-0.5 text-xs text-zinc-400">
                                 {visible.includes(cred.id) ? (
-                                  <span className="font-mono text-zinc-300">{cred.data ? (typeof cred.data === "string" && cred.data.startsWith("{") ? "Encrypted Vault Payload" : String(cred.data)) : "No raw value"}</span>
+                                  <span className="font-mono text-zinc-300">{cred.data ? (typeof cred.data === "string" && cred.data.startsWith("{") ? "Payload criptografado no cofre" : String(cred.data)) : "Valor não disponível"}</span>
                                 ) : (
                                   "••••••••••••••••••••••••••••••••"
                                 )}
@@ -847,23 +969,25 @@ export default function CredentialsPage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 self-end sm:self-auto">
                             <button
                               type="button"
                               disabled={isTesting}
                               onClick={() => handleTestSavedCredential(cred.id)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] text-xs font-medium text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50"
-                              title="Test active connection"
+                              className="inline-flex min-h-9 items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] text-xs font-medium text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50"
+                              title="Testar conexão ativa"
+                              aria-label={`Testar conexão de ${cred.name}`}
+                              aria-busy={isTesting}
                             >
                               {isTesting ? (
                                 <>
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400" />
-                                  <span className="hidden sm:inline">Testing...</span>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400" aria-hidden="true" />
+                                  <span className="hidden sm:inline">Testando...</span>
                                 </>
                               ) : (
                                 <>
-                                  <Zap className="h-3.5 w-3.5 text-amber-400" />
-                                  <span className="hidden sm:inline">Test</span>
+                                  <Zap className="h-3.5 w-3.5 text-amber-400" aria-hidden="true" />
+                                  <span className="hidden sm:inline">Testar</span>
                                 </>
                               )}
                             </button>
@@ -872,25 +996,26 @@ export default function CredentialsPage() {
                               type="button"
                               onClick={() => toggleVisible(cred.id)}
                               className="rounded-lg p-2 text-zinc-400 hover:bg-white/5 hover:text-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
-                              aria-label={visible.includes(cred.id) ? "Hide secret" : "Show secret"}
+                              aria-label={visible.includes(cred.id) ? `Ocultar segredo de ${cred.name}` : `Mostrar segredo de ${cred.name}`}
+                              aria-pressed={visible.includes(cred.id)}
                             >
-                              {visible.includes(cred.id) ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              {visible.includes(cred.id) ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                             </button>
 
                             <button
                               type="button"
                               onClick={() => deleteCredential(cred.id)}
                               className="rounded-lg p-2 text-zinc-400 hover:bg-red-500/10 hover:text-red-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-                              aria-label={`Delete ${cred.name}`}
+                              aria-label={`Excluir ${cred.name}`}
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
                             </button>
                           </div>
                         </div>
 
                         {/* Inline Test Result Details if present */}
                         {cardResult && (
-                          <div className={`p-2.5 rounded-lg border text-xs animate-in fade-in flex items-center justify-between gap-2 ${
+                          <div aria-live="polite" className={`p-2.5 rounded-lg border text-xs animate-in fade-in flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${
                             cardResult.success
                               ? "border-emerald-500/20 bg-emerald-500/[0.03] text-emerald-300"
                               : "border-rose-500/20 bg-rose-500/[0.03] text-rose-300"
@@ -916,12 +1041,16 @@ export default function CredentialsPage() {
                 })}
               </AnimatePresence>
               {creds.length === 0 && (
-                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 p-12 text-center">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/5 text-zinc-400">
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-zinc-950/40 p-12 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-400">
                     <KeyRound className="h-6 w-6" aria-hidden="true" />
                   </div>
-                  <p className="mt-4 text-sm font-medium text-zinc-300">No credentials yet</p>
-                  <p className="mt-1 text-xs text-zinc-400">Add one to connect workflows with external services.</p>
+                  <h2 className="mt-4 text-sm font-semibold text-zinc-200">Nenhuma credencial configurada</h2>
+                  <p className="mt-1 max-w-sm text-xs leading-relaxed text-zinc-400">Seu cofre está vazio. Adicione uma credencial para autenticar workflows em serviços externos.</p>
+                  <Button size="sm" onClick={() => setOpen(true)} className="mt-5 bg-violet-600 text-white hover:bg-violet-500">
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    Adicionar primeira credencial
+                  </Button>
                 </div>
               )}
             </div>
@@ -930,7 +1059,7 @@ export default function CredentialsPage() {
       </div>
 
       {/* Generalized 760px Pixel-Perfect Credential Modal with WCAG compliance */}
-      <Modal open={open} onClose={() => setOpen(false)} title="" className={`${step === 2 ? "max-w-[760px]" : "max-w-[560px]"} !bg-[#1c1c1f] !border-white/10 !rounded-xl !p-0 !overflow-hidden !shadow-2xl`}>
+      <Modal open={open} onClose={() => setOpen(false)} title="" ariaLabel={step === 1 ? "Adicionar nova credencial" : `Configurar credencial ${selected}`} className={`${step === 2 ? "max-w-[760px]" : "max-w-[560px]"} !bg-[#1c1c1f] !border-white/10 !rounded-xl !p-0 !overflow-hidden !shadow-2xl`}>
         <div className="-m-5 relative overflow-hidden">
           {/* Subtle violet top accent glow */}
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-500/40 to-transparent" />
@@ -939,23 +1068,29 @@ export default function CredentialsPage() {
             <div className="px-8 pt-8 pb-7 bg-[#1c1c1f]">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-[19px] font-semibold tracking-tight leading-6 text-white">Add new credential</h2>
-                  <p className="mt-1.5 text-[13.5px] leading-5 text-zinc-400">Select an app or service to connect to</p>
+                  <h2 className="text-[19px] font-semibold tracking-tight leading-6 text-white">Adicionar nova credencial</h2>
+                  <p className="mt-1.5 text-[13.5px] leading-5 text-zinc-400">Selecione o aplicativo ou serviço que deseja conectar.</p>
                 </div>
-                <button type="button" onClick={() => setOpen(false)} className="rounded-full p-1.5 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors -mr-1 -mt-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" aria-label="Close modal"><X className="h-4 w-4" aria-hidden="true" /></button>
+                <button type="button" onClick={() => setOpen(false)} className="rounded-full p-1.5 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors -mr-1 -mt-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" aria-label="Fechar modal"><X className="h-4 w-4" aria-hidden="true" /></button>
               </div>
 
               <div className="relative mt-6">
                 <div className="group relative">
-                  <label htmlFor="credential-search-apps" className="sr-only">Search apps</label>
+                  <label htmlFor="credential-search-apps" className="sr-only">Pesquisar aplicativos</label>
                   <Search className="pointer-events-none absolute left-3.5 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-zinc-400 group-focus-within:text-zinc-300 transition-colors" aria-hidden="true" />
                   <input
                     id="credential-search-apps"
                     value={search}
                     onChange={(e) => { setSearch(e.target.value); setDropdownOpen(true); }}
                     onFocus={() => setDropdownOpen(true)}
+                    onKeyDown={handleProviderKeyDown}
                     onBlur={() => setTimeout(() => setDropdownOpen(false), 140)}
-                    placeholder="Search for app..."
+                    placeholder="Pesquisar aplicativo..."
+                    role="combobox"
+                    aria-expanded={dropdownOpen}
+                    aria-controls="credential-provider-options"
+                    aria-activedescendant={dropdownOpen && filtered.length > 0 ? `credential-provider-option-${activeProviderIndex}` : undefined}
+                    aria-autocomplete="list"
                     className="w-full rounded-xl border border-white/[0.08] bg-white/[0.06] py-[11px] pl-10 pr-9 text-[14px] font-medium text-zinc-100 placeholder:text-zinc-400 outline-none backdrop-blur-sm transition-all placeholder:font-normal focus:bg-white/[0.08] focus:border-violet-500/40 focus:ring-4 focus:ring-violet-500/10"
                   />
                   <ChevronDown className={`pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 transition-transform ${dropdownOpen ? "rotate-180" : ""}`} aria-hidden="true" />
@@ -963,28 +1098,28 @@ export default function CredentialsPage() {
                 </div>
 
                 {dropdownOpen && (
-                  <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-[min(320px,45vh)] overflow-auto rounded-xl border border-white/[0.08] bg-[#1a1a1d] py-1.5 shadow-[0_20px_48px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-track]:bg-transparent" role="listbox">
+                  <div id="credential-provider-options" className="absolute left-0 right-0 top-full z-30 mt-2 max-h-[min(320px,45vh)] overflow-auto rounded-xl border border-white/[0.08] bg-[#1a1a1d] py-1.5 shadow-[0_20px_48px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-xl scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-track]:bg-transparent" role="listbox">
                     {filtered.length === 0 ? (
-                      <p className="px-4 py-3 text-sm text-zinc-400">No apps found for “{search}”</p>
+                      <p className="px-4 py-3 text-sm text-zinc-400">Nenhum aplicativo encontrado para “{search}”</p>
                     ) : (
                       <>
-                        {filtered.map((p) => (
+                        {filtered.map((p, index) => (
                           <button
                             key={p.value}
                             type="button"
                             role="option"
+                            id={`credential-provider-option-${index}`}
                             aria-selected={selected === p.value}
+                            onMouseEnter={() => setActiveProviderIndex(index)}
                             onMouseDown={(e) => {
                               e.preventDefault();
-                              setSelected(p.value);
-                              setSearch(p.label);
-                              setDropdownOpen(false);
+                              selectProvider(p.value, p.label);
                             }}
-                            className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[13.5px] transition-colors ${selected === p.value ? "bg-violet-600/15 text-white" : "text-zinc-300 hover:bg-white/[0.04] hover:text-white"}`}
+                            className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[13.5px] transition-colors ${selected === p.value ? "bg-violet-600/15 text-white" : index === activeProviderIndex ? "bg-white/[0.06] text-white" : "text-zinc-300 hover:bg-white/[0.04] hover:text-white"}`}
                           >
                             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${selected === p.value ? "bg-violet-500" : "bg-zinc-600"}`} />
                             <span className="truncate pr-2">{p.label}</span>
-                            {selected === p.value && <span className="ml-auto text-[10px] font-semibold tracking-widest text-violet-400">SELECTED</span>}
+                            {selected === p.value && <span className="ml-auto text-[10px] font-semibold tracking-widest text-violet-400">SELECIONADO</span>}
                           </button>
                         ))}
                       </>
@@ -995,11 +1130,11 @@ export default function CredentialsPage() {
                 {selected ? (
                   <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/10 px-3 py-1 text-xs">
                     <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
-                    <span className="text-zinc-400">Selected:</span><span className="font-medium text-white">{selected}</span>
-                    <button type="button" onClick={() => { setSelected(""); setSearch(""); setDropdownOpen(true); }} className="ml-1 rounded-full p-0.5 hover:bg-white/10 text-zinc-400 hover:text-white" aria-label="Clear selection"><X className="h-3 w-3" aria-hidden="true" /></button>
+                    <span className="text-zinc-400">Selecionado:</span><span className="font-medium text-white">{selected}</span>
+                    <button type="button" onClick={() => { setSelected(""); setSearch(""); setDropdownOpen(true); }} className="ml-1 rounded-full p-0.5 hover:bg-white/10 text-zinc-400 hover:text-white" aria-label="Limpar seleção"><X className="h-3 w-3" aria-hidden="true" /></button>
                   </div>
                 ) : (
-                  <p className="mt-2.5 text-xs text-zinc-400">{filtered.length.toLocaleString()} apps available — start typing to filter</p>
+                  <p className="mt-2.5 text-xs text-zinc-400">{filtered.length.toLocaleString()} aplicativos disponíveis — digite para filtrar</p>
                 )}
               </div>
 
@@ -1010,9 +1145,9 @@ export default function CredentialsPage() {
                   onClick={handleContinue}
                   className={`inline-flex items-center justify-center rounded-xl px-6 py-2.5 text-sm font-semibold transition-all ${selected ? "bg-violet-600 text-white shadow-md hover:bg-violet-500 active:scale-[0.98]" : "bg-white/[0.07] text-white/25 cursor-not-allowed border border-white/[0.06]"}`}
                 >
-                  Continue
+                  Continuar
                 </button>
-                {!selected && <span className="text-xs text-zinc-400">Choose an app to continue</span>}
+                {!selected && <span className="text-xs text-zinc-400">Escolha um aplicativo para continuar</span>}
               </div>
             </div>
           ) : (
@@ -1025,7 +1160,7 @@ export default function CredentialsPage() {
                     <span>❯</span>
                   </div>
                   <div>
-                    <label htmlFor="credential-name-input" className="sr-only">Credential Name</label>
+                    <label htmlFor="credential-name-input" className="sr-only">Nome da Credencial</label>
                     <input
                       id="credential-name-input"
                       type="text"
@@ -1040,38 +1175,49 @@ export default function CredentialsPage() {
                   {detailTab !== "details" && (
                     <button
                       type="submit"
-                      className="h-8 px-4 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                      disabled={savingCredential}
+                      className="h-8 px-4 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50"
                     >
-                      Save
+                      {savingCredential ? "Salvando..." : "Salvar"}
                     </button>
                   )}
                   <button
                     type="button"
                     onClick={() => setOpen(false)}
                     className="rounded p-1.5 text-zinc-400 hover:bg-white/5 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
-                    aria-label="Close modal"
+                    aria-label="Fechar modal"
                   >
                     <X className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>
 
+              {saveError && (
+                <div className="flex items-center gap-2 border-b border-rose-500/20 bg-rose-500/10 px-6 py-2.5 text-xs text-rose-300" role="alert">
+                  <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{saveError}</span>
+                </div>
+              )}
+
               {/* 2-Column Body Layout */}
               <div className="flex flex-col sm:flex-row min-h-[380px]">
                 {/* Left Tabs Navigation */}
-                <div className="w-full sm:w-44 shrink-0 border-b sm:border-b-0 sm:border-r border-white/10 bg-[#18181b]/50 p-3 space-y-1 flex sm:flex-col" role="tablist" aria-label="Credential settings tabs">
+                <div className="w-full sm:w-44 shrink-0 border-b sm:border-b-0 sm:border-r border-white/10 bg-[#18181b]/50 p-3 space-y-1 flex sm:flex-col" role="tablist" aria-label="Abas de configuração da credencial">
                   {[
-                    { k: "connection", label: "Connection" },
-                    { k: "sharing", label: "Sharing" },
-                    { k: "details", label: "Details" },
+                    { k: "connection", label: "Conexão" },
+                    { k: "sharing", label: "Compartilhamento" },
+                    { k: "details", label: "Detalhes" },
                   ].map((t) => (
                     <button
                       key={t.k}
                       type="button"
+                      id={`credential-tab-${t.k}`}
                       role="tab"
                       aria-selected={detailTab === t.k}
                       aria-controls={`tabpanel-${t.k}`}
-                      onClick={() => setDetailTab(t.k as any)}
+                      tabIndex={detailTab === t.k ? 0 : -1}
+                      onClick={() => setDetailTab(t.k as CredentialTab)}
+                      onKeyDown={(event) => handleTabKeyDown(event, t.k as CredentialTab)}
                       className={`w-full text-left px-3 py-2 rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${
                         detailTab === t.k
                           ? "bg-[#27272a] text-white font-semibold"
@@ -1086,18 +1232,18 @@ export default function CredentialsPage() {
                 {/* Right Tab Content */}
                 <div className="flex-1 bg-[#1c1c1f] p-6 overflow-y-auto max-h-[520px]">
                   {detailTab === "connection" && (
-                    <div id="tabpanel-connection" role="tabpanel" className="space-y-4 animate-in fade-in duration-150">
+                    <div id="tabpanel-connection" role="tabpanel" aria-labelledby="credential-tab-connection" tabIndex={0} className="space-y-4 animate-in fade-in duration-150">
                       {/* AI Assistance Header */}
-                      <div className="flex items-center gap-2 text-xs text-zinc-300">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-300">
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-violet-500/40 bg-violet-950/30 text-violet-300 text-xs font-medium hover:bg-violet-950/50 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-violet-500/40 bg-violet-950/30 text-violet-300 text-xs font-medium hover:bg-violet-950/50 transition-colors focus-visible:ring-2 focus-visible:ring-violet-500"
                         >
                           <Sparkles className="h-3 w-3 text-violet-400" aria-hidden="true" />
-                          Ask AI Assistant
+                          Consultar Assistente de IA
                         </button>
-                        <span className="text-zinc-400">for setup instructions or read the</span>
-                        <a href="https://docs.agentflow.dev" target="_blank" rel="noreferrer" className="text-violet-400 hover:underline font-medium">docs</a>
+                        <span className="text-zinc-400">para instruções de configuração ou consulte a</span>
+                        <a href="https://docs.agentflow.dev" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:underline font-medium">documentação</a>
                       </div>
 
                       {/* ActiveCampaign & API Key Form Fields */}
@@ -1139,7 +1285,7 @@ export default function CredentialsPage() {
                           </div>
 
                           <div>
-                            <label htmlFor="cred-allowed-domains" className={labelClass}>Allowed HTTP Request Domains</label>
+                            <label htmlFor="cred-allowed-domains" className={labelClass}>Domínios Permitidos para Requisições HTTP</label>
                             <div className="relative">
                               <select
                                 id="cred-allowed-domains"
@@ -1147,8 +1293,8 @@ export default function CredentialsPage() {
                                 onChange={(e) => setFormData({ ...formData, allowedDomains: e.target.value })}
                                 className="h-10 w-full appearance-none rounded-md border border-[#2e2e32] bg-[#161618] px-3 pr-8 text-xs text-zinc-200 outline-none focus:border-violet-500 cursor-pointer"
                               >
-                                <option value="All">All</option>
-                                <option value="Restricted">Restricted Domains Only</option>
+                                <option value="All">Todos os Domínios</option>
+                                <option value="Restricted">Apenas Domínios Restritos</option>
                               </select>
                               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" aria-hidden="true" />
                             </div>
@@ -1195,7 +1341,7 @@ export default function CredentialsPage() {
                           </div>
 
                           <div>
-                            <label htmlFor="cred-bearer-domains" className={labelClass}>Allowed HTTP Request Domains</label>
+                            <label htmlFor="cred-bearer-domains" className={labelClass}>Domínios Permitidos para Requisições HTTP</label>
                             <div className="relative">
                               <select
                                 id="cred-bearer-domains"
@@ -1203,8 +1349,8 @@ export default function CredentialsPage() {
                                 onChange={(e) => setFormData({ ...formData, allowedDomains: e.target.value })}
                                 className="h-10 w-full appearance-none rounded-md border border-[#2e2e32] bg-[#161618] px-3 pr-8 text-xs text-zinc-200 outline-none focus:border-violet-500 cursor-pointer"
                               >
-                                <option value="All">All</option>
-                                <option value="Restricted">Restricted Domains Only</option>
+                                <option value="All">Todos os Domínios</option>
+                                <option value="Restricted">Apenas Domínios Restritos</option>
                               </select>
                               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" aria-hidden="true" />
                             </div>
@@ -1344,6 +1490,43 @@ export default function CredentialsPage() {
                               className={inputClass}
                             />
                           </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label htmlFor="cred-header-name" className={labelClass}>Header Name</label>
+                              <input
+                                id="cred-header-name"
+                                type="text"
+                                value={formData.headerName}
+                                onChange={(e) => setFormData({ ...formData, headerName: e.target.value })}
+                                placeholder="X-API-Key or Authorization"
+                                className={inputClass}
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor="cred-header-value" className={labelClass}>Header Value / Secret</label>
+                              <div className="relative">
+                                <input
+                                  id="cred-header-value"
+                                  type={showSecret ? "text" : "password"}
+                                  value={formData.headerValue}
+                                  onChange={(e) => setFormData({ ...formData, headerValue: e.target.value })}
+                                  placeholder="••••••••••••••••"
+                                  className={`${inputClass} pr-9`}
+                                  required
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowSecret(!showSecret)}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200"
+                                  aria-label={showSecret ? "Hide secret" : "Show secret"}
+                                >
+                                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
 
@@ -1456,38 +1639,39 @@ export default function CredentialsPage() {
                             type="button"
                             disabled={testingConnection}
                             onClick={handleTestConnection}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md border border-white/10 bg-white/[0.06] hover:bg-white/[0.1] text-xs font-medium text-zinc-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex min-h-9 items-center gap-1.5 px-3.5 py-1.5 rounded-md border border-white/10 bg-white/[0.06] hover:bg-white/[0.1] text-xs font-medium text-zinc-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-busy={testingConnection}
                           >
                             {testingConnection ? (
                               <>
                                 <Loader2 className="h-3.5 w-3.5 text-violet-400 animate-spin" aria-hidden="true" />
-                                <span>Testing connection...</span>
+                                <span>Testando conexão...</span>
                               </>
                             ) : (
                               <>
                                 <Shield className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
-                                <span>Test Connection</span>
+                                <span>Testar Conexão</span>
                               </>
                             )}
                           </button>
 
                           {testResult && (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2" aria-live="polite">
                               {testResult.success ? (
                                 <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400 animate-in fade-in">
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                                  <span>Verified</span>
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
+                                  <span>Verificada</span>
                                   {testResult.latencyMs > 0 && (
                                     <span className="text-[11px] text-emerald-400/80 font-mono flex items-center gap-0.5">
-                                      <Clock className="h-3 w-3" />
+                                      <Clock className="h-3 w-3" aria-hidden="true" />
                                       {testResult.latencyMs}ms
                                     </span>
                                   )}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-xs font-medium text-rose-400 animate-in fade-in">
-                                  <XCircle className="h-3.5 w-3.5 text-rose-400" />
-                                  <span>Failed</span>
+                                  <XCircle className="h-3.5 w-3.5 text-rose-400" aria-hidden="true" />
+                                  <span>Falhou</span>
                                 </span>
                               )}
                             </div>
@@ -1496,7 +1680,7 @@ export default function CredentialsPage() {
 
                         {/* Extended Details & Account Payload Banner */}
                         {testResult && (
-                          <div className={`p-3 rounded-lg border text-xs animate-in fade-in space-y-1.5 ${
+                          <div role={testResult.success ? "status" : "alert"} aria-live={testResult.success ? "polite" : "assertive"} className={`p-3 rounded-lg border text-xs animate-in fade-in space-y-1.5 ${
                             testResult.success
                               ? "border-emerald-500/20 bg-emerald-500/[0.04] text-emerald-300"
                               : "border-rose-500/20 bg-rose-500/[0.04] text-rose-300"
@@ -1505,7 +1689,7 @@ export default function CredentialsPage() {
                               <p className="font-medium leading-relaxed">{testResult.message}</p>
                               {testResult.latencyMs > 0 && (
                                 <span className="shrink-0 font-mono text-[11px] opacity-80">
-                                  {testResult.latencyMs}ms latency
+                                  {testResult.latencyMs}ms de latência
                                 </span>
                               )}
                             </div>
@@ -1514,28 +1698,28 @@ export default function CredentialsPage() {
                               <div className="mt-2 pt-2 border-t border-emerald-500/10 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
                                 {testResult.accountDetails.name && (
                                   <div className="flex items-center gap-1.5 text-zinc-300">
-                                    <User className="h-3 w-3 text-emerald-400 shrink-0" />
-                                    <span className="text-zinc-500">Name:</span>
+                                    <User className="h-3 w-3 text-emerald-400 shrink-0" aria-hidden="true" />
+                                    <span className="text-zinc-500">Nome:</span>
                                     <span className="font-medium text-zinc-200 truncate">{testResult.accountDetails.name}</span>
                                   </div>
                                 )}
                                 {testResult.accountDetails.username && (
                                   <div className="flex items-center gap-1.5 text-zinc-300">
-                                    <User className="h-3 w-3 text-emerald-400 shrink-0" />
-                                    <span className="text-zinc-500">User:</span>
+                                    <User className="h-3 w-3 text-emerald-400 shrink-0" aria-hidden="true" />
+                                    <span className="text-zinc-500">Usuário:</span>
                                     <span className="font-medium text-zinc-200 truncate">@{testResult.accountDetails.username}</span>
                                   </div>
                                 )}
                                 {testResult.accountDetails.email && (
                                   <div className="flex items-center gap-1.5 text-zinc-300">
-                                    <span className="text-zinc-500">Email:</span>
+                                    <span className="text-zinc-500">E-mail:</span>
                                     <span className="font-medium text-zinc-200 truncate">{testResult.accountDetails.email}</span>
                                   </div>
                                 )}
                                 {testResult.accountDetails.organization && (
                                   <div className="flex items-center gap-1.5 text-zinc-300">
-                                    <Building className="h-3 w-3 text-emerald-400 shrink-0" />
-                                    <span className="text-zinc-500">Org:</span>
+                                    <Building className="h-3 w-3 text-emerald-400 shrink-0" aria-hidden="true" />
+                                    <span className="text-zinc-500">Organização:</span>
                                     <span className="font-medium text-zinc-200 truncate">{testResult.accountDetails.organization}</span>
                                   </div>
                                 )}
@@ -1544,7 +1728,7 @@ export default function CredentialsPage() {
 
                             {testResult.error && (
                               <p className="text-[11px] font-mono text-rose-400 opacity-90">
-                                Error details: {testResult.error}
+                                Detalhes do erro: {testResult.error}
                               </p>
                             )}
                           </div>
@@ -1554,37 +1738,37 @@ export default function CredentialsPage() {
                       {/* Footer Info Banner */}
                       <div className="pt-2 flex items-center gap-1.5 text-xs text-zinc-400">
                         <Info className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
-                        <span>Enterprise plan users can pull in credentials from external vaults.</span>
+                        <span>Usuários Enterprise podem sincronizar credenciais de cofres externos.</span>
                         <Link href="/settings/external-secrets" className="text-violet-400 hover:underline font-medium">
-                          More info
+                          Saiba mais
                         </Link>
                       </div>
 
                       <div className="pt-2 flex justify-between items-center">
                         <button type="button" onClick={() => setStep(1)} className="text-xs text-zinc-400 underline decoration-white/20 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 rounded">
-                          ← Change app
+                          ← Alterar aplicativo
                         </button>
                         <button type="button" onClick={() => setDetailTab("sharing")} className="text-xs text-zinc-300 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 rounded">
-                          Sharing →
+                          Compartilhamento →
                         </button>
                       </div>
                     </div>
                   )}
 
                   {detailTab === "sharing" && (
-                    <div id="tabpanel-sharing" role="tabpanel" className="space-y-4 animate-in fade-in duration-150">
+                    <div id="tabpanel-sharing" role="tabpanel" aria-labelledby="credential-tab-sharing" tabIndex={0} className="space-y-4 animate-in fade-in duration-150">
                       <div className="flex items-center gap-2 text-xs text-zinc-400">
                         <Info className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
-                        <span>Sharing a credential allows people to use it in their workflows. They cannot access credential details.</span>
+                        <span>Compartilhar uma credencial permite seu uso em fluxos por outros membros. O valor secreto permanece protegido.</span>
                       </div>
 
                       <div className="relative">
-                        <label htmlFor="share-credential-input" className="sr-only">Share with user or team</label>
+                        <label htmlFor="share-credential-input" className="sr-only">Compartilhar com usuário ou equipe</label>
                         <Layers className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
                         <input
                           id="share-credential-input"
                           type="text"
-                          placeholder="Share with user(s)"
+                          placeholder="Compartilhar com usuário(s)..."
                           className="h-10 w-full rounded-md border border-[#2e2e32] bg-[#161618] pl-9 pr-3 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none focus:border-violet-500 transition-colors"
                         />
                       </div>
@@ -1600,14 +1784,14 @@ export default function CredentialsPage() {
                           </div>
                         </div>
                         <span className="px-2 py-0.5 rounded border border-zinc-700 bg-zinc-800 text-[10px] font-semibold text-zinc-300">
-                          Owner
+                          Proprietário
                         </span>
                       </div>
                     </div>
                   )}
 
                   {detailTab === "details" && (
-                    <div id="tabpanel-details" role="tabpanel" className="space-y-3 animate-in fade-in duration-150">
+                    <div id="tabpanel-details" role="tabpanel" aria-labelledby="credential-tab-details" tabIndex={0} className="space-y-3 animate-in fade-in duration-150">
                       <div className="p-4 rounded-lg border border-white/5 bg-[#161618] space-y-2.5 text-xs text-zinc-400">
                         <div className="flex justify-between items-center">
                           <span className="text-zinc-500">Provider Type</span>

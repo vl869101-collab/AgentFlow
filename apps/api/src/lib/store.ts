@@ -33,6 +33,8 @@ export const subscriptions = new Map<string, any>();
 export const usageRecords = new Map<string, any>();
 export const refreshTokens = new Map<string, any>();
 export const auditLogs = new Map<string, any>();
+export const workflowAuditLogs = new Map<string, any>();
+export const browserSessions = new Map<string, any>();
 
 // ── Helpers ─────────────────────────────────
 function matches(value: any, where: any): boolean {
@@ -108,6 +110,24 @@ function withWorkflowRelations(workflow: any, include?: any): any {
       .filter((version) => version.workflowId === workflow.id)
       .sort((a, b) => b.version - a.version)
       .slice(0, include.versions.take ?? undefined);
+  }
+  return result;
+}
+
+function withApprovalRelations(approval: any, include?: any): any {
+  if (!approval || !include) return approval;
+  const result = { ...approval };
+  if (include.execution) {
+    const exec = executions.get(approval.executionId);
+    if (exec) {
+      result.execution = { ...exec };
+      if (include.execution.include?.workflow) {
+        const wf = workflows.get(exec.workflowId);
+        result.execution.workflow = wf ? { id: wf.id, name: wf.name } : null;
+      }
+    } else {
+      result.execution = null;
+    }
   }
   return result;
 }
@@ -475,6 +495,9 @@ export const store = {
       }
       return result[0] ?? null;
     },
+    async findUnique({ where }: { where: any }) {
+      return find(nodeExecutions, where);
+    },
     async create({ data }: { data: any }) {
       const nodeExecution = { id: cuid(), ...data, createdAt: now(), updatedAt: now() };
       nodeExecutions.set(nodeExecution.id, nodeExecution);
@@ -528,20 +551,74 @@ export const store = {
   },
 
   approval: {
-    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number }) {
-      let result = findMany(approvals, where);
-      if (orderBy?.createdAt === "desc") result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
-      if (take !== undefined) result = result.slice(skip, skip + take);
-      return result;
+    async create({ data }: { data: any }) {
+      const appr = {
+        id: data.id || cuid(),
+        status: data.status || "PENDING",
+        createdAt: data.createdAt ? (data.createdAt instanceof Date ? data.createdAt : new Date(data.createdAt)) : now(),
+        updatedAt: now(),
+        ...data,
+      };
+      approvals.set(appr.id, appr);
+      return { ...appr };
+    },
+    async findFirst({ where, include }: { where?: any; include?: any } = {}) {
+      const list = await this.findMany({ where, include, take: 1 });
+      return list[0] ?? null;
+    },
+    async findUnique({ where, include }: { where: any; include?: any }) {
+      return this.findFirst({ where, include });
+    },
+    async update({ where, data }: { where: any; data: any }) {
+      const appr = find(approvals, where);
+      if (!appr) throw new Error("Approval record not found");
+      Object.assign(appr, data, { updatedAt: now() });
+      return { ...appr };
+    },
+    async findMany({ where, include, orderBy, skip = 0, take }: { where?: any; include?: any; orderBy?: any; skip?: number; take?: number } = {}) {
+      let list = Array.from(approvals.values());
+      if (where) {
+        list = list.filter((a: any) => {
+          if (where.id && a.id !== where.id) return false;
+          if (where.status && a.status !== where.status) return false;
+          if (where.executionId && a.executionId !== where.executionId) return false;
+          if (where.userId && a.userId !== where.userId) return false;
+          if (where.execution) {
+            const exec = executions.get(a.executionId);
+            if (!exec) return false;
+            if (where.execution.orgId) {
+              if (Array.isArray(where.execution.orgId.in) && !where.execution.orgId.in.includes(exec.orgId)) return false;
+              if (typeof where.execution.orgId === "string" && exec.orgId !== where.execution.orgId) return false;
+            }
+          }
+          return true;
+        });
+      }
+      if (orderBy?.createdAt === "desc") {
+        list.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
+      } else if (orderBy?.createdAt === "asc") {
+        list.sort((a: any, b: any) => toIsoString(a.createdAt).localeCompare(toIsoString(b.createdAt)));
+      }
+      if (take !== undefined) list = list.slice(skip, skip + take);
+      if (include) {
+        list = list.map((a: any) => withApprovalRelations(a, include));
+      }
+      return list.map((item) => ({ ...item }));
     },
     async updateMany({ where, data }: { where: any; data: any }) {
       let count = 0;
       for (const a of approvals.values()) {
         if (where.id && a.id !== where.id) continue;
+        if (where.status && a.status !== where.status) continue;
+        if (where.executionId && a.executionId !== where.executionId) continue;
         Object.assign(a, data, { updatedAt: now() });
         count++;
       }
       return { count };
+    },
+    async count({ where }: { where?: any } = {}) {
+      const list = await this.findMany({ where });
+      return list.length;
     },
   },
 
@@ -715,6 +792,110 @@ export const store = {
     },
   },
 
+  workflowAuditLog: {
+    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number } = {}) {
+      let result = findMany(workflowAuditLogs, where);
+      if (orderBy?.createdAt === "desc") {
+        result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
+      } else if (orderBy?.createdAt === "asc") {
+        result.sort((a: any, b: any) => toIsoString(a.createdAt).localeCompare(toIsoString(b.createdAt)));
+      }
+      if (take !== undefined) result = result.slice(skip, skip + take);
+      return result;
+    },
+    async findFirst({ where, orderBy }: { where?: any; orderBy?: any } = {}) {
+      let result = findMany(workflowAuditLogs, where);
+      if (orderBy?.createdAt === "desc") {
+        result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
+      } else if (orderBy?.createdAt === "asc") {
+        result.sort((a: any, b: any) => toIsoString(a.createdAt).localeCompare(toIsoString(b.createdAt)));
+      }
+      return result[0] ?? null;
+    },
+    async findUnique({ where }: { where: any }) {
+      return find(workflowAuditLogs, where);
+    },
+    async count({ where }: { where?: any } = {}) {
+      return findMany(workflowAuditLogs, where).length;
+    },
+    async create({ data }: { data: any }) {
+      const entry = {
+        id: data.id || cuid(),
+        ...data,
+        createdAt: data.createdAt ? (data.createdAt instanceof Date ? data.createdAt : new Date(data.createdAt)) : new Date(),
+      };
+      workflowAuditLogs.set(entry.id, entry);
+      return entry;
+    },
+    async update() {
+      throw new Error("WorkflowAuditLog is append-only: updates are prohibited");
+    },
+    async updateMany() {
+      throw new Error("WorkflowAuditLog is append-only: updates are prohibited");
+    },
+    async delete() {
+      throw new Error("WorkflowAuditLog is append-only: deletes are prohibited");
+    },
+    async deleteMany() {
+      throw new Error("WorkflowAuditLog is append-only: deletes are prohibited");
+    },
+  },
+
+  browserSession: {
+    async findMany({ where, orderBy, skip = 0, take }: { where?: any; orderBy?: any; skip?: number; take?: number } = {}) {
+      let result = findMany(browserSessions, where);
+      if (orderBy?.createdAt === "desc") {
+        result.sort((a: any, b: any) => toIsoString(b.createdAt).localeCompare(toIsoString(a.createdAt)));
+      } else if (orderBy?.createdAt === "asc") {
+        result.sort((a: any, b: any) => toIsoString(a.createdAt).localeCompare(toIsoString(b.createdAt)));
+      }
+      if (take !== undefined) result = result.slice(skip, skip + take);
+      return result;
+    },
+    async findFirst({ where }: { where: any }) {
+      return find(browserSessions, where);
+    },
+    async findUnique({ where }: { where: any }) {
+      return find(browserSessions, where);
+    },
+    async count({ where }: { where?: any } = {}) {
+      return findMany(browserSessions, where).length;
+    },
+    async create({ data }: { data: any }) {
+      const session = {
+        id: data.id || cuid(),
+        ...data,
+        createdAt: data.createdAt ? (data.createdAt instanceof Date ? data.createdAt : new Date(data.createdAt)) : new Date(),
+        updatedAt: data.updatedAt ? (data.updatedAt instanceof Date ? data.updatedAt : new Date(data.updatedAt)) : new Date(),
+      };
+      browserSessions.set(session.id, session);
+      return session;
+    },
+    async update({ where, data }: { where: any; data: any }) {
+      const session = find(browserSessions, where);
+      if (!session) throw new Error("Record not found");
+      Object.assign(session, data, { updatedAt: new Date() });
+      return session;
+    },
+    async delete({ where }: { where: any }) {
+      const session = find(browserSessions, where);
+      if (session) {
+        browserSessions.delete(session.id);
+        return { count: 1 };
+      }
+      return { count: 0 };
+    },
+    async deleteMany({ where }: { where?: any } = {}) {
+      let count = 0;
+      for (const [id, s] of browserSessions) {
+        if (where && !matches(s, where)) continue;
+        browserSessions.delete(id);
+        count++;
+      }
+      return { count };
+    },
+  },
+
   $queryRaw: async () => [{ ok: 1 }],
   $disconnect: async () => undefined,
 
@@ -725,7 +906,7 @@ export const store = {
 };
 
 export function resetStore() {
-  for (const table of [users, orgs, orgMembers, workflows, workflowNodes, workflowEdges, workflowVersions, executions, nodeExecutions, credentials, approvals, apiKeys, webhooks, subscriptions, usageRecords, refreshTokens, auditLogs]) {
+  for (const table of [users, orgs, orgMembers, workflows, workflowNodes, workflowEdges, workflowVersions, executions, nodeExecutions, credentials, approvals, apiKeys, webhooks, subscriptions, usageRecords, refreshTokens, auditLogs, workflowAuditLogs, browserSessions]) {
     table.clear();
   }
 }

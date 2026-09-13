@@ -3,6 +3,8 @@ import { z } from "zod";
 import { assertSafeUrl } from "../../lib/ssrf.js";
 import { decryptCredential } from "../../lib/crypto.js";
 import { prisma } from "../../lib/prisma.js";
+import { UniversalConnectionInjector } from "../vault/universal-injector.js";
+import { resolveSingleCredential } from "../vault/universal-resolver.js";
 
 export const mcpClientConfigSchema = z.object({
   operation: z.enum(["callTool", "listTools", "listResources", "readResource", "listPrompts", "getPrompt"]).default("callTool"),
@@ -50,14 +52,21 @@ export async function executeMcpClient(
     process.env.NODE_ENV === "test";
 
   let token = validConfig.token ?? validConfig.apiKey ?? "";
+  let resolvedCredential: any = null;
   if (validConfig.credentialId && orgId) {
     try {
-      const cred = await prisma.credential.findFirst({
-        where: { id: validConfig.credentialId, orgId },
-      });
-      if (cred) {
-        const data = JSON.parse(decryptCredential(cred.data));
-        token = data.apiKey ?? data.token ?? data.accessToken ?? token;
+      const resolved = await resolveSingleCredential(validConfig.credentialId, orgId);
+      if (resolved) {
+        resolvedCredential = resolved;
+        token = resolved.token ?? resolved.accessToken ?? resolved.apiKey ?? token;
+      } else {
+        const cred = await prisma.credential.findFirst({
+          where: { id: validConfig.credentialId, orgId },
+        });
+        if (cred) {
+          const data = JSON.parse(decryptCredential(cred.data));
+          token = data.apiKey ?? data.token ?? data.accessToken ?? token;
+        }
       }
     } catch {
       // offline fallback
@@ -180,7 +189,7 @@ export async function executeMcpClient(
     params,
   };
 
-  const headers: Record<string, string> = {
+  let headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
   };
@@ -189,6 +198,14 @@ export async function executeMcpClient(
   }
   if (validConfig.scopes && validConfig.scopes.length > 0) {
     headers["x-mcp-scopes"] = validConfig.scopes.join(",");
+  }
+
+  if (resolvedCredential) {
+    const injected = UniversalConnectionInjector.injectMcpTool(
+      { serverUrl, headers, token },
+      resolvedCredential
+    );
+    headers = injected.headers || headers;
   }
 
   const controller = new AbortController();
@@ -244,7 +261,12 @@ export class McpClientNodeHandler implements NodeHandler {
 
     for (const item of items) {
       const itemData = (typeof item === "object" && item !== null && "json" in item ? (item as NodeItem).json : item) ?? {};
-      const res = await executeMcpClient(config, itemData, ctx.orgId);
+      const configWithCreds = {
+        ...config,
+        token: (ctx.credentials?._token as string) || (ctx.credentials?._apiKey as string) || (ctx.credentials?._accessToken as string) || (config.token as string),
+        apiKey: (ctx.credentials?._apiKey as string) || (config.apiKey as string),
+      };
+      const res = await executeMcpClient(configWithCreds, itemData, ctx.orgId);
       results.push({ json: res });
       const toolLabel = res._tool ?? res._operation ?? config.toolName ?? config.operation ?? "mcp";
       logs.push(`MCP Client: Tool '${toolLabel}' invoked successfully`);

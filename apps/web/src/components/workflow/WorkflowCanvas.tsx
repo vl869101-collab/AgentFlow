@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -9,16 +9,21 @@ import {
   Panel,
   ReactFlow,
   ReactFlowProvider,
+  type Connection,
   type Edge,
   type OnConnect,
   type OnEdgesChange,
   type OnNodesChange,
   useReactFlow,
 } from "@xyflow/react";
-import { Plus, Sparkles, Move } from "lucide-react";
+import { Plus, Sparkles, Move, AlertCircle, X } from "lucide-react";
 import { NODE_TYPES } from "@agentflow/shared";
-import { cn } from "@/lib/utils";
-import { getNodeMeta, type NodeTypeKey, type WorkflowCanvasNode } from "@/lib/workflow";
+import {
+  detectCycle,
+  getNodeMeta,
+  type NodeTypeKey,
+  type WorkflowCanvasNode,
+} from "@/lib/workflow";
 import { ActionNode } from "./nodes/ActionNode";
 import { AdvancedNode } from "./nodes/AdvancedNode";
 import { LogicNode } from "./nodes/LogicNode";
@@ -39,6 +44,7 @@ interface CanvasInnerProps {
   onConnect: OnConnect;
   onSelectNode: (id?: string) => void;
   onCreateNode: (type: NodeTypeKey, position: { x: number; y: number }) => void;
+  onCycleDetected?: (source: string, target: string, reason?: string) => void;
 }
 
 function CanvasInner({
@@ -49,8 +55,46 @@ function CanvasInner({
   onConnect,
   onSelectNode,
   onCreateNode,
+  onCycleDetected,
 }: CanvasInnerProps) {
   const { screenToFlowPosition } = useReactFlow();
+  const [cycleWarning, setCycleWarning] = useState<string | null>(null);
+  const cycleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (cycleTimeoutRef.current) {
+        clearTimeout(cycleTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleConnect: OnConnect = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target) return;
+
+      const cycleResult = detectCycle(connection.source, connection.target, edges);
+      if (cycleResult.hasCycle) {
+        const message =
+          cycleResult.reason ||
+          "Conexão rejeitada: a dependência circular formaria um ciclo no grafo.";
+        setCycleWarning(message);
+        onCycleDetected?.(connection.source, connection.target, message);
+
+        if (cycleTimeoutRef.current) {
+          clearTimeout(cycleTimeoutRef.current);
+        }
+        cycleTimeoutRef.current = setTimeout(() => {
+          setCycleWarning(null);
+        }, 4500);
+        return;
+      }
+
+      setCycleWarning(null);
+      onConnect(connection);
+    },
+    [edges, onConnect, onCycleDetected]
+  );
 
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
@@ -71,7 +115,7 @@ function CanvasInner({
 
   return (
     <div
-      className="relative h-full min-h-[560px] w-full overflow-hidden bg-[#0e0e10]"
+      className="af-workflow-canvas relative h-full min-h-[560px] w-full overflow-hidden"
       onDrop={onDrop}
       onDragOver={onDragOver}
       role="region"
@@ -80,12 +124,12 @@ function CanvasInner({
       <svg className="absolute h-0 w-0" aria-hidden="true">
         <defs>
           <linearGradient id="edge-gradient" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#6366f1" />
-            <stop offset="50%" stopColor="#8b5cf6" />
-            <stop offset="100%" stopColor="#d946ef" />
+            <stop offset="0%" stopColor="var(--color-accent-cool)" />
+            <stop offset="50%" stopColor="var(--color-accent)" />
+            <stop offset="100%" stopColor="var(--color-accent-magenta)" />
           </linearGradient>
           <filter id="edge-glow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#8b5cf6" floodOpacity="0.4" />
+            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="var(--color-accent)" floodOpacity="0.4" />
           </filter>
         </defs>
       </svg>
@@ -95,14 +139,14 @@ function CanvasInner({
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
+        onConnect={handleConnect}
         onNodeClick={(_, node) => onSelectNode(node.id)}
         onPaneClick={() => onSelectNode(undefined)}
         fitView
         fitViewOptions={{ padding: 0.25 }}
         defaultEdgeOptions={{
           animated: true,
-          style: { stroke: "#8b5cf6", strokeWidth: 2 },
+          style: { stroke: "var(--color-accent)", strokeWidth: 2 },
         }}
         proOptions={{ hideAttribution: true }}
         minZoom={0.25}
@@ -112,21 +156,21 @@ function CanvasInner({
           variant={BackgroundVariant.Dots}
           gap={20}
           size={1.5}
-          color="rgba(255, 255, 255, 0.12)"
+          color="var(--border-strong)"
           className="transition-opacity"
         />
         <Controls
           showInteractive={false}
           aria-label="Controles de zoom e enquadramento do canvas"
-          className="!rounded-xl !border !border-white/10 !bg-zinc-900/85 !shadow-2xl !backdrop-blur-xl"
+          className="af-flow-controls"
         />
         <MiniMap
           nodeColor={(node) => {
             const data = node.data as { type?: NodeTypeKey };
             return data.type ? getNodeMeta(data.type).color : "#52525b";
           }}
-          maskColor="rgba(9, 9, 11, 0.85)"
-          className="!rounded-xl !border !border-white/10 !bg-zinc-900/60 !shadow-xl !backdrop-blur-xl"
+          maskColor="var(--surface-overlay)"
+          className="af-flow-minimap"
           aria-label="Minimapa do fluxo"
         />
 
@@ -164,9 +208,36 @@ function CanvasInner({
           </div>
         ) : null}
 
+        {cycleWarning ? (
+          <Panel
+            position="top-center"
+            className="af-cycle-warning z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          >
+            <div
+              className="flex max-w-lg items-center gap-3 rounded-xl border border-rose-500/40 bg-rose-950/90 px-4 py-2.5 text-xs font-medium text-rose-100 shadow-2xl shadow-rose-950/60 backdrop-blur-xl"
+              role="alert"
+              aria-live="assertive"
+            >
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-rose-200">Ciclo Bloqueado (DAG Inválido)</p>
+                <p className="text-[11px] text-rose-300/90 leading-tight break-words">{cycleWarning}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCycleWarning(null)}
+                className="ml-2 -mr-1 rounded-md p-1 text-rose-400 hover:bg-rose-900/50 hover:text-rose-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-400"
+                aria-label="Fechar aviso de ciclo"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          </Panel>
+        ) : null}
+
         <Panel
           position="top-right"
-          className={cn("rounded-lg border border-white/10 bg-zinc-900/85 px-3 py-1.5 text-[11px] font-medium text-zinc-400 backdrop-blur-xl shadow-lg")}
+          className="af-workflow-hint rounded-lg px-3 py-1.5 text-[11px] font-medium backdrop-blur-xl shadow-lg"
         >
           <span className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
@@ -178,7 +249,7 @@ function CanvasInner({
   );
 }
 
-export function WorkflowCanvas(props: {
+export interface WorkflowCanvasProps {
   nodes: WorkflowCanvasNode[];
   edges: Edge[];
   onNodesChange: OnNodesChange<WorkflowCanvasNode>;
@@ -186,7 +257,10 @@ export function WorkflowCanvas(props: {
   onConnect: OnConnect;
   onSelectNode: (id?: string) => void;
   onCreateNode: (type: NodeTypeKey, position: { x: number; y: number }) => void;
-}) {
+  onCycleDetected?: (source: string, target: string, reason?: string) => void;
+}
+
+export function WorkflowCanvas(props: WorkflowCanvasProps) {
   return (
     <ReactFlowProvider>
       <CanvasInner {...props} />

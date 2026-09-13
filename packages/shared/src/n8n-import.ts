@@ -595,6 +595,7 @@ export interface ImportOptions {
   statusOverride?: "DRAFT" | "ACTIVE";
   defaultPositionOffset?: { x: number; y: number };
   prefixNodeIds?: string;
+  preserveNodeIds?: boolean;
 }
 
 function mapNodeType(n8nType: string): string {
@@ -603,6 +604,9 @@ function mapNodeType(n8nType: string): string {
 }
 
 function generateId(prefix = "n8n"): string {
+  if (typeof globalThis !== "undefined" && globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+    return `${prefix}-${globalThis.crypto.randomUUID()}`;
+  }
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).substring(2, 10);
   return `${prefix}-${ts}${rand}`;
@@ -630,8 +634,11 @@ export function importN8nWorkflow(
   const idPrefix = options.prefixNodeIds ?? "n8n";
 
   for (const node of nodes) {
-    const id = node.id ? `${idPrefix}-${node.id}` : generateId(idPrefix);
+    const id = options.preserveNodeIds && node.id ? `${idPrefix}-${node.id}` : generateId(idPrefix);
     nodeIdMap.set(node.name, id);
+    if (node.id) {
+      nodeIdMap.set(node.id, id);
+    }
   }
 
   // Convert nodes
@@ -733,3 +740,4 @@ export function importN8nWorkflow(
 
 /** Alias for semantic clarity */
 export const createAgentFlowFromN8n = importN8nWorkflow;
+export const convertN8nToAgentflow = importN8nWorkflow;

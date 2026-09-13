@@ -1,4 +1,7 @@
+import http from "node:http";
+import https from "node:https";
 import { lookup, resolve4, resolve6 } from "node:dns/promises";
+import { Readable } from "node:stream";
 import ipaddr from "ipaddr.js";
 import { getEnv } from "./env.js";
 
@@ -26,6 +29,32 @@ const BLOCKED_SUFFIXES = [
   ".test",
   ".example",
   ".invalid",
+];
+
+const BLOCKED_CIDRS: [ipaddr.IPv4 | ipaddr.IPv6, number][] = [
+  // IPv4 Private, Loopback, Link-Local, Reserved
+  ipaddr.parseCIDR("127.0.0.0/8"),
+  ipaddr.parseCIDR("10.0.0.0/8"),
+  ipaddr.parseCIDR("172.16.0.0/12"),
+  ipaddr.parseCIDR("192.168.0.0/16"),
+  ipaddr.parseCIDR("169.254.0.0/16"),
+  ipaddr.parseCIDR("0.0.0.0/8"),
+  ipaddr.parseCIDR("100.64.0.0/10"), // Carrier-grade NAT
+  ipaddr.parseCIDR("192.0.0.0/24"),
+  ipaddr.parseCIDR("192.0.2.0/24"),  // TEST-NET-1
+  ipaddr.parseCIDR("198.18.0.0/15"),
+  ipaddr.parseCIDR("198.51.100.0/24"), // TEST-NET-2
+  ipaddr.parseCIDR("203.0.113.0/24"),  // TEST-NET-3
+  ipaddr.parseCIDR("224.0.0.0/4"),   // Multicast
+  ipaddr.parseCIDR("240.0.0.0/4"),   // Reserved
+  ipaddr.parseCIDR("255.255.255.255/32"),
+
+  // IPv6 Loopback, Unspecified, Unique-Local, Link-Local, Multicast
+  ipaddr.parseCIDR("::1/128"),
+  ipaddr.parseCIDR("::/128"),
+  ipaddr.parseCIDR("fc00::/7"),      // Unique-Local
+  ipaddr.parseCIDR("fe80::/10"),     // Link-Local
+  ipaddr.parseCIDR("ff00::/8"),      // Multicast
 ];
 
 export class SsrFSecurityError extends Error {
@@ -60,6 +89,13 @@ export function isBlockedIpOrHost(ipOrHost: string): boolean {
     let addr = ipaddr.parse(normalized);
     if (addr.kind() === "ipv6" && (addr as ipaddr.IPv6).isIPv4MappedAddress()) {
       addr = (addr as ipaddr.IPv6).toIPv4Address();
+    }
+
+    // Match explicit CIDR block definitions
+    for (const cidr of BLOCKED_CIDRS) {
+      if (addr.kind() === cidr[0].kind() && addr.match(cidr)) {
+        return true;
+      }
     }
 
     const range = addr.range();
@@ -211,6 +247,78 @@ export async function assertSafeDestination(url: URL): Promise<void> {
   }
 }
 
+/**
+ * Creates a pinned DNS lookup function that forces the network socket to connect
+ * directly to a pre-validated IP address, avoiding DNS rebinding and TOCTOU.
+ */
+export function createPinnedLookup(pinnedIp: string) {
+  const isIpv6 = pinnedIp.includes(":");
+  const family = isIpv6 ? 6 : 4;
+  return function pinnedLookup(
+    _hostname: string,
+    options: any,
+    callback: (err: NodeJS.ErrnoException | null, address: any, family: number) => void
+  ) {
+    if (typeof options === "function") {
+      callback = options;
+      options = {};
+    }
+    if (options && options.all) {
+      callback(null, [{ address: pinnedIp, family }] as any, family);
+    } else {
+      callback(null, pinnedIp, family);
+    }
+  };
+}
+
+type SafeHeadersInit =
+  | Headers
+  | Record<string, string>
+  | [string, string][]
+  | string[][]
+  | Iterable<[string, string]>
+  | any;
+
+function normalizeHeaders(headers?: SafeHeadersInit): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!headers) return result;
+  if (headers instanceof Headers) {
+    headers.forEach((val, key) => {
+      result[key] = val;
+    });
+  } else if (Array.isArray(headers)) {
+    for (const [key, val] of headers) {
+      result[key] = val;
+    }
+  } else if (typeof headers === "object") {
+    for (const [key, val] of Object.entries(headers)) {
+      if (val !== undefined && val !== null) {
+        result[key] = String(val);
+      }
+    }
+  }
+  return result;
+}
+
+function createByteLimitStream(maxBytes: number) {
+  let bytesCount = 0;
+  return new TransformStream({
+    transform(chunk, controller) {
+      bytesCount += chunk.byteLength || chunk.length || 0;
+      if (bytesCount > maxBytes) {
+        controller.error(
+          new SsrFSecurityError(
+            `HTTP response size (${bytesCount} bytes) exceeds limit (${maxBytes} bytes)`,
+            "RESPONSE_TOO_LARGE"
+          )
+        );
+        return;
+      }
+      controller.enqueue(chunk);
+    },
+  });
+}
+
 export interface SafeFetchOptions extends RequestInit {
   timeoutMs?: number;
   maxRedirects?: number;
@@ -219,6 +327,7 @@ export interface SafeFetchOptions extends RequestInit {
 
 /**
  * Performs a safe HTTP request protected against SSRF, DNS rebinding, and malicious redirects.
+ * Pins connection sockets to pre-validated IP addresses.
  */
 export async function safeFetch(input: string | URL, options: SafeFetchOptions = {}): Promise<Response> {
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
@@ -229,52 +338,156 @@ export async function safeFetch(input: string | URL, options: SafeFetchOptions =
   let currentUrl = typeof input === "string" ? new URL(input) : input;
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
-    await assertSafeDestination(currentUrl);
+    validateUrl(currentUrl);
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutPerHop);
+    let addresses: string[];
+    const host = currentUrl.hostname.toLowerCase().trim().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+    if (ipaddr.isValid(host)) {
+      if (isBlockedIpOrHost(host)) {
+        throw new SsrFSecurityError(`Direct access to private IP '${host}' is blocked`, "SSRF_BLOCKED");
+      }
+      addresses = [host];
+    } else {
+      addresses = await resolveAllAddresses(host);
+      if (addresses.length === 0) {
+        throw new SsrFSecurityError(`Unable to resolve hostname '${host}'`, "DNS_RESOLUTION_FAILED");
+      }
+      for (const address of addresses) {
+        if (isBlockedIpOrHost(address)) {
+          throw new SsrFSecurityError(
+            `Hostname '${host}' resolved to blocked/private address '${address}'`,
+            "SSRF_BLOCKED"
+          );
+        }
+      }
+    }
 
-    let response: Response;
-    try {
-      response = await fetch(currentUrl, {
-        ...options,
-        redirect: "manual",
-        signal: controller.signal,
+    const pinnedIp = addresses[0];
+    const pinnedLookup = createPinnedLookup(pinnedIp);
+
+    const isHttps = currentUrl.protocol === "https:";
+    const transport = isHttps ? https : http;
+
+    const requestHeaders = normalizeHeaders(options.headers);
+    if (!requestHeaders["host"] && !requestHeaders["Host"]) {
+      requestHeaders["Host"] = currentUrl.host;
+    }
+
+    const port = currentUrl.port ? Number(currentUrl.port) : isHttps ? 443 : 80;
+    const method = (options.method ?? "GET").toUpperCase();
+
+    const response = await new Promise<Response>((resolve, reject) => {
+      let isDone = false;
+      let req: http.ClientRequest;
+
+      const done = (fn: () => void) => {
+        if (isDone) return;
+        isDone = true;
+        clearTimeout(timer);
+        fn();
+      };
+
+      const timer = setTimeout(() => {
+        if (req) req.destroy();
+        done(() => reject(new SsrFSecurityError(`Outbound HTTP request timed out after ${timeoutMs}ms`, "TIMEOUT")));
+      }, timeoutPerHop);
+
+      if (options.signal) {
+        if (options.signal.aborted) {
+          done(() => reject(new SsrFSecurityError("Outbound HTTP request aborted", "TIMEOUT")));
+          return;
+        }
+        options.signal.addEventListener("abort", () => {
+          if (req) req.destroy();
+          done(() => reject(new SsrFSecurityError("Outbound HTTP request aborted", "TIMEOUT")));
+        });
+      }
+
+      req = transport.request(
+        {
+          protocol: currentUrl.protocol,
+          hostname: currentUrl.hostname,
+          port,
+          path: currentUrl.pathname + currentUrl.search,
+          method,
+          headers: requestHeaders,
+          lookup: pinnedLookup,
+          servername: currentUrl.hostname,
+        },
+        (res) => {
+          const headers = new Headers();
+          for (const [key, value] of Object.entries(res.headers)) {
+            if (Array.isArray(value)) {
+              for (const v of value) headers.append(key, v);
+            } else if (value !== undefined) {
+              headers.set(key, value);
+            }
+          }
+
+          const statusCode = res.statusCode ?? 200;
+          const statusText = res.statusMessage ?? "OK";
+
+          const byteLimiter = createByteLimitStream(maxBytes);
+          const webStream = (Readable.toWeb(res) as any).pipeThrough(byteLimiter);
+
+          const whatwgResponse = new Response(webStream, {
+            status: statusCode,
+            statusText,
+            headers,
+          });
+
+          done(() => resolve(whatwgResponse));
+        }
+      );
+
+      req.on("error", (err) => {
+        done(() => reject(err));
       });
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") {
-        throw new SsrFSecurityError(`Outbound HTTP request timed out after ${timeoutMs}ms`, "TIMEOUT");
+
+      if (options.body) {
+        if (typeof options.body === "string" || Buffer.isBuffer(options.body)) {
+          req.write(options.body);
+        } else if (typeof (options.body as any).pipe === "function") {
+          (options.body as any).pipe(req);
+          return;
+        } else {
+          req.write(String(options.body));
+        }
       }
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
 
-    // If not a redirect, validate content length and return
-    if (response.status < 300 || response.status >= 400) {
-      const contentLength = Number(response.headers.get("content-length") ?? 0);
-      if (contentLength > maxBytes) {
-        throw new SsrFSecurityError(`HTTP response size (${contentLength} bytes) exceeds limit (${maxBytes} bytes)`, "RESPONSE_TOO_LARGE");
+      req.end();
+    });
+
+    // Handle HTTP Redirects
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) {
+        throw new SsrFSecurityError("HTTP redirect response has no Location header", "INVALID_REDIRECT");
       }
-      return response;
+
+      let nextUrl: URL;
+      try {
+        nextUrl = new URL(location, currentUrl);
+      } catch {
+        throw new SsrFSecurityError(`Invalid redirect Location: '${location}'`, "INVALID_REDIRECT");
+      }
+
+      validateUrl(nextUrl);
+      currentUrl = nextUrl;
+      continue;
     }
 
-    // Follow redirect safely
-    const location = response.headers.get("location");
-    if (!location) {
-      throw new SsrFSecurityError("HTTP redirect response is missing Location header", "INVALID_REDIRECT");
+    // Non-redirect response: check content-length
+    const contentLength = Number(response.headers.get("content-length") ?? 0);
+    if (contentLength > maxBytes) {
+      throw new SsrFSecurityError(
+        `HTTP response size (${contentLength} bytes) exceeds limit (${maxBytes} bytes)`,
+        "RESPONSE_TOO_LARGE"
+      );
     }
 
-    let nextUrl: URL;
-    try {
-      nextUrl = new URL(location, currentUrl);
-    } catch {
-      throw new SsrFSecurityError(`Invalid redirect Location: '${location}'`, "INVALID_REDIRECT");
-    }
-
-    validateUrl(nextUrl);
-    currentUrl = nextUrl;
+    return response;
   }
 
-  throw new SsrFSecurityError(`Too many HTTP redirects (limit: ${maxRedirects})`, "TOO_MANY_REDIRECTS");
+  throw new SsrFSecurityError(`Too many redirects (max ${maxRedirects})`, "TOO_MANY_REDIRECTS");
 }

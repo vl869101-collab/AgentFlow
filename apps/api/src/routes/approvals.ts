@@ -5,6 +5,7 @@ import { requireAuth, userIdFromRequest } from "../middleware/auth.js";
 import { buildFormZodSchema, type FormField } from "../services/nodes/form.js";
 import { enqueueExecution } from "../services/queue.js";
 import { runExecution } from "../services/executor.js";
+import { recordWorkflowAuditEvent } from "../services/audit-ledger.js";
 
 export async function approvalRoutes(app: FastifyInstance) {
   // Public / Token-based Form endpoints (does not require standard session if token is valid)
@@ -83,6 +84,18 @@ export async function approvalRoutes(app: FastifyInstance) {
       },
     });
 
+    void recordWorkflowAuditEvent({
+      executionId: approval.executionId,
+      actor: "form-user",
+      action: "approval.resolved",
+      decision: newStatus,
+      payload: {
+        approvalId: token,
+        status: newStatus,
+        submittedData: parsedData,
+      },
+    }).catch(() => {});
+
     if (newStatus === "APPROVED") {
       await prisma.workflowExecution.updateMany({
         where: { id: approval.executionId, status: "WAITING_APPROVAL" },
@@ -119,12 +132,54 @@ export async function approvalRoutes(app: FastifyInstance) {
       const orgIds = memberships.map((membership: { orgId: string }) => membership.orgId);
       if (orgIds.length === 0) return [];
 
-      return prisma.approval.findMany({
-        where: { status: "PENDING", execution: { orgId: { in: orgIds } } },
+      const query = (request.query as Record<string, any>) ?? {};
+      const rawStatus = query.status ? String(query.status).toUpperCase() : "PENDING";
+      const statusFilter = rawStatus === "ALL" ? undefined : rawStatus;
+
+      const approvals = await prisma.approval.findMany({
+        where: {
+          ...(statusFilter ? { status: statusFilter } : {}),
+          execution: { orgId: { in: orgIds } },
+        },
         include: { execution: { include: { workflow: { select: { id: true, name: true } } } } },
         orderBy: { createdAt: "desc" },
         ...parsePagination(request, reply),
       });
+
+      // Handle expired pending approvals
+      const now = Date.now();
+      for (const app of approvals) {
+        if (app.status === "PENDING") {
+          const context = (app.context as Record<string, any>) ?? {};
+          if (context.expiresAt && new Date(context.expiresAt).getTime() < now) {
+            await prisma.approval.update({
+              where: { id: app.id },
+              data: { status: "EXPIRED", decidedAt: new Date() },
+            });
+            await prisma.workflowExecution.updateMany({
+              where: { id: app.executionId, status: "WAITING_APPROVAL" },
+              data: { status: "CANCELLED", error: "Approval timed out after configured duration" },
+            });
+            void recordWorkflowAuditEvent({
+              executionId: app.executionId,
+              nodeId: context.nodeId,
+              actor: "system",
+              action: "approval.expired",
+              decision: "CANCELLED",
+              payload: {
+                approvalId: app.id,
+                reason: "Approval timed out after configured duration",
+              },
+            }).catch(() => {});
+            app.status = "EXPIRED";
+          }
+        }
+      }
+
+      if (statusFilter === "PENDING") {
+        return approvals.filter((a: any) => a.status === "PENDING");
+      }
+      return approvals;
     });
 
     async function decide(request: FastifyRequest, reply: FastifyReply, status: "APPROVED" | "REJECTED") {
@@ -137,15 +192,56 @@ export async function approvalRoutes(app: FastifyInstance) {
       const orgIds = memberships.map((membership: { orgId: string }) => membership.orgId);
 
       const approval = await prisma.approval.findFirst({
-        where: { id, status: "PENDING", execution: { orgId: { in: orgIds } } },
+        where: { id, execution: { orgId: { in: orgIds } } },
       });
-      if (!approval) return reply.code(404).send({ error: "Approval not found or already decided", code: "NOT_FOUND" });
+      if (!approval) return reply.code(404).send({ error: "Approval not found", code: "NOT_FOUND" });
+
+      if (approval.status !== "PENDING") {
+        return reply.code(400).send({ error: `Approval is already ${approval.status.toLowerCase()}`, code: "ALREADY_DECIDED" });
+      }
+
+      const context = (approval.context as Record<string, any>) ?? {};
+      if (context.expiresAt && new Date(context.expiresAt).getTime() < Date.now()) {
+        await prisma.approval.update({
+          where: { id },
+          data: { status: "EXPIRED", decidedAt: new Date() },
+        });
+        await prisma.workflowExecution.updateMany({
+          where: { id: approval.executionId, status: "WAITING_APPROVAL" },
+          data: { status: "CANCELLED", error: "Approval timed out after configured duration" },
+        });
+        void recordWorkflowAuditEvent({
+          executionId: approval.executionId,
+          nodeId: context.nodeId,
+          actor: "system",
+          action: "approval.expired",
+          decision: "CANCELLED",
+          payload: {
+            approvalId: id,
+            reason: "Approval timed out after configured duration",
+          },
+        }).catch(() => {});
+        return reply.code(410).send({ error: "Approval has expired", code: "EXPIRED" });
+      }
 
       const result = await prisma.approval.updateMany({
         where: { id, status: "PENDING" },
         data: { status, decidedAt: new Date(), approverId: userId },
       });
       if (result.count === 0) return reply.code(404).send({ error: "Approval not found or already decided", code: "NOT_FOUND" });
+
+      void recordWorkflowAuditEvent({
+        executionId: approval.executionId,
+        nodeId: context.nodeId,
+        actor: userId || "system",
+        action: "approval.resolved",
+        decision: status,
+        payload: {
+          approvalId: id,
+          status,
+          approverId: userId,
+        },
+      }).catch(() => {});
 
       if (status === "APPROVED") {
         await prisma.workflowExecution.updateMany({

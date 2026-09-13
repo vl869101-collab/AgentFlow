@@ -15,20 +15,51 @@ export interface BinaryData {
   [key: string]: unknown;
 }
 
+export interface BinaryPayloadMeta {
+  /** MIME type verificado (ex: application/pdf, image/png) */
+  mimeType: string;
+  /** Nome do arquivo original com extensão */
+  fileName: string;
+  /** Tamanho exato em bytes */
+  fileSize: number;
+  /** Extensão do arquivo sem ponto */
+  fileExtension?: string;
+  /** Chave de armazenamento no Vault/S3 (Storage Key) */
+  storageKey: string;
+  /** Checksum SHA-256 para integridade criptográfica (64 hex characters) */
+  checksumSha256: string;
+  /** Tamanho do payload em bytes */
+  byteLength?: number;
+  /** Amostra Base64 para previews ultra-leves (< 16KB), nula caso exceda */
+  previewDataUri?: string;
+  [key: string]: unknown;
+}
+
 export interface PairedItemRef {
+  /** Índice do item na entrada do nó atual */
   item: number;
+  /** Identificador opcional do nó que gerou o item original */
+  sourceNodeId?: string;
+  /** Sub-índice para operações de desdobramento (unwind, splitInBatches) */
+  subIndex?: number;
   input?: number;
   source?: string;
   [key: string]: unknown;
 }
 
-export type PairedItem = PairedItemRef | PairedItemRef[] | number | number[] | unknown;
+export type PairedItem = PairedItemRef | PairedItemRef[] | number | number[] | Record<string, unknown>;
 
 export interface NodeItem<TJson extends Record<string, any> = Record<string, any>> {
-  json: TJson;
-  binary?: Record<string, BinaryData | any>;
-  pairedItem?: PairedItem;
-  [key: string]: unknown;
+  readonly json: Readonly<TJson>;
+  readonly binary?: Readonly<Record<string, BinaryPayloadMeta | BinaryData | any>>;
+  readonly pairedItem?: Readonly<PairedItem>;
+  readonly _metadata?: Readonly<{
+    executionTimeMs?: number;
+    iterationIndex?: number;
+    sourceBranch?: number;
+    [key: string]: unknown;
+  }>;
+  readonly [key: string]: unknown;
 }
 
 export type NormalizedItem<TJson extends Record<string, any> = Record<string, any>> = NodeItem<TJson>;
@@ -81,27 +112,47 @@ export const binaryDataSchema = z.object({
   directory: z.string().optional(),
 }).passthrough();
 
+export const binaryPayloadMetaSchema = z.object({
+  mimeType: z.string().min(1),
+  fileName: z.string().min(1),
+  fileSize: z.number().int().nonnegative(),
+  storageKey: z.string().min(1),
+  checksumSha256: z
+    .string()
+    .length(64, "Must be a 64-character hex SHA-256 digest")
+    .regex(/^[a-fA-F0-9]{64}$/, "Must be a 64-character hex SHA-256 digest"),
+  fileExtension: z.string().optional(),
+  byteLength: z.number().int().nonnegative().optional(),
+  previewDataUri: z.string().optional(),
+}).passthrough();
+export const BinaryPayloadMetaSchema = binaryPayloadMetaSchema;
+
 export const pairedItemRefSchema = z.object({
   item: z.number().int().nonnegative(),
+  sourceNodeId: z.string().optional(),
+  subIndex: z.number().int().nonnegative().optional(),
   input: z.number().int().nonnegative().optional(),
   source: z.string().optional(),
 }).passthrough();
+export const PairedItemRefSchema = pairedItemRefSchema;
 
 export const pairedItemSchema = z.union([
   pairedItemRefSchema,
   z.array(pairedItemRefSchema),
   z.number().int().nonnegative(),
   z.array(z.number().int().nonnegative()),
-  z.unknown(),
 ]);
 
 export const nodeItemSchema = z.object({
   json: z.record(z.any()),
-  binary: z.record(binaryDataSchema.or(z.any())).optional(),
+  binary: z.record(z.union([binaryPayloadMetaSchema, binaryDataSchema])).optional(),
   pairedItem: pairedItemSchema.optional(),
+  _metadata: z.record(z.unknown()).optional(),
 }).passthrough();
+export const NodeItemSchema = nodeItemSchema;
 
 export const nodeItemsArraySchema = z.array(nodeItemSchema);
+export const NodeItemsSchema = nodeItemsArraySchema;
 
 // ═══════════════════════════════════════════
 // 3. Extraction & Dot Notation / JSONPath Engine
@@ -230,16 +281,21 @@ export function isNodeItem(candidate: unknown): candidate is NodeItem {
 /**
  * Ensures an individual item conforms strictly to the NodeItem contract.
  */
-export function ensureNodeItem(item: unknown, defaultIndex?: number): NodeItem {
+export function ensureNodeItem<TJson extends Record<string, any> = Record<string, any>>(
+  item: unknown,
+  defaultIndex?: number
+): NodeItem<TJson> {
   if (item === null || item === undefined) {
-    const res: NodeItem = { json: {} };
-    if (defaultIndex !== undefined) res.pairedItem = { item: defaultIndex };
+    const res: NodeItem<TJson> = { json: {} as TJson };
+    if (defaultIndex !== undefined) {
+      return { ...res, pairedItem: { item: defaultIndex } };
+    }
     return res;
   }
 
   // Already a valid NodeItem
   if (isNodeItem(item)) {
-    const existing = item as NodeItem;
+    const existing = item as NodeItem<TJson>;
     return {
       json: { ...existing.json },
       ...(existing.binary ? { binary: { ...existing.binary } } : {}),
@@ -248,36 +304,50 @@ export function ensureNodeItem(item: unknown, defaultIndex?: number): NodeItem {
         : defaultIndex !== undefined
         ? { pairedItem: { item: defaultIndex } }
         : {}),
+      ...(existing._metadata ? { _metadata: { ...existing._metadata } } : {}),
     };
   }
 
   // If item is a primitive or array, package it in json.value
   if (typeof item !== "object" || Array.isArray(item)) {
-    const res: NodeItem = { json: { value: item } };
-    if (defaultIndex !== undefined) res.pairedItem = { item: defaultIndex };
+    const res: NodeItem<TJson> = { json: { value: item } as unknown as TJson };
+    if (defaultIndex !== undefined) {
+      return { ...res, pairedItem: { item: defaultIndex } };
+    }
     return res;
   }
 
   // If item is a plain dictionary object
   const obj = item as Record<string, any>;
-  const res: NodeItem = { json: { ...obj } };
-  if (defaultIndex !== undefined) res.pairedItem = { item: defaultIndex };
-  return res;
+  const { pairedItem, binary, _metadata, ...rest } = obj;
+  const extractedPaired =
+    pairedItem !== undefined
+      ? pairedItem
+      : defaultIndex !== undefined
+      ? { item: defaultIndex }
+      : undefined;
+
+  return {
+    json: rest as TJson,
+    ...(binary ? { binary } : {}),
+    ...(extractedPaired !== undefined ? { pairedItem: extractedPaired } : {}),
+    ...(_metadata ? { _metadata } : {}),
+  };
 }
 
 /**
  * Wraps any arbitrary raw payload (single object, array of items, legacy { items: [...] },
  * array of primitives, null/undefined) into a standardized multi-item array: NodeItem[].
  */
-export function wrapItems(data: unknown): NodeItem[] {
+export function wrapItems<TJson extends Record<string, any> = Record<string, any>>(data: unknown): NodeItem<TJson>[] {
   if (data === undefined || data === null) {
-    return [{ json: {} }];
+    return [{ json: {} as TJson }];
   }
 
   // Already an array
   if (Array.isArray(data)) {
     if (data.length === 0) return [];
-    return data.map((entry, idx) => ensureNodeItem(entry, idx));
+    return data.map((entry, idx) => ensureNodeItem<TJson>(entry, idx));
   }
 
   if (typeof data === "object") {
@@ -285,28 +355,28 @@ export function wrapItems(data: unknown): NodeItem[] {
 
     // Handle legacy container patterns like `{ items: [...] }` or `{ data: [...] }`
     if ("items" in obj && Array.isArray(obj.items)) {
-      return wrapItems(obj.items);
+      return wrapItems<TJson>(obj.items);
     }
 
     if (isNodeItem(obj)) {
-      return [ensureNodeItem(obj, 0)];
+      return [ensureNodeItem<TJson>(obj, 0)];
     }
 
     // Single dictionary object
-    return [ensureNodeItem(obj, 0)];
+    return [ensureNodeItem<TJson>(obj, 0)];
   }
 
   // Primitive value (string, number, boolean)
-  return [{ json: { value: data }, pairedItem: { item: 0 } }];
+  return [{ json: { value: data } as unknown as TJson, pairedItem: { item: 0 } }];
 }
 
 /**
  * Unwraps standardized NodeItem[] into consumer-friendly data formats (legacy backwards-compatible or clean payload).
  */
-export function unwrapItems(
+export function unwrapItems<T = unknown>(
   items: NodeItem[],
   options?: ItemUnwrapOptions | boolean
-): unknown {
+): T {
   const opts: ItemUnwrapOptions = typeof options === "boolean"
     ? { singleObjectIfOne: options }
     : options ?? {};
@@ -318,28 +388,28 @@ export function unwrapItems(
   } = opts;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
-    return [];
+    return [] as unknown as T;
   }
 
   if (unwrapMode === "raw") {
-    return items;
+    return items as unknown as T;
   }
 
   if (unwrapMode === "json_only") {
     const jsonList = items.map((i) => (i?.json ? { ...i.json } : {}));
     if (jsonList.length === 1 && singleObjectIfOne) {
-      return jsonList[0];
+      return jsonList[0] as unknown as T;
     }
-    return jsonList;
+    return jsonList as unknown as T;
   }
 
   // Legacy format: strips pairedItem and returns clean JSON objects / array
   if (preserveBinary === false) {
     const jsonList = items.map((i) => (i?.json ? { ...i.json } : {}));
     if (jsonList.length === 1 && singleObjectIfOne) {
-      return jsonList[0];
+      return jsonList[0] as unknown as T;
     }
-    return jsonList;
+    return jsonList as unknown as T;
   }
 
   // Auto / Full mode:
@@ -347,11 +417,11 @@ export function unwrapItems(
   if (items.length === 1 && singleObjectIfOne) {
     const single = items[0];
     if (!single.binary && single.pairedItem === undefined) {
-      return { ...single.json };
+      return { ...single.json } as unknown as T;
     }
   }
 
-  return items.map((item) => {
+  const res = items.map((item) => {
     if (!item) return {};
     const hasBinary = preserveBinary && item.binary && Object.keys(item.binary).length > 0;
     const hasPaired = item.pairedItem !== undefined;
@@ -366,6 +436,7 @@ export function unwrapItems(
       ...(hasPaired ? { pairedItem: item.pairedItem } : {}),
     };
   });
+  return res as unknown as T;
 }
 
 // ═══════════════════════════════════════════
@@ -445,10 +516,16 @@ export async function mapItems(
     const current = normalized[i];
     const mapped = await mapper(current, i, normalized);
     const ensured = ensureNodeItem(mapped);
-    if (ensured.pairedItem === undefined) {
-      ensured.pairedItem = current.pairedItem !== undefined ? current.pairedItem : { item: i };
-    }
-    out.push(ensured);
+    const pairedItem =
+      ensured.pairedItem !== undefined
+        ? ensured.pairedItem
+        : current.pairedItem !== undefined
+        ? current.pairedItem
+        : { item: i };
+    out.push({
+      ...ensured,
+      pairedItem,
+    });
   }
 
   return out;
@@ -501,12 +578,14 @@ export function mergeItemBatches(batches: NodeItem[][]): NodeItem[] {
 export function createPairedItem(
   itemIndex: number,
   inputIndex: number = 0,
-  sourceNode?: string
+  sourceNode?: string,
+  subIndex?: number
 ): PairedItemRef {
   return {
     item: Math.max(0, itemIndex),
     input: Math.max(0, inputIndex),
-    ...(sourceNode ? { source: sourceNode } : {}),
+    ...(sourceNode ? { source: sourceNode, sourceNodeId: sourceNode } : {}),
+    ...(subIndex !== undefined ? { subIndex } : {}),
   };
 }
 
@@ -522,7 +601,7 @@ export function linkPairedItems(
   const wrappedOutput = wrapItems(outputItems);
 
   return wrappedOutput.map((outItem, idx) => {
-    let paired: PairedItem;
+    let paired: PairedItemRef;
     if (wrappedSource.length === 1) {
       paired = createPairedItem(0, 0, sourceNodeId);
     } else if (idx < wrappedSource.length) {
