@@ -1484,7 +1484,7 @@ const swaggerUiHtml = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AgentFlow API - Swagger UI</title>
+  <title>AgentFlow API — Swagger UI</title>
   <link rel="stylesheet" href="/docs/assets/swagger-ui.css" />
 </head>
 <body>
