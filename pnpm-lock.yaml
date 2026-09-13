@@ -74,6 +74,9 @@ importers:
       '@types/ws':
         specifier: ^8.5.14
         version: 8.18.1
+      acorn:
+        specifier: ^8.18.0
+        version: 8.18.0
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3
