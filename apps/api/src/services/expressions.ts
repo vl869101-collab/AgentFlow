@@ -345,7 +345,7 @@ function evaluateNode(node: any, scope: Record<string, unknown>): unknown {
       }
 
       const args = node.arguments.map((arg: any) => evaluateNode(arg, scope));
-      return (fn as Function).apply(thisArg, args);
+      return Reflect.apply(fn as (...callArgs: unknown[]) => unknown, thisArg, args);
     }
 
     case "BinaryExpression": {
