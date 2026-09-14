@@ -623,7 +623,8 @@ export async function getHeartbeatTTL(executionId: string): Promise<number> {
       if (ttl === -2) {
         // Key does not exist in Redis, fall back to memory
       } else {
-        return ttl;
+        // ttl === -1 (no expiry) or 0 (expiring now) both mean not active.
+        return ttl <= 0 ? -1 : ttl;
       }
     } catch (err) {
       console.warn(`[Queue] Failed to check Redis TTL for ${executionId}:`, (err as Error).message);
@@ -633,11 +634,12 @@ export async function getHeartbeatTTL(executionId: string): Promise<number> {
   const memory = inMemoryHeartbeats.get(executionId);
   if (!memory) return -1;
   const now = Date.now();
-  if (now > memory.expiresAt) {
+  const remainingMs = memory.expiresAt - now;
+  if (remainingMs <= 0) {
     inMemoryHeartbeats.delete(executionId);
     return -1;
   }
-  return Math.max(0, Math.ceil((memory.expiresAt - now) / 1000));
+  return Math.ceil(remainingMs / 1000);
 }
 
 /**
