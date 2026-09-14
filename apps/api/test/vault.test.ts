@@ -132,8 +132,8 @@ test("Vault AES-256-GCM: handles sensitive field detection, per-field encryption
   assert.equal(masked.nested.publicFlag, true);
 });
 
-test("Vault 8 Buckets: verifies all 8 bucket schemas and validations", () => {
-  assert.equal(ALL_BUCKETS.length, 8);
+test("Vault Buckets: verifies all bucket schemas and validations", () => {
+  assert.equal(ALL_BUCKETS.length, 13);
   const expectedBuckets: CredentialBucket[] = [
     "api_key",
     "bearer_token",
@@ -143,6 +143,11 @@ test("Vault 8 Buckets: verifies all 8 bucket schemas and validations", () => {
     "header_auth",
     "query_auth",
     "mcp_oauth2",
+    "digest_auth",
+    "custom_headers",
+    "aws_iam",
+    "certificate_auth",
+    "database_connection",
   ];
 
   for (const bucket of expectedBuckets) {
@@ -218,7 +223,7 @@ test("Vault Routes Integration: buckets, providers, credential creation & reveal
   });
   assert.equal(bucketsRes.statusCode, 200);
   const buckets = JSON.parse(bucketsRes.body);
-  assert.equal(buckets.length, 8);
+  assert.equal(buckets.length, 13);
 
   // 2. List providers
   const providersRes = await app.inject({
@@ -267,6 +272,140 @@ test("Vault Routes Integration: buckets, providers, credential creation & reveal
   const revealed = JSON.parse(revealRes.body);
   assert.equal(revealed.data.apiKey, "sk-live-1234567890abcdef");
   assert.equal(revealed.data.headerName, "Authorization");
+
+  // 5. SEC-05: Validação Anti-SSRF no connection tester
+  const { validateSafeDestinationHost } = await import("../src/services/vault/connection-tester.js");
+  await assert.rejects(
+    async () => validateSafeDestinationHost("127.0.0.1"),
+    /SSRF Security Error/
+  );
+  await assert.rejects(
+    async () => validateSafeDestinationHost("http://169.254.169.254/latest/meta-data"),
+    /SSRF Security Error/
+  );
+  await assert.rejects(
+    async () => validateSafeDestinationHost("localhost"),
+    /SSRF Security Error/
+  );
+  await assert.rejects(
+    async () => validateSafeDestinationHost("10.0.0.1"),
+    /SSRF Security Error/
+  );
+});
+
+test("FINDING-F2-04 & FINDING-F2-05: Single credential retrieval and in-place secret rotation via PATCH", async () => {
+  const token = await register("vault_f2_owner@example.com");
+  const otherToken = await register("vault_f2_other@example.com");
+
+  // 1. Create initial credential
+  const createRes = await app.inject({
+    method: "POST",
+    url: "/api/credentials",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    payload: JSON.stringify({
+      name: "Stripe Production Key",
+      type: "api_key",
+      provider: "stripe",
+      data: {
+        apiKey: "sk_live_stripe_initial_secret_12345",
+      },
+    }),
+  });
+  assert.equal(createRes.statusCode, 201);
+  const created = JSON.parse(createRes.body);
+
+  // 2. FINDING-F2-04: GET /api/credentials/:id (Owner gets masked credential)
+  const getRes = await app.inject({
+    method: "GET",
+    url: `/api/credentials/${created.id}`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(getRes.statusCode, 200);
+  const got = JSON.parse(getRes.body);
+  assert.equal(got.id, created.id);
+  assert.equal(got.name, "Stripe Production Key");
+  assert.equal(got.data.apiKey, "••••••••••••••••");
+  assert.equal(got.data.hasValue, true);
+
+  // 3. FINDING-F2-04: GET /api/credentials/:id Cross-org returns strict 404
+  const crossGetRes = await app.inject({
+    method: "GET",
+    url: `/api/credentials/${created.id}`,
+    headers: { authorization: `Bearer ${otherToken}` },
+  });
+  assert.equal(crossGetRes.statusCode, 404);
+  assert.equal(JSON.parse(crossGetRes.body).code, "NOT_FOUND");
+
+  // 4. FINDING-F2-05: PATCH /api/credentials/:id Renaming preserves existing secret
+  const patchNameRes = await app.inject({
+    method: "PATCH",
+    url: `/api/credentials/${created.id}`,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    payload: JSON.stringify({
+      name: "Stripe Rotated Label",
+    }),
+  });
+  assert.equal(patchNameRes.statusCode, 200);
+  const renamed = JSON.parse(patchNameRes.body);
+  assert.equal(renamed.name, "Stripe Rotated Label");
+  assert.equal(renamed.data.apiKey, "••••••••••••••••");
+
+  // Reveal to verify secret unchanged
+  const revealAfterRename = await app.inject({
+    method: "GET",
+    url: `/api/credentials/${created.id}/reveal`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(revealAfterRename.statusCode, 200);
+  assert.equal(JSON.parse(revealAfterRename.body).data.apiKey, "sk_live_stripe_initial_secret_12345");
+
+  // 5. FINDING-F2-05: PATCH /api/credentials/:id In-place secret rotation
+  const patchSecretRes = await app.inject({
+    method: "PATCH",
+    url: `/api/credentials/${created.id}`,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    payload: JSON.stringify({
+      data: {
+        apiKey: "sk_live_stripe_NEW_ROTATED_SECRET_67890",
+      },
+    }),
+  });
+  assert.equal(patchSecretRes.statusCode, 200);
+  const rotated = JSON.parse(patchSecretRes.body);
+  assert.equal(rotated.data.apiKey, "••••••••••••••••");
+
+  // Reveal to verify secret was rotated with new envelope
+  const revealAfterRotate = await app.inject({
+    method: "GET",
+    url: `/api/credentials/${created.id}/reveal`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(revealAfterRotate.statusCode, 200);
+  assert.equal(JSON.parse(revealAfterRotate.body).data.apiKey, "sk_live_stripe_NEW_ROTATED_SECRET_67890");
+
+  // 6. FINDING-F2-05: PATCH /api/credentials/:id Cross-org returns strict 404
+  const crossPatchRes = await app.inject({
+    method: "PATCH",
+    url: `/api/credentials/${created.id}`,
+    headers: {
+      authorization: `Bearer ${otherToken}`,
+      "content-type": "application/json",
+    },
+    payload: JSON.stringify({
+      name: "Hacked Name",
+    }),
+  });
+  assert.equal(crossPatchRes.statusCode, 404);
+  assert.equal(JSON.parse(crossPatchRes.body).code, "NOT_FOUND");
 });
 
 test.after(async () => {

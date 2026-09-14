@@ -4,13 +4,68 @@ import type { CredentialBucket, EncryptedFieldEnvelope } from "./types.js";
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96-bit IV recommended for GCM
 const AUTH_TAG_LENGTH = 16; // 128-bit authentication tag
-const DEFAULT_KEY_HEX = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+export const DEFAULT_KEY_HEX = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 const KEY_RING: Map<number, Buffer> = new Map();
 let CURRENT_KEY_VERSION = 1;
 
+export function assertKmsKeySecurity(keyHex?: string): void {
+  const isProduction = process.env.NODE_ENV === "production";
+  if (!isProduction) {
+    return;
+  }
+
+  const key = keyHex ?? process.env.CREDENTIAL_ENCRYPTION_KEY;
+  if (!key || typeof key !== "string" || key.trim() === "") {
+    throw new Error(
+      "CREDENTIAL_ENCRYPTION_KEY is required in production environment. Refusing to start with insecure or missing key."
+    );
+  }
+
+  const normalized = key.trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new Error(
+      "CREDENTIAL_ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hexadecimal characters in production."
+    );
+  }
+
+  if (normalized.toLowerCase() === DEFAULT_KEY_HEX.toLowerCase()) {
+    throw new Error(
+      "CREDENTIAL_ENCRYPTION_KEY cannot use the default insecure fallback key in production."
+    );
+  }
+
+  const uniqueChars = new Set(normalized.toLowerCase()).size;
+  if (uniqueChars < 8) {
+    throw new Error(
+      "CREDENTIAL_ENCRYPTION_KEY has insufficient entropy for production use (too few unique characters)."
+    );
+  }
+
+  for (const blockSize of [2, 4, 8, 16]) {
+    const block = normalized.slice(0, blockSize);
+    if (block.repeat(64 / blockSize).toLowerCase() === normalized.toLowerCase()) {
+      throw new Error(
+        "CREDENTIAL_ENCRYPTION_KEY has insufficient entropy for production use (repeating pattern detected)."
+      );
+    }
+  }
+}
+
+export function resetKeyRing(): void {
+  KEY_RING.clear();
+  CURRENT_KEY_VERSION = 1;
+}
+
 function initKeyRing(): void {
   if (KEY_RING.size === 0) {
+    if (process.env.NODE_ENV === "production") {
+      assertKmsKeySecurity();
+      const keyHex = process.env.CREDENTIAL_ENCRYPTION_KEY!;
+      KEY_RING.set(1, Buffer.from(keyHex, "hex"));
+      return;
+    }
+
     const keyHex = process.env.CREDENTIAL_ENCRYPTION_KEY || DEFAULT_KEY_HEX;
     if (/^[0-9a-fA-F]{64}$/.test(keyHex)) {
       KEY_RING.set(1, Buffer.from(keyHex, "hex"));
@@ -51,6 +106,14 @@ export function getEncryptionKey(version?: number): Buffer {
   // Fallback to version 1 or env key
   const fallback = KEY_RING.get(1);
   if (fallback) return fallback;
+
+  if (process.env.NODE_ENV === "production") {
+    assertKmsKeySecurity();
+    const keyHex = process.env.CREDENTIAL_ENCRYPTION_KEY!;
+    const buf = Buffer.from(keyHex, "hex");
+    KEY_RING.set(1, buf);
+    return buf;
+  }
 
   const keyHex = process.env.CREDENTIAL_ENCRYPTION_KEY || DEFAULT_KEY_HEX;
   if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {

@@ -1,0 +1,440 @@
+{
+  "metadata": {
+    "timestamp": "2026-09-07T01:50:12.641Z",
+    "nodeVersion": "v22.16.0",
+    "hardware": {
+      "cpu": "Intel(R) Core(TM) i5-3570 CPU @ 3.40GHz (4 cores)",
+      "ramTotalGB": 16,
+      "ramFreeGB": 2.77,
+      "os": "Windows_NT 10.0.26100 (x64)",
+      "limitations": "Bare-metal local dev execution on Intel Core i5-3570 without dedicated GPU. Backend with PostgreSQL connected and Redis offline (fallback in-memory). Frontend served by Next.js dev server on :3030."
+    }
+  },
+  "surface8": {
+    "routes": [
+      {
+        "name": "Dashboard",
+        "path": "/dashboard",
+        "status": 200,
+        "loadTimeMs": 2124.66,
+        "a11y": {
+          "totalInputs": 2,
+          "unlabeledInputsCount": 1,
+          "totalButtons": 8,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 25,
+          "hasEmptyStateIndication": true,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Workflows",
+        "path": "/workflows",
+        "status": 200,
+        "loadTimeMs": 2376.11,
+        "a11y": {
+          "totalInputs": 2,
+          "unlabeledInputsCount": 1,
+          "totalButtons": 10,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 26,
+          "hasEmptyStateIndication": true,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Templates",
+        "path": "/templates",
+        "status": "TIMEOUT_OR_ERROR",
+        "error": "page.goto: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3030/templates\", waiting until \"domcontentloaded\"\u001b[22m\n"
+      },
+      {
+        "name": "Credentials",
+        "path": "/credentials",
+        "status": 200,
+        "loadTimeMs": 8946.44,
+        "a11y": {
+          "totalInputs": 0,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 8,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 19,
+          "hasEmptyStateIndication": true,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Executions",
+        "path": "/executions",
+        "status": 200,
+        "loadTimeMs": 1494.49,
+        "a11y": {
+          "totalInputs": 3,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 9,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 26,
+          "hasEmptyStateIndication": true,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings",
+        "path": "/settings",
+        "status": 200,
+        "loadTimeMs": 6170.55,
+        "a11y": {
+          "totalInputs": 4,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 14,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 30,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - Environments",
+        "path": "/settings/environments",
+        "status": 200,
+        "loadTimeMs": 6396.87,
+        "a11y": {
+          "totalInputs": 0,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 29,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 40,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - SSO",
+        "path": "/settings/sso",
+        "status": 200,
+        "loadTimeMs": 5368.16,
+        "a11y": {
+          "totalInputs": 8,
+          "unlabeledInputsCount": 1,
+          "totalButtons": 13,
+          "unlabeledButtonsCount": 2,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 33,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - LDAP",
+        "path": "/settings/ldap",
+        "status": 200,
+        "loadTimeMs": 5977.55,
+        "a11y": {
+          "totalInputs": 20,
+          "unlabeledInputsCount": 7,
+          "totalButtons": 13,
+          "unlabeledButtonsCount": 1,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 45,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - External Secrets",
+        "path": "/settings/external-secrets",
+        "status": 200,
+        "loadTimeMs": 4410.81,
+        "a11y": {
+          "totalInputs": 6,
+          "unlabeledInputsCount": 1,
+          "totalButtons": 18,
+          "unlabeledButtonsCount": 1,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 36,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - Security",
+        "path": "/settings/security",
+        "status": 200,
+        "loadTimeMs": 6967.44,
+        "a11y": {
+          "totalInputs": 1,
+          "unlabeledInputsCount": 1,
+          "totalButtons": 6,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 18,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - Roles",
+        "path": "/settings/roles",
+        "status": 200,
+        "loadTimeMs": 6317.48,
+        "a11y": {
+          "totalInputs": 0,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 8,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 22,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - Users",
+        "path": "/settings/users",
+        "status": 200,
+        "loadTimeMs": 4341.26,
+        "a11y": {
+          "totalInputs": 1,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 7,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 20,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - AI Usage",
+        "path": "/settings/ai-usage",
+        "status": 200,
+        "loadTimeMs": 4400.9,
+        "a11y": {
+          "totalInputs": 2,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 6,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 20,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - OpenTelemetry",
+        "path": "/settings/opentelemetry",
+        "status": 200,
+        "loadTimeMs": 4365.64,
+        "a11y": {
+          "totalInputs": 0,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 6,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 19,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - Community Nodes",
+        "path": "/settings/community-nodes",
+        "status": 200,
+        "loadTimeMs": 4301.3,
+        "a11y": {
+          "totalInputs": 0,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 6,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 19,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      },
+      {
+        "name": "Settings - Log Streaming",
+        "path": "/settings/log-streaming",
+        "status": 200,
+        "loadTimeMs": 3682.08,
+        "a11y": {
+          "totalInputs": 0,
+          "unlabeledInputsCount": 0,
+          "totalButtons": 6,
+          "unlabeledButtonsCount": 0,
+          "totalImages": 0,
+          "imagesWithoutAltCount": 0,
+          "focusableCount": 20,
+          "hasEmptyStateIndication": false,
+          "hasHorizontalOverflow": false
+        }
+      }
+    ],
+    "viewportsTested": [
+      "1280x800",
+      "768x1024"
+    ],
+    "consoleErrors": [],
+    "pageErrors": [],
+    "httpErrors": [],
+    "emptyStatesFound": [
+      {
+        "route": "/dashboard",
+        "name": "Dashboard"
+      },
+      {
+        "route": "/workflows",
+        "name": "Workflows"
+      },
+      {
+        "route": "/credentials",
+        "name": "Credentials"
+      },
+      {
+        "route": "/executions",
+        "name": "Executions"
+      }
+    ],
+    "a11ySummary": {
+      "totalInputsAudited": 49,
+      "unlabeledInputsTotal": 12,
+      "totalButtonsAudited": 167,
+      "unlabeledButtonsTotal": 4,
+      "imagesWithoutAltTotal": 0
+    },
+    "responsivenessSummary": {
+      "routesWithHorizontalOverflow": []
+    },
+    "verdict": "PASSED"
+  },
+  "surface10": {
+    "baselineApiLatencies": {
+      "/health": {
+        "samplesMs": [
+          12.02,
+          18.06,
+          31.91
+        ],
+        "avgMs": 20.66,
+        "minMs": 12.02,
+        "maxMs": 31.91,
+        "status": 503
+      },
+      "/api/workflows": {
+        "samplesMs": [
+          22.41,
+          5.72,
+          6.77
+        ],
+        "avgMs": 11.63,
+        "minMs": 5.72,
+        "maxMs": 22.41,
+        "status": 200
+      },
+      "/api/templates": {
+        "samplesMs": [
+          4.28,
+          3.21,
+          2.36
+        ],
+        "avgMs": 3.28,
+        "minMs": 2.36,
+        "maxMs": 4.28,
+        "status": 200
+      },
+      "/api/credentials": {
+        "samplesMs": [
+          11.43,
+          4.89,
+          6.5
+        ],
+        "avgMs": 7.61,
+        "minMs": 4.89,
+        "maxMs": 11.43,
+        "status": 200
+      },
+      "/api/executions": {
+        "samplesMs": [
+          17.28,
+          8.9,
+          8.99
+        ],
+        "avgMs": 11.72,
+        "minMs": 8.9,
+        "maxMs": 17.28,
+        "status": 200
+      },
+      "/api/orgs": {
+        "samplesMs": [
+          14.01,
+          6.03,
+          9.56
+        ],
+        "avgMs": 9.87,
+        "minMs": 6.03,
+        "maxMs": 14.01,
+        "status": 200
+      }
+    },
+    "workflow30Nodes": {
+      "id": "cmtql2o0l000hwdawu1br3yxr",
+      "nodeCount": 30,
+      "edgeCount": 29,
+      "saveSamplesMs": [
+        809.4,
+        662.76,
+        88.17
+      ],
+      "saveAvgMs": 520.11,
+      "saveMinMs": 88.17,
+      "saveMaxMs": 809.4,
+      "loadSamplesMs": [
+        12.85,
+        9.4,
+        11.99
+      ],
+      "loadAvgMs": 11.41,
+      "loadMinMs": 9.4,
+      "loadMaxMs": 12.85,
+      "payloadBytes": 13293,
+      "uiCanvasMountTimeMs": 2526.1,
+      "uiRenderedNodesCount": 30,
+      "uiErrors": [],
+      "uiRenderedEdgesCount": 0
+    },
+    "verdict": "PASSED"
+  },
+  "findings": [
+    {
+      "id": "FINDING-F2-08",
+      "surface": "8. Settings e UI global",
+      "severity": "MINOR",
+      "confidence": "HIGH",
+      "evidence": "Total de 4 botões sem aria-label/texto acessível e 12 inputs sem label associado mapeados em 17 rotas.",
+      "repro": "Inspeção DOM em /settings, /workflows e subrotas de settings.",
+      "impact": "Dificuldade de navegação para usuários dependentes de leitores de tela (a11y WCAG 2.1 AA).",
+      "suggestedFix": "Adicionar atributos aria-label explicativos a botões de ícone (ex: ChevronDown, MoreVertical, Search) e vincular labels a inputs."
+    }
+  ]
+}

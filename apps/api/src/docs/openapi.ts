@@ -1,4 +1,7 @@
 import type { FastifyInstance } from "fastify";
+import { createReadStream } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z, type ZodSchema } from "zod";
 import {
   extendZodWithOpenApi,
@@ -1468,19 +1471,32 @@ export const openApiDocument: OpenApiDocument = generator.generateDocument({
 // Fastify plugin that serves the spec + UI
 // ═══════════════════════════════════════════
 
+// Local, CDN-free Swagger UI assets (apps/api/public/swagger-ui).
+// Resolved from this module so it works in dev (tsx) and dist (tsc) alike.
+const swaggerUiAssetsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../public/swagger-ui");
+const swaggerUiAssets: Record<string, { file: string; contentType: string }> = {
+  "swagger-ui.css": { file: "swagger-ui.css", contentType: "text/css; charset=utf-8" },
+  "swagger-ui-bundle.js": { file: "swagger-ui-bundle.js", contentType: "application/javascript; charset=utf-8" },
+};
+
 const swaggerUiHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AgentFlow API — Swagger UI</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" />
+  <link rel="stylesheet" href="/docs/assets/swagger-ui.css" />
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
+  <script src="/docs/assets/swagger-ui-bundle.js"></script>
   <script>
     window.onload = () => {
+      const host = document.getElementById("swagger-ui");
+      if (typeof SwaggerUIBundle === "undefined") {
+        host.innerHTML = '<div style="font-family:system-ui;padding:24px">Swagger UI assets failed to load. Open <a href="/api/docs">/api/docs</a> for the raw OpenAPI JSON.</div>';
+        return;
+      }
       window.ui = SwaggerUIBundle({ url: "/api/docs", dom_id: "#swagger-ui", deepLinking: true });
     };
   </script>
@@ -1491,6 +1507,17 @@ export async function docsRoutes(app: FastifyInstance) {
   // JSON OpenAPI Specification
   app.get("/api/docs", async () => openApiDocument);
   app.get("/docs/json", async () => openApiDocument);
+
+  // Self-hosted Swagger UI assets (no external CDN needed)
+  app.get<{ Params: { asset: string } }>("/docs/assets/:asset", async (request, reply) => {
+    const asset = swaggerUiAssets[request.params.asset];
+    if (!asset) return reply.code(404).send({ error: "Asset not found", code: "NOT_FOUND" });
+    reply
+      .type(asset.contentType)
+      .header("Cache-Control", "public, max-age=86400")
+      .header("X-Content-Type-Options", "nosniff");
+    return reply.send(createReadStream(join(swaggerUiAssetsDir, asset.file)));
+  });
 
   // Interactive Swagger UI
   app.get("/docs", async (_request, reply) => reply.type("text/html; charset=utf-8").send(swaggerUiHtml));

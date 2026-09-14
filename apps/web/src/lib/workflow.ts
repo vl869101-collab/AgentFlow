@@ -11,6 +11,7 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   status?: ExecutionStatus;
   config: Record<string, string | number | boolean>;
   diffMarker?: VisualNodeDiffMarker;
+  duration?: number;
 }
 
 export type WorkflowCanvasNode = Node<WorkflowNodeData, CanvasNodeKind>;
@@ -42,6 +43,7 @@ const nodeStyles: Partial<Record<NodeTypeKey, NodeStyleTokens>> = {
   delay: { iconBg: "bg-slate-500/10", iconColor: "text-slate-400", borderColor: "border-l-slate-400", badgeColor: "bg-slate-500/10" },
   ai_agent: { iconBg: "bg-purple-500/10", iconColor: "text-purple-400", borderColor: "border-l-purple-400", badgeColor: "bg-purple-500/10" },
   approval: { iconBg: "bg-red-500/10", iconColor: "text-red-400", borderColor: "border-l-red-400", badgeColor: "bg-red-500/10" },
+  swarm: { iconBg: "bg-amber-500/10", iconColor: "text-amber-400", borderColor: "border-l-amber-400", badgeColor: "bg-amber-500/10" },
   merge: { iconBg: "bg-cyan-500/10", iconColor: "text-cyan-400", borderColor: "border-l-cyan-400", badgeColor: "bg-cyan-500/10" },
   filter: { iconBg: "bg-amber-500/10", iconColor: "text-amber-400", borderColor: "border-l-amber-400", badgeColor: "bg-amber-500/10" },
   set_fields: { iconBg: "bg-pink-500/10", iconColor: "text-pink-400", borderColor: "border-l-pink-400", badgeColor: "bg-pink-500/10" },
@@ -90,6 +92,7 @@ function defaultDescription(type: NodeTypeKey) {
     delay: "Pause before continuing",
     ai_agent: "Reason over context with an AI model",
     approval: "Wait for a human decision",
+    swarm: "Orchestrate a swarm of agents over a shared job",
     merge: "Combine data from multiple parallel branches",
     filter: "Pass or block items based on a condition",
     set_fields: "Add or override fields in the data",
@@ -117,6 +120,7 @@ function defaultConfig(type: NodeTypeKey): Record<string, string | number | bool
     delay: { duration: 15, unit: "minutes" },
     ai_agent: { model: "nvidia/llama-3.1-70b-instruct", prompt: "Classify the order risk" },
     approval: { reviewers: "ops@northstar.dev", sla: 60 },
+    swarm: { job: "Research the target and return a structured brief", maxIterations: 3 },
     merge: { strategy: "combine" },
     filter: { expression: "true" },
     set_fields: { fieldName: "value" },
@@ -147,4 +151,90 @@ export const initialWorkflowEdges: Edge[] = [
 
 export function createCanvasNode(type: NodeTypeKey, position: XYPosition, id = `node-${Date.now()}`): WorkflowCanvasNode {
   return { id, type: nodeKindFor(type), position, data: createNodeData(type) };
+}
+
+export interface CycleValidationResult {
+  hasCycle: boolean;
+  cyclePath?: string[];
+  reason?: string;
+}
+
+/**
+ * Checks if adding a directed edge from `source` to `target` would create a cycle
+ * in the graph defined by `edges`.
+ * In a DAG, adding u -> v creates a cycle iff there is already a directed path from v to u.
+ */
+export function detectCycle(
+  source: string,
+  target: string,
+  edges: Array<{ source: string; target: string }>
+): CycleValidationResult {
+  if (!source || !target) {
+    return { hasCycle: false };
+  }
+
+  if (source === target) {
+    return {
+      hasCycle: true,
+      cyclePath: [source, target],
+      reason: `Auto-referência inválida: o nó "${source}" não pode ser conectado a si mesmo.`,
+    };
+  }
+
+  // Build adjacency list for existing edges
+  const adj = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (!edge.source || !edge.target) continue;
+    const neighbors = adj.get(edge.source);
+    if (neighbors) {
+      neighbors.push(edge.target);
+    } else {
+      adj.set(edge.source, [edge.target]);
+    }
+  }
+
+  // BFS starting from target searching for source
+  const queue: string[] = [target];
+  const visited = new Set<string>([target]);
+  const parent = new Map<string, string>();
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === source) {
+      // Reconstruct cycle path from target to source
+      const path: string[] = [source];
+      let curr = source;
+      while (curr !== target && parent.has(curr)) {
+        curr = parent.get(curr)!;
+        path.unshift(curr);
+      }
+      return {
+        hasCycle: true,
+        cyclePath: path,
+        reason: `Ciclo detectado: conectar "${source}" -> "${target}" criaria uma dependência circular pelo caminho: ${path.join(" -> ")} -> "${target}".`,
+      };
+    }
+
+    const neighbors = adj.get(current) || [];
+    for (const neighbor of neighbors) {
+      if (!visited.has(neighbor)) {
+        visited.add(neighbor);
+        parent.set(neighbor, current);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  return { hasCycle: false };
+}
+
+/**
+ * Returns true if adding an edge from source to target would create a cycle.
+ */
+export function wouldCreateCycle(
+  source: string,
+  target: string,
+  edges: Array<{ source: string; target: string }>
+): boolean {
+  return detectCycle(source, target, edges).hasCycle;
 }

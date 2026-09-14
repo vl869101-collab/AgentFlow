@@ -81,6 +81,7 @@ export function TemplatePreviewModal({
     <Modal
       open={open}
       onClose={onClose}
+      ariaLabel={`Template preview: ${template.name}`}
       className="max-w-5xl overflow-hidden !p-0 border-white/10 bg-[#09090b] text-zinc-100 shadow-2xl shadow-black/60"
     >
       {/* Modal Header */}

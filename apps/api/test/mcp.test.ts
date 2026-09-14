@@ -284,10 +284,11 @@ test("MCP token generation and status endpoint", async () => {
   const tokBody = JSON.parse(tokRes.body);
   assert.ok(tokBody.token.startsWith("af_"));
 
-  // Status check
+  // Status check (requires auth)
   const statusRes = await app.inject({
     method: "GET",
     url: "/mcp/status",
+    headers: { authorization: "Bearer af_token_123" },
   });
   assert.equal(statusRes.statusCode, 200);
   const statusBody = JSON.parse(statusRes.body);

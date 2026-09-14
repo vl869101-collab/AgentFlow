@@ -3,7 +3,19 @@ import os from "node:os";
 import { prisma } from "./lib/prisma.js";
 import { getEnv } from "./lib/env.js";
 import { runExecution } from "./services/executor.js";
-import { sendToDLQ, DEFAULT_JOB_OPTIONS } from "./services/queue.js";
+import {
+  sendToDLQ,
+  DEFAULT_JOB_OPTIONS,
+  recordHeartbeat,
+  clearHeartbeat,
+  DEFAULT_HEARTBEAT_INTERVAL_MS,
+  DEFAULT_HEARTBEAT_TTL_SECONDS,
+} from "./services/queue.js";
+import {
+  reapOrphanExecutions,
+  startOrphanReaper,
+  stopOrphanReaper,
+} from "./services/orphan-recovery.js";
 import { telemetry } from "./lib/otel.js";
 import { cronScheduler } from "./services/cron-scheduler.js";
 import { scanAndRefreshExpiringCredentials } from "./services/vault/oauth-refresh.js";
@@ -53,10 +65,30 @@ export const worker = new Worker(
       "job.attempts_made": job.attemptsMade ?? 0,
     }, parentContext);
 
+    let heartbeatTimer: NodeJS.Timeout | undefined;
     try {
+      // Record initial heartbeat and start periodic renewal (WF-ENG Item 5)
+      await recordHeartbeat(executionId, DEFAULT_HEARTBEAT_TTL_SECONDS, {
+        jobId: job.id,
+        attemptsMade: job.attemptsMade ?? 0,
+      });
+
+      heartbeatTimer = setInterval(async () => {
+        try {
+          await recordHeartbeat(executionId, DEFAULT_HEARTBEAT_TTL_SECONDS, {
+            jobId: job.id,
+            attemptsMade: job.attemptsMade ?? 0,
+          });
+        } catch (hbErr) {
+          console.warn(`[Worker] Failed to renew heartbeat for ${executionId}:`, hbErr);
+        }
+      }, DEFAULT_HEARTBEAT_INTERVAL_MS);
+      heartbeatTimer.unref();
+
       // The executor loads the workflow graph, executes every reachable node,
       // records node-level input/output/status and finalizes the execution.
       const result = await runExecution(executionId, {
+        traceparent: telemetry.formatTraceParent(workerSpan),
         parentContext: {
           traceId: workerSpan.traceId,
           spanId: workerSpan.spanId,
@@ -74,6 +106,16 @@ export const worker = new Worker(
       workerSpan.setStatus("ERROR", error instanceof Error ? error.message : String(error));
       workerSpan.end();
       throw error;
+    } finally {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      }
+      try {
+        await clearHeartbeat(executionId);
+      } catch (hbClearErr) {
+        console.warn(`[Worker] Failed to clear heartbeat for ${executionId}:`, hbClearErr);
+      }
     }
   },
   { connection, concurrency },
@@ -150,8 +192,15 @@ worker.on("error", (error) => console.error("AgentFlow workflow worker error", e
 oauthRefreshWorker.on("ready", () => console.log("AgentFlow OAuth refresh worker ready"));
 oauthRefreshWorker.on("error", (error) => console.error("AgentFlow OAuth refresh worker error", error));
 
+// Start orphan recovery reaper and execute bootstrap scan on worker startup (WF-ENG Item 5)
+export const orphanReaper = startOrphanReaper();
+reapOrphanExecutions().catch((err) => {
+  console.warn("[Worker] Initial bootstrap orphan recovery scan error:", err);
+});
+
 async function shutdown(signal: string) {
   console.log(`Shutting down workflow worker (${signal})`);
+  orphanReaper.stop();
   cronScheduler.stop();
   await worker.close();
   await workflowQueue.close();

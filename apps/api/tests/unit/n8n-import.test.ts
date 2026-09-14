@@ -213,7 +213,7 @@ describe("n8n importer edge cases", () => {
     expect(result.nodes[0].id).toMatch(/^n8n-/);
   });
 
-  it("preserves n8n node IDs with n8n- prefix", () => {
+  it("preserves n8n node IDs with n8n- prefix when preserveNodeIds is enabled", () => {
     const raw = {
       name: "With IDs",
       nodes: [
@@ -221,8 +221,25 @@ describe("n8n importer edge cases", () => {
       ],
       connections: {},
     };
-    const result = importN8nWorkflow(raw as any);
+    const result = importN8nWorkflow(raw as any, { preserveNodeIds: true });
     expect(result.nodes[0].id).toBe("n8n-abc-123");
+    expect(result.nodes[0].config.originalN8nId).toBe("abc-123");
+  });
+
+  it("generates unique node IDs by default to prevent PK collisions across imports", () => {
+    const raw = {
+      name: "With IDs",
+      nodes: [
+        { id: "abc-123", name: "Node A", type: "n8n-nodes-base.webhook", typeVersion: 1, position: [0, 0], parameters: {} },
+      ],
+      connections: {},
+    };
+    const r1 = importN8nWorkflow(raw as any);
+    const r2 = importN8nWorkflow(raw as any);
+    expect(r1.nodes[0].id).toMatch(/^n8n-/);
+    expect(r2.nodes[0].id).toMatch(/^n8n-/);
+    expect(r1.nodes[0].id).not.toBe(r2.nodes[0].id);
+    expect(r1.nodes[0].config.originalN8nId).toBe("abc-123");
   });
 
   it("warns about connections referencing missing nodes", () => {

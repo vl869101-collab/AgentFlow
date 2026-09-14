@@ -16,10 +16,12 @@ const statusIndicatorConfig: Record<string, { label: string; dotClass: string; i
   IDLE: { label: "Inativo", dotClass: "bg-zinc-500" },
   QUEUED: { label: "Na Fila", dotClass: "bg-sky-400" },
   PENDING: { label: "Pronto", dotClass: "bg-zinc-500" },
-  RUNNING: { label: "Executando", dotClass: "bg-amber-400 animate-pulse shadow-[0_0_12px_2px_rgba(245,158,11,0.45)]" },
+  RUNNING: { label: "Executando", dotClass: "bg-blue-400 animate-pulse shadow-[0_0_12px_2px_rgba(59,130,246,0.5)]" },
   SUCCESS: { label: "Sucesso", dotClass: "bg-emerald-400", icon: CheckCircle },
   SUCCEEDED: { label: "Sucesso", dotClass: "bg-emerald-400", icon: CheckCircle },
+  COMPLETED: { label: "Concluído", dotClass: "bg-emerald-400", icon: CheckCircle },
   FAILED: { label: "Falhou", dotClass: "bg-rose-500", icon: AlertCircle },
+  ERROR: { label: "Erro", dotClass: "bg-rose-500", icon: AlertCircle },
   PAUSED: { label: "Pausado", dotClass: "bg-amber-400", icon: Pause },
   CANCELLED: { label: "Cancelado", dotClass: "bg-zinc-500" },
   TIMED_OUT: { label: "Tempo Excedido", dotClass: "bg-orange-400", icon: Clock },
@@ -35,8 +37,20 @@ export function BaseNode({
   const meta = getNodeMeta(data.type);
   const showBranchHandles = data.type === "condition";
   const diffMarker = data.diffMarker;
-  const statusKey = data.status ?? "PENDING";
+  const statusKey: string = data.status ?? "PENDING";
   const statusInfo = statusIndicatorConfig[statusKey] ?? { label: statusKey, dotClass: "bg-blue-500" };
+
+  const isRunning = statusKey === "RUNNING";
+  const isSuccess = statusKey === "SUCCESS" || statusKey === "SUCCEEDED" || statusKey === "COMPLETED";
+  const isError = statusKey === "FAILED" || statusKey === "ERROR";
+
+  const statusGlowClass = isRunning
+    ? "border-blue-500/80 ring-2 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.45)] animate-pulse"
+    : isSuccess
+    ? "border-emerald-500/80 ring-2 ring-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.35)]"
+    : isError
+    ? "border-rose-500/80 ring-2 ring-rose-500/80 shadow-[0_0_15px_rgba(244,63,94,0.35)]"
+    : "";
 
   return (
     <div
@@ -50,6 +64,7 @@ export function BaseNode({
           ? "ring-2 ring-violet-400/80 ring-offset-2 ring-offset-zinc-950 shadow-[0_0_25px_-5px_rgba(139,92,246,0.45)]"
           : "focus-visible:ring-2 focus-visible:ring-violet-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
         diffMarker?.styleClass,
+        statusGlowClass,
         "transition-all duration-200 hover:border-white/20 hover:shadow-lg hover:shadow-black/50 outline-none cursor-pointer"
       )}
     >
@@ -95,7 +110,16 @@ export function BaseNode({
             </span>
           </div>
         </div>
-        <div className="flex shrink-0 items-center pl-1" title={`Status: ${statusInfo.label}`}>
+        <div className="flex shrink-0 items-center gap-1.5 pl-1" title={`Status: ${statusInfo.label}`}>
+          {data.duration !== undefined ? (
+            <span
+              className="inline-flex items-center gap-1 rounded bg-zinc-800/90 border border-white/10 px-1.5 py-0.5 text-[10px] font-mono text-zinc-300 shadow-xs"
+              title={`Duração: ${data.duration}ms`}
+            >
+              <Clock className="h-2.5 w-2.5 text-zinc-400" aria-hidden="true" />
+              {data.duration < 1000 ? `${data.duration}ms` : `${(data.duration / 1000).toFixed(2)}s`}
+            </span>
+          ) : null}
           <span className={cn("h-2 w-2 rounded-full", statusInfo.dotClass)} />
         </div>
       </div>

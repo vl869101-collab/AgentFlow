@@ -5,6 +5,7 @@
 
 import {
   type BinaryData,
+  type BinaryPayloadMeta,
   type PairedItemRef,
   type PairedItem,
   type NodeItem,
@@ -15,10 +16,15 @@ import {
   type ItemExtractionOptions,
   type ItemUnwrapOptions,
   binaryDataSchema,
+  binaryPayloadMetaSchema,
+  BinaryPayloadMetaSchema,
   pairedItemRefSchema,
+  PairedItemRefSchema,
   pairedItemSchema,
   nodeItemSchema,
+  NodeItemSchema,
   nodeItemsArraySchema,
+  NodeItemsSchema,
   normalizePath,
   extractFieldByPath,
   setFieldByPath,
@@ -38,6 +44,7 @@ import {
 
 export {
   type BinaryData,
+  type BinaryPayloadMeta,
   type PairedItemRef,
   type PairedItem,
   type NodeItem,
@@ -48,10 +55,15 @@ export {
   type ItemExtractionOptions,
   type ItemUnwrapOptions,
   binaryDataSchema,
+  binaryPayloadMetaSchema,
+  BinaryPayloadMetaSchema,
   pairedItemRefSchema,
+  PairedItemRefSchema,
   pairedItemSchema,
   nodeItemSchema,
+  NodeItemSchema,
   nodeItemsArraySchema,
+  NodeItemsSchema,
   normalizePath,
   extractFieldByPath,
   setFieldByPath,
@@ -76,7 +88,9 @@ export interface NodeExecutionContext {
   orgId: string;
   nodeConfig: Record<string, unknown>;
   input: unknown;
+  inputBranches?: NodeItem[][];
   credentials?: Record<string, unknown>;
+  traceparent?: string;
 }
 
 export interface NodeExecutionResult {

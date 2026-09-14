@@ -275,8 +275,16 @@ export async function mcpRoutes(app: FastifyInstance) {
   });
 
   // ── Status endpoint for the /mcp web page ────────────────────
-  app.get("/status", async (_request, reply) => {
-    const workflowsExposed = await prisma.workflow.count({ where: { status: { not: "ARCHIVED" } } });
+  app.get("/status", mcpRateLimit, async (request, reply) => {
+    const auth = await validateMcpAuth(request);
+    if (!auth.authenticated) {
+      return reply.code(401).send({ error: auth.error || "Authentication required", code: "AUTH_FAILED" });
+    }
+
+    const where: Record<string, unknown> = { status: { not: "ARCHIVED" } };
+    if (auth.orgId) where.orgId = auth.orgId;
+    const workflowsExposed = await prisma.workflow.count({ where });
+
     return reply.send({
       enabled: isMcpEnabled(),
       connectedClients: connectedClients(),
@@ -288,16 +296,30 @@ export async function mcpRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post("/status", async (request, reply) => {
+  app.post("/status", mcpRateLimit, async (request, reply) => {
+    const auth = await validateMcpAuth(request);
+    if (!auth.authenticated) {
+      return reply.code(401).send({ error: auth.error || "Authentication required", code: "AUTH_FAILED" });
+    }
+
+    // Require ADMIN / OWNER authorization
+    const isAuthorizedAdmin = auth.scopes?.includes("*") || auth.scopes?.includes("admin") || auth.scopes?.includes("admin:mcp");
+    if (!isAuthorizedAdmin) {
+      return reply.code(403).send({ error: "Forbidden: Admin or Owner privileges required to update MCP status", code: "FORBIDDEN" });
+    }
+
     const body = request.body as { enabled?: unknown };
     if (typeof body?.enabled !== "boolean") {
       return reply.code(400).send({ error: "enabled (boolean) is required", code: "INVALID_INPUT" });
     }
     setMcpEnabled(body.enabled);
-    const workflowsExposed = await prisma.workflow.count({ where: { status: { not: "ARCHIVED" } } });
 
-    const orgId = orgIdFromRequest(request);
-    const userId = userIdFromRequest(request);
+    const where: Record<string, unknown> = { status: { not: "ARCHIVED" } };
+    if (auth.orgId) where.orgId = auth.orgId;
+    const workflowsExposed = await prisma.workflow.count({ where });
+
+    const orgId = auth.orgId || orgIdFromRequest(request);
+    const userId = auth.userId || userIdFromRequest(request);
     if (orgId) {
       void recordAuditEvent({
         orgId,

@@ -17,7 +17,12 @@ export type CredentialBucket =
   | "oauth2_custom"
   | "header_auth"
   | "query_auth"
-  | "mcp_oauth2";
+  | "mcp_oauth2"
+  | "digest_auth"
+  | "custom_headers"
+  | "aws_iam"
+  | "certificate_auth"
+  | "database_connection";
 
 export type FieldType = "text" | "password" | "select" | "textarea" | "number" | "boolean" | "hidden";
 

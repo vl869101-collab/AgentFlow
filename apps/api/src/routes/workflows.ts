@@ -16,14 +16,37 @@ import {
   workflowVersionParamsSchema,
 } from "@agentflow/shared";
 import { limitsForPlan } from "../lib/plans.js";
+import { telemetry } from "../lib/otel.js";
 import { computeWorkflowDiff, type WorkflowSnapshot } from "../services/workflow-diff.js";
 import { cronScheduler } from "../services/cron-scheduler.js";
 import { recordAuditEvent } from "../services/audit-ledger.js";
+import {
+  validateSubworkflowRecursion,
+  CyclicSubworkflowError,
+} from "../services/workflow-validator.js";
 
 type CanvasValue = Record<string, any>;
 
 function asObject(value: unknown): CanvasValue {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as CanvasValue) : {};
+}
+
+export function toScopedId(workflowId: string, id: string): string {
+  if (!id) return id;
+  const str = String(id);
+  if (workflowId && str.startsWith(`${workflowId}:`)) {
+    return str;
+  }
+  return workflowId ? `${workflowId}:${str}` : str;
+}
+
+export function fromScopedId(workflowId: string | undefined, id: string): string {
+  if (!id) return id;
+  const str = String(id);
+  if (workflowId && str.startsWith(`${workflowId}:`)) {
+    return str.slice(workflowId.length + 1);
+  }
+  return str;
 }
 
 function canvasKind(type: string): string {
@@ -35,12 +58,14 @@ function canvasKind(type: string): string {
 
 function serializeWorkflow(workflow: any) {
   if (!workflow) return workflow;
+  const workflowId = workflow.id;
   const nodes = Array.isArray(workflow.nodes)
     ? workflow.nodes.map((node: any) => {
         const data = asObject(node.data);
         const actualType = String(data.type ?? node.type);
+        const rawId = String(node.id ?? "");
         return {
-          id: node.id,
+          id: fromScopedId(workflowId, rawId),
           type: canvasKind(actualType),
           position: node.position ?? { x: 0, y: 0 },
           width: node.width ?? undefined,
@@ -55,16 +80,21 @@ function serializeWorkflow(workflow: any) {
       })
     : undefined;
   const edges = Array.isArray(workflow.edges)
-    ? workflow.edges.map((edge: any) => ({
-        id: edge.id,
-        source: edge.source ?? edge.sourceNodeId,
-        target: edge.target ?? edge.targetNodeId,
-        sourceHandle: edge.sourceHandle ?? undefined,
-        targetHandle: edge.targetHandle ?? undefined,
-        label: edge.label ?? undefined,
-        condition: edge.condition ?? undefined,
-        animated: true,
-      }))
+    ? workflow.edges.map((edge: any) => {
+        const rawId = String(edge.id ?? "");
+        const rawSource = String(edge.source ?? edge.sourceNodeId ?? "");
+        const rawTarget = String(edge.target ?? edge.targetNodeId ?? "");
+        return {
+          id: fromScopedId(workflowId, rawId),
+          source: fromScopedId(workflowId, rawSource),
+          target: fromScopedId(workflowId, rawTarget),
+          sourceHandle: edge.sourceHandle ?? undefined,
+          targetHandle: edge.targetHandle ?? undefined,
+          label: edge.label ?? undefined,
+          condition: edge.condition ?? undefined,
+          animated: true,
+        };
+      })
     : undefined;
   return { ...workflow, ...(nodes ? { nodes } : {}), ...(edges ? { edges } : {}) };
 }
@@ -113,13 +143,38 @@ function canonicalCanvas(body: any) {
   return { nodes, edges };
 }
 
-async function saveCanvas(workflowId: string, body: any) {
+async function saveCanvas(workflowId: string, body: any, orgId?: string) {
   const canvas = canonicalCanvas(body);
+
+  let targetOrgId = orgId;
+  if (!targetOrgId) {
+    const wf = await prisma.workflow.findUnique({ where: { id: workflowId }, select: { orgId: true } });
+    targetOrgId = wf?.orgId;
+  }
+
+  if (targetOrgId) {
+    await validateSubworkflowRecursion(workflowId, canvas.nodes, targetOrgId, prisma);
+  }
+
   const version = await prisma.$transaction(async (tx: any) => {
     await tx.workflowEdge.deleteMany({ where: { workflowId } });
     await tx.workflowNode.deleteMany({ where: { workflowId } });
-    if (canvas.nodes.length) await tx.workflowNode.createMany({ data: canvas.nodes.map((node) => ({ ...node, workflowId })) });
-    if (canvas.edges.length) await tx.workflowEdge.createMany({ data: canvas.edges.map((edge) => ({ ...edge, workflowId })) });
+
+    const dbNodes = canvas.nodes.map((node) => ({
+      ...node,
+      id: toScopedId(workflowId, node.id),
+      workflowId,
+    }));
+    const dbEdges = canvas.edges.map((edge) => ({
+      ...edge,
+      id: toScopedId(workflowId, edge.id),
+      sourceNodeId: toScopedId(workflowId, edge.sourceNodeId),
+      targetNodeId: toScopedId(workflowId, edge.targetNodeId),
+      workflowId,
+    }));
+
+    if (dbNodes.length) await tx.workflowNode.createMany({ data: dbNodes });
+    if (dbEdges.length) await tx.workflowEdge.createMany({ data: dbEdges });
 
     const lastVersion = await tx.workflowVersion.findFirst({ where: { workflowId }, orderBy: { version: "desc" } });
     return tx.workflowVersion.create({
@@ -245,10 +300,35 @@ export async function workflowRoutes(app: FastifyInstance) {
         include: { nodes: true, edges: true },
       });
       const existingCanvas = {
-        nodes: (existing?.nodes ?? []).map((node: any) => ({ id: node.id, type: node.type, label: node.label, config: node.config, position: node.position })),
-        edges: (existing?.edges ?? []).map((edge: any) => ({ id: edge.id, sourceNodeId: edge.sourceNodeId, targetNodeId: edge.targetNodeId, sourceHandle: edge.sourceHandle, targetHandle: edge.targetHandle, label: edge.label, condition: edge.condition })),
+        nodes: (existing?.nodes ?? []).map((node: any) => ({
+          id: fromScopedId(id, node.id),
+          type: node.type,
+          label: node.label,
+          config: node.config,
+          position: node.position,
+        })),
+        edges: (existing?.edges ?? []).map((edge: any) => ({
+          id: fromScopedId(id, edge.id),
+          sourceNodeId: fromScopedId(id, edge.sourceNodeId),
+          targetNodeId: fromScopedId(id, edge.targetNodeId),
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
+          label: edge.label,
+          condition: edge.condition,
+        })),
       };
-      savedVersion = await saveCanvas(id, { nodes: raw.nodes ?? existingCanvas.nodes, edges: raw.edges ?? existingCanvas.edges });
+      try {
+        savedVersion = await saveCanvas(id, { nodes: raw.nodes ?? existingCanvas.nodes, edges: raw.edges ?? existingCanvas.edges }, orgId);
+      } catch (err: any) {
+        if (err instanceof CyclicSubworkflowError || err?.code === "CYCLIC_SUBWORKFLOW_REFERENCE") {
+          return reply.code(400).send({
+            error: err.message || "Cyclic subworkflow reference detected",
+            code: "CYCLIC_SUBWORKFLOW_REFERENCE",
+            cyclePath: err.cyclePath,
+          });
+        }
+        throw err;
+      }
     }
     await recordAuditEvent({
       orgId,
@@ -303,18 +383,29 @@ export async function workflowRoutes(app: FastifyInstance) {
 
     const workflow = await prisma.workflow.findFirst({ where: { id, orgId } });
     if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
-    const canvas = await saveCanvas(id, request.body);
-    await recordAuditEvent({
-      orgId,
-      userId: userIdFromRequest(request),
-      action: "workflow.version.created",
-      resource: "workflow",
-      resourceId: id,
-      metadata: { version: canvas.version },
-      ip: request.ip,
-      userAgent: request.headers["user-agent"] as string | undefined,
-    });
-    return { ok: true, ...canvas };
+    try {
+      const canvas = await saveCanvas(id, request.body, orgId);
+      await recordAuditEvent({
+        orgId,
+        userId: userIdFromRequest(request),
+        action: "workflow.version.created",
+        resource: "workflow",
+        resourceId: id,
+        metadata: { version: canvas.version },
+        ip: request.ip,
+        userAgent: request.headers["user-agent"] as string | undefined,
+      });
+      return { ok: true, ...canvas };
+    } catch (err: any) {
+      if (err instanceof CyclicSubworkflowError || err?.code === "CYCLIC_SUBWORKFLOW_REFERENCE") {
+        return reply.code(400).send({
+          error: err.message || "Cyclic subworkflow reference detected",
+          code: "CYCLIC_SUBWORKFLOW_REFERENCE",
+          cyclePath: err.cyclePath,
+        });
+      }
+      throw err;
+    }
   });
 
   app.post("/:id/run", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } }, preHandler: checkQuota }, async (request, reply) => {
@@ -328,8 +419,209 @@ export async function workflowRoutes(app: FastifyInstance) {
 
     const execution = await createWorkflowExecution(id, undefined, { userId, trigger: "manual" });
     await prisma.usageRecord.create({ data: { type: "execution", quantity: 1, orgId: workflow.orgId, userId } });
-    if (!(await enqueueExecution(execution.id))) void runExecution(execution.id);
+
+    const incomingTraceHeader =
+      (request.headers["traceparent"] as string | undefined) ||
+      (request.headers["x-traceparent"] as string | undefined);
+    const traceInfo = telemetry.getOrCreateTraceParent(incomingTraceHeader);
+
+    if (!(await enqueueExecution(execution.id, { traceparent: traceInfo.traceparent }))) {
+      void runExecution(execution.id, {
+        traceparent: traceInfo.traceparent,
+        parentContext: traceInfo.context,
+      });
+    }
     return reply.status(202).send(execution);
+  });
+
+  // ── Duplicate Workflow (FINDING-F2-08) ────────────────────────
+  app.post("/:id/duplicate", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } }, preHandler: checkWorkflowQuota }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = userIdFromRequest(request);
+    const orgId = await activeOrgId(request);
+    if (!orgId || !userId) return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });
+
+    const source = await prisma.workflow.findFirst({
+      where: { id, orgId },
+      include: { nodes: true, edges: true },
+    });
+    if (!source) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const rawBody = asObject(request.body);
+    const customName = typeof rawBody.name === "string" && rawBody.name.trim() ? rawBody.name.trim() : `${source.name} (copy)`;
+
+    const nodeIdMap = new Map<string, string>();
+    const clonedNodesData = source.nodes.map((node: any) => {
+      const cleanOldId = fromScopedId(source.id, node.id);
+      const newCleanId = randomUUID();
+      nodeIdMap.set(node.id, newCleanId);
+      nodeIdMap.set(cleanOldId, newCleanId);
+
+      return {
+        cleanId: newCleanId,
+        type: node.type,
+        label: node.label,
+        config: asObject(node.config),
+        position: node.position ?? { x: 0, y: 0 },
+        width: node.width,
+        height: node.height,
+      };
+    });
+
+    const clonedEdgesData = source.edges.map((edge: any) => {
+      const cleanOldSource = fromScopedId(source.id, edge.sourceNodeId);
+      const cleanOldTarget = fromScopedId(source.id, edge.targetNodeId);
+      const newCleanSource = nodeIdMap.get(edge.sourceNodeId) ?? nodeIdMap.get(cleanOldSource) ?? cleanOldSource;
+      const newCleanTarget = nodeIdMap.get(edge.targetNodeId) ?? nodeIdMap.get(cleanOldTarget) ?? cleanOldTarget;
+      const newCleanEdgeId = randomUUID();
+
+      return {
+        cleanId: newCleanEdgeId,
+        sourceNodeId: newCleanSource,
+        targetNodeId: newCleanTarget,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+        label: edge.label,
+        condition: edge.condition,
+      };
+    });
+
+    const clonedWorkflow = await prisma.$transaction(async (tx: any) => {
+      const wf = await tx.workflow.create({
+        data: {
+          name: customName,
+          description: source.description,
+          status: "DRAFT",
+          ownerId: userId,
+          orgId,
+        },
+      });
+
+      if (clonedNodesData.length > 0) {
+        await tx.workflowNode.createMany({
+          data: clonedNodesData.map((node: any) => ({
+            id: toScopedId(wf.id, node.cleanId),
+            workflowId: wf.id,
+            type: node.type,
+            label: node.label,
+            config: node.config,
+            position: node.position,
+            width: node.width,
+            height: node.height,
+          })),
+        });
+      }
+
+      if (clonedEdgesData.length > 0) {
+        await tx.workflowEdge.createMany({
+          data: clonedEdgesData.map((edge: any) => ({
+            id: toScopedId(wf.id, edge.cleanId),
+            workflowId: wf.id,
+            sourceNodeId: toScopedId(wf.id, edge.sourceNodeId),
+            targetNodeId: toScopedId(wf.id, edge.targetNodeId),
+            sourceHandle: edge.sourceHandle,
+            targetHandle: edge.targetHandle,
+            label: edge.label,
+            condition: edge.condition,
+          })),
+        });
+      }
+
+      await tx.workflowVersion.create({
+        data: {
+          workflowId: wf.id,
+          version: 1,
+          snapshot: {
+            nodes: clonedNodesData.map((n: any) => ({
+              id: n.cleanId,
+              type: n.type,
+              label: n.label,
+              config: n.config,
+              position: n.position,
+              width: n.width,
+              height: n.height,
+            })),
+            edges: clonedEdgesData.map((e: any) => ({
+              id: e.cleanId,
+              sourceNodeId: e.sourceNodeId,
+              targetNodeId: e.targetNodeId,
+              sourceHandle: e.sourceHandle,
+              targetHandle: e.targetHandle,
+              label: e.label,
+              condition: e.condition,
+            })),
+          } as any,
+        },
+      });
+
+      return wf;
+    });
+
+    await recordAuditEvent({
+      orgId,
+      userId,
+      action: "workflow.duplicated",
+      resource: "workflow",
+      resourceId: clonedWorkflow.id,
+      metadata: {
+        sourceWorkflowId: source.id,
+        sourceWorkflowName: source.name,
+        name: clonedWorkflow.name,
+      },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] as string | undefined,
+    });
+
+    const fullCloned = await prisma.workflow.findFirst({
+      where: { id: clonedWorkflow.id, orgId },
+      include: { nodes: true, edges: true },
+    });
+
+    return reply.status(201).send(serializeWorkflow(fullCloned));
+  });
+
+  // ── Export Workflow (FINDING-F2-09) ───────────────────────────
+  app.get("/:id/export", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string };
+    const orgId = await activeOrgId(request);
+    if (!orgId) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const workflow = await prisma.workflow.findFirst({
+      where: { id, orgId },
+      include: { nodes: true, edges: true },
+    });
+    if (!workflow) return reply.code(404).send({ error: "Workflow not found", code: "NOT_FOUND" });
+
+    const serialized = serializeWorkflow(workflow);
+    const exportPayload = {
+      name: serialized.name,
+      description: serialized.description,
+      status: serialized.status,
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      nodes: (serialized.nodes ?? []).map((node: any) => ({
+        id: node.id,
+        type: node.type,
+        position: node.position,
+        width: node.width,
+        height: node.height,
+        data: node.data,
+      })),
+      edges: (serialized.edges ?? []).map((edge: any) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+        label: edge.label,
+        condition: edge.condition,
+        animated: edge.animated,
+      })),
+    };
+
+    reply.header("Content-Disposition", `attachment; filename="agentflow-workflow-${workflow.id}.json"`);
+    reply.header("Content-Type", "application/json; charset=utf-8");
+    return exportPayload;
   });
 
   app.post("/import", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } }, preHandler: checkWorkflowQuota }, async (request, reply) => {

@@ -19,7 +19,22 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
     return;
   } catch {
     const header = request.headers.authorization;
-    const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
+    let token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
+
+    // Check query token fallback for EventSource / SSE requests
+    if (!token && (request.query as any)?.token && typeof (request.query as any).token === "string") {
+      const candidateToken = (request.query as any).token.trim();
+      if (candidateToken) {
+        try {
+          const decoded = (request.server as any).jwt.verify(candidateToken);
+          (request as any).user = decoded;
+          return;
+        } catch {
+          token = candidateToken;
+        }
+      }
+    }
+
     if (token?.startsWith("af_")) {
       const keyHash = createHash("sha256").update(token).digest("hex");
       const apiKey = await prisma.apiKey.findUnique({ where: { key: keyHash } });

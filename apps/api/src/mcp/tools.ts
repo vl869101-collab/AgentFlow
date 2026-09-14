@@ -1999,7 +1999,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>, ctx: ToolContext)
 export function scopeMatches(userScopes: string[], requiredScopes: string[]): boolean {
   if (!requiredScopes || requiredScopes.length === 0) return true;
   if (!userScopes || userScopes.length === 0) return false;
-  if (userScopes.includes("*") || userScopes.includes("admin") || userScopes.includes("tools:call")) return true;
+  if (userScopes.includes("*") || userScopes.includes("admin")) return true;
 
   const normalizedUserScopes = new Set<string>();
   for (const raw of userScopes) {
@@ -2060,10 +2060,10 @@ export async function callTool(name: string, args: Record<string, unknown>, ctx:
     return errorResult(`Tool '${name}' is a mock implementation and is disabled (MOCK_MCP=false)`);
   }
 
-  // 2. Enforce Scopes if provided in context
-  if (ctx.scopes && ctx.scopes.length > 0) {
-    const requiredScopes = tool?.scopes ?? [];
-    if (requiredScopes.length > 0 && !scopeMatches(ctx.scopes, requiredScopes)) {
+  // 2. Strict Deny-by-Default Scope Enforcement
+  const requiredScopes = tool?.scopes ?? [];
+  if (requiredScopes.length > 0) {
+    if (!ctx.scopes || ctx.scopes.length === 0 || !scopeMatches(ctx.scopes, requiredScopes)) {
       return errorResult(`Insufficient scope for tool '${name}'. Required: ${requiredScopes.join(", ")} (code: -32003)`);
     }
   }

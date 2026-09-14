@@ -93,12 +93,16 @@ function TemplatePreviewCanvasInner({ nodes: rawNodes, edges: rawEdges, classNam
       targetHandle: e.targetHandle,
       label: e.label,
       animated: true,
-      style: { stroke: "#6366f1", strokeWidth: 2 },
+      style: { stroke: "#8b5cf6", strokeWidth: 2 },
     }));
   }, [rawEdges]);
 
   return (
-    <div className={className ?? "relative h-[420px] w-full overflow-hidden rounded-xl border border-white/10 bg-[#0c0d12]"}>
+    <div
+      className={className ?? "relative h-[420px] w-full overflow-hidden rounded-xl border border-white/10 bg-[#09090b]"}
+      role="img"
+      aria-label={`Pré-visualização do workflow com ${formattedNodes.length} nós e ${formattedEdges.length} conexões`}
+    >
       <ReactFlow
         nodes={formattedNodes}
         edges={formattedEdges}
@@ -112,7 +116,7 @@ function TemplatePreviewCanvasInner({ nodes: rawNodes, edges: rawEdges, classNam
         panOnDrag={true}
         defaultEdgeOptions={{
           animated: true,
-          style: { stroke: "#6366f1", strokeWidth: 2 },
+          style: { stroke: "#8b5cf6", strokeWidth: 2 },
         }}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1.5} color="#27272a" />
@@ -121,7 +125,7 @@ function TemplatePreviewCanvasInner({ nodes: rawNodes, edges: rawEdges, classNam
           className="!border-white/10 !bg-zinc-900/90 !fill-zinc-400 !text-zinc-400 !backdrop-blur-md"
         />
         <MiniMap
-          nodeColor="#6366f1"
+          nodeColor="#8b5cf6"
           maskColor="rgba(9, 9, 11, 0.7)"
           className="!hidden sm:!block !border-white/10 !bg-zinc-950/80 !rounded-lg"
         />

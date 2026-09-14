@@ -228,6 +228,7 @@ test("TASK 16: MCP status returns 125+ tools and rate-limit configured", async (
   const res = await app.inject({
     method: "GET",
     url: "/mcp/status",
+    headers: { authorization: "Bearer af_test_token" },
   });
   assert.equal(res.statusCode, 200);
   const body = JSON.parse(res.body);

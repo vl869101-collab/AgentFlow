@@ -23,6 +23,48 @@
   --color-brand-violet: #8b5cf6;
   --color-brand-fuchsia: #d946ef;
 
+  /* Semantic color utilities (for example: bg-background, border-border-default) */
+  --color-background: #09090b;
+  --color-foreground: #fafafa;
+  --color-accent-primary: #8b5cf6;
+  --color-accent-hover: #7c3aed;
+
+  --color-surface-base: #18181b;
+  --color-surface-muted: #202024;
+  --color-surface-elevated: #27272a;
+  --color-surface-overlay: rgb(9 9 11 / 85%);
+
+  --color-border-subtle: rgb(255 255 255 / 6%);
+  --color-border-default: rgb(255 255 255 / 10%);
+  --color-border-strong: rgb(255 255 255 / 20%);
+  --color-border-focus: #8b5cf6;
+
+  --color-text-primary: #fafafa;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+  --color-text-inverted: #09090b;
+
+  --color-success: #10b981;
+  --color-success-surface: rgb(16 185 129 / 10%);
+  --color-success-border: rgb(16 185 129 / 20%);
+  --color-success-foreground: #34d399;
+  --color-warning: #f59e0b;
+  --color-warning-surface: rgb(245 158 11 / 10%);
+  --color-warning-border: rgb(245 158 11 / 20%);
+  --color-warning-foreground: #fbbf24;
+  --color-error: #ef4444;
+  --color-error-surface: rgb(239 68 68 / 10%);
+  --color-error-border: rgb(239 68 68 / 20%);
+  --color-error-foreground: #f87171;
+  --color-info: #3b82f6;
+  --color-info-surface: rgb(59 130 246 / 10%);
+  --color-info-border: rgb(59 130 246 / 20%);
+  --color-info-foreground: #60a5fa;
+  --color-ai: #a855f7;
+  --color-ai-surface: rgb(168 85 247 / 10%);
+  --color-ai-border: rgb(168 85 247 / 20%);
+  --color-ai-foreground: #c084fc;
+
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "Fira Code", monospace;
 
@@ -67,22 +109,22 @@ select {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(9, 9, 11, 0.5);
+  background: color-mix(in srgb, var(--color-background) 50%, transparent);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 9999px;
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: color-mix(in srgb, var(--text-primary) 25%, transparent);
 }
 
 /* Selection */
 ::selection {
-  background: rgba(139, 92, 246, 0.35);
-  color: #fafafa;
+  background: var(--color-accent-glow);
+  color: var(--color-foreground);
 }
 
 /* Reduced Motion Override (WCAG AA & Design System Specification) */
@@ -98,29 +140,39 @@ select {
 }
 
 /* React Flow Visual Customizations */
+.af-workflow-canvas {
+  background: var(--color-background);
+}
+
+.af-workflow-hint {
+  border: 1px solid var(--border-default);
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+}
+
 .react-flow__attribution {
   display: none;
 }
 
 .react-flow__controls {
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-default);
   border-radius: 0.75rem;
-  background: rgba(24, 24, 27, 0.85);
+  background: var(--surface-overlay);
   backdrop-filter: blur(12px);
   box-shadow: var(--shadow-popover);
 }
 
 .react-flow__controls-button {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-default);
   background: transparent;
-  color: #a1a1aa;
+  color: var(--text-secondary);
   transition: background var(--duration-fast) var(--ease-spring), color var(--duration-fast) var(--ease-spring);
 }
 
 .react-flow__controls-button:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fafafa;
+  background: var(--border-subtle);
+  color: var(--text-primary);
 }
 
 .react-flow__controls-button:last-child {
@@ -133,9 +185,9 @@ select {
 
 .react-flow__minimap {
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-default);
   border-radius: 0.75rem;
-  background: rgba(24, 24, 27, 0.6);
+  background: color-mix(in srgb, var(--surface-base) 60%, transparent);
   backdrop-filter: blur(12px);
   box-shadow: var(--shadow-card);
 }
@@ -143,14 +195,14 @@ select {
 .react-flow__handle {
   width: 0.55rem;
   height: 0.55rem;
-  border: 2px solid #18181b;
-  background: #8b5cf6;
+  border: 2px solid var(--surface-base);
+  background: var(--color-accent);
   transition: transform var(--duration-fast) var(--ease-spring), box-shadow var(--duration-fast) var(--ease-spring);
 }
 
 .react-flow__handle:hover {
   transform: scale(1.25);
-  box-shadow: 0 0 10px 2px rgba(139, 92, 246, 0.6);
+  box-shadow: var(--glow-violet);
 }
 
 .react-flow__edge-path {

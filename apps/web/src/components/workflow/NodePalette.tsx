@@ -11,7 +11,7 @@ const paletteGroups = [
   { label: "Actions", types: ["http", "email", "discord", "telegram", "sheets", "respond_webhook"] },
   { label: "Integrations", types: ["gmailTrigger", "googleDrive", "evaluationTrigger", "emailReadImap", "gmail"] },
   { label: "Logic", types: ["condition", "transform", "delay", "merge", "filter", "set_fields"] },
-  { label: "Advanced", types: ["ai_agent", "approval"] },
+  { label: "Advanced", types: ["ai_agent", "approval", "swarm"] },
 ] as const;
 
 const iconMap: Record<string, string> = {
@@ -27,6 +27,7 @@ const iconMap: Record<string, string> = {
   delay: "◌",
   ai_agent: "✦",
   approval: "✓",
+  swarm: "⬢",
   merge: "⊕",
   filter: "▽",
   set_fields: "✎",
@@ -51,6 +52,7 @@ const colorMap: Record<string, string> = {
   delay: "bg-slate-500/10 text-slate-400",
   ai_agent: "bg-purple-500/10 text-purple-400",
   approval: "bg-red-500/10 text-red-400",
+  swarm: "bg-amber-500/10 text-amber-400",
   merge: "bg-cyan-500/10 text-cyan-400",
   filter: "bg-amber-500/10 text-amber-400",
   set_fields: "bg-pink-500/10 text-pink-400",

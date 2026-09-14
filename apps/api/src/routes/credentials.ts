@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { prisma } from "../lib/prisma.js";
 import { parsePagination } from "../lib/pagination.js";
 import { orgIdFromRequest, requireAuth, userIdFromRequest } from "../middleware/auth.js";
-import { createCredentialSchema } from "@agentflow/shared";
+import { createCredentialSchema, updateCredentialSchema } from "@agentflow/shared";
 import {
   BUCKET_DEFINITIONS,
   decryptVaultEnvelope,
@@ -13,6 +13,8 @@ import {
   listProviders,
   maskVaultData,
   mapCredentialToBucket,
+  resolveSingleCredential,
+  verifyCredentialConnection,
   type CredentialBucket,
 } from "../services/vault/index.js";
 import { decryptCredential } from "../lib/crypto.js";
@@ -125,6 +127,68 @@ export async function credentialRoutes(app: FastifyInstance) {
     return reply.status(201).send(maskedCredential(credential));
   });
 
+  app.get("/:id", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const orgId = await currentOrgId(request);
+    if (!orgId) return reply.code(404).send({ error: "Credential not found", code: "NOT_FOUND" });
+
+    const credential = await prisma.credential.findFirst({ where: { id, orgId } });
+    if (!credential) return reply.code(404).send({ error: "Credential not found", code: "NOT_FOUND" });
+
+    return reply.send(maskedCredential(credential));
+  });
+
+  app.patch("/:id", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const membership = await currentMembership(request);
+    if (!membership) return reply.code(404).send({ error: "Credential not found", code: "NOT_FOUND" });
+
+    const credential = await prisma.credential.findFirst({ where: { id, orgId: membership.orgId } });
+    if (!credential) return reply.code(404).send({ error: "Credential not found", code: "NOT_FOUND" });
+
+    if (!(["OWNER", "ADMIN"] as string[]).includes(String(membership.role))) {
+      return reply.code(403).send({ error: "Only organization owners and admins can update credentials", code: "FORBIDDEN" });
+    }
+
+    const body = updateCredentialSchema.parse(request.body);
+
+    const updateData: {
+      name?: string;
+      type?: string;
+      provider?: string;
+      data?: string;
+      keyVersion?: number;
+    } = {};
+
+    if (body.name !== undefined) {
+      updateData.name = body.name;
+    }
+    if (body.provider !== undefined) {
+      updateData.provider = body.provider;
+    }
+    if (body.type !== undefined) {
+      updateData.type = body.type;
+    }
+    if (body.data !== undefined) {
+      const targetProvider = body.provider || credential.provider;
+      const targetType = body.type || credential.type;
+      const { bucket, data: normalizedData } = mapCredentialToBucket(targetProvider || targetType, body.data);
+      const encryptedDataObj = encryptVaultEnvelope(normalizedData);
+      updateData.data = JSON.stringify(encryptedDataObj);
+      updateData.keyVersion = encryptedDataObj.keyVersion;
+      if (!updateData.type && bucket && !credential.type) {
+        updateData.type = bucket;
+      }
+    }
+
+    const updated = await prisma.credential.update({
+      where: { id: credential.id },
+      data: updateData,
+    });
+
+    return reply.send(maskedCredential(updated));
+  });
+
   app.get("/:id/reveal", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const membership = await currentMembership(request);
@@ -152,6 +216,62 @@ export async function credentialRoutes(app: FastifyInstance) {
     }
 
     return { id: credential.id, name: credential.name, type: credential.type, provider: credential.provider, data };
+  });
+
+  // Test unpersisted draft credential
+  app.post("/test", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const orgId = await currentOrgId(request);
+    if (!orgId) return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });
+
+    const body = (request.body || {}) as {
+      provider?: string;
+      type?: string;
+      data?: Record<string, any> | string;
+    };
+
+    let rawData: Record<string, any> = {};
+    if (typeof body.data === "string") {
+      try {
+        rawData = JSON.parse(body.data);
+      } catch {
+        rawData = { value: body.data };
+      }
+    } else if (typeof body.data === "object" && body.data !== null) {
+      rawData = body.data;
+    }
+
+    const result = await verifyCredentialConnection({
+      provider: body.provider,
+      type: body.type,
+      data: rawData,
+    });
+
+    return reply.status(result.success ? 200 : 400).send(result);
+  });
+
+  // Test already saved and encrypted credential by ID
+  app.post("/:id/test", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const orgId = await currentOrgId(request);
+    if (!orgId) return reply.code(403).send({ error: "Organization context is required", code: "ORG_REQUIRED" });
+
+    const resolved = await resolveSingleCredential(id, orgId);
+    if (!resolved) {
+      return reply.code(404).send({
+        success: false,
+        latencyMs: 0,
+        message: "Credential not found or cannot be resolved",
+        error: "NOT_FOUND",
+      });
+    }
+
+    const result = await verifyCredentialConnection({
+      provider: resolved.provider,
+      type: resolved.type,
+      data: resolved.data,
+    });
+
+    return reply.status(result.success ? 200 : 400).send(result);
   });
 
   app.delete("/:id", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request, reply) => {

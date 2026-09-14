@@ -74,3 +74,64 @@ test("executeGraph retries a node using maxTries and fixed backoff", async () =>
   const retryExecution = nodeExecutions.find((item: any) => item.nodeId === "retry");
   assert.equal(retryExecution?.retryCount, 2);
 });
+
+test("executeGraph routes switch node matching specific output handles", async () => {
+  const workflow = await createFixtureWorkflow({
+    nodes: [
+      { id: "trigger", type: "webhook" },
+      {
+        id: "switch",
+        type: "switch",
+        config: {
+          rules: [
+            { field: "category", operator: "equals", value: "billing", output: 0 },
+            { field: "category", operator: "equals", value: "tech", output: 1 },
+          ],
+        },
+      },
+      { id: "billing_handler", type: "set_fields", config: { lane: "finance" } },
+      { id: "tech_handler", type: "set_fields", config: { lane: "dev" } },
+    ],
+    edges: [
+      { id: "e1", sourceNodeId: "trigger", targetNodeId: "switch" },
+      { id: "e2", sourceNodeId: "switch", targetNodeId: "billing_handler", sourceHandle: "output_0" },
+      { id: "e3", sourceNodeId: "switch", targetNodeId: "tech_handler", sourceHandle: "output_1" },
+    ],
+  });
+
+  const execution = await createWorkflowExecution(workflow.id, { category: "tech" }, { trigger: "webhook" });
+  const result = await runExecution(execution.id);
+  assert.equal(result.status, "SUCCESS");
+  assert.equal((result.output as any).lane, "dev");
+
+  const nodeExecutions = await prisma.nodeExecution.findMany({ where: { executionId: execution.id } });
+  assert.equal(nodeExecutions.find((item: any) => item.nodeId === "tech_handler")?.status, "SUCCESS");
+  assert.equal(nodeExecutions.find((item: any) => item.nodeId === "billing_handler")?.status, "CANCELLED");
+});
+
+test("executeGraph merges parallel branches and combines inputs", async () => {
+  const workflow = await createFixtureWorkflow({
+    nodes: [
+      { id: "trigger", type: "webhook" },
+      { id: "branchA", type: "set_fields", config: { sourceA: "alpha" } },
+      { id: "branchB", type: "set_fields", config: { sourceB: "beta" } },
+      { id: "merge", type: "merge", config: { mode: "append" } },
+    ],
+    edges: [
+      { id: "e1", sourceNodeId: "trigger", targetNodeId: "branchA" },
+      { id: "e2", sourceNodeId: "trigger", targetNodeId: "branchB" },
+      { id: "e3", sourceNodeId: "branchA", targetNodeId: "merge" },
+      { id: "e4", sourceNodeId: "branchB", targetNodeId: "merge" },
+    ],
+  });
+
+  const execution = await createWorkflowExecution(workflow.id, { init: true }, { trigger: "webhook" });
+  const result = await runExecution(execution.id);
+  assert.equal(result.status, "SUCCESS");
+
+  const nodeExecutions = await prisma.nodeExecution.findMany({ where: { executionId: execution.id } });
+  const mergeExec = nodeExecutions.find((item: any) => item.nodeId === "merge");
+  assert.equal(mergeExec?.status, "SUCCESS");
+  assert.ok(Array.isArray(mergeExec?.output));
+  assert.equal((mergeExec?.output as any[])?.length, 2);
+});

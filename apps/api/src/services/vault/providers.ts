@@ -1,5 +1,6 @@
 import type { CredentialBucket, ProviderSpec } from "./types.js";
 import { BUCKET_DEFINITIONS } from "./buckets.js";
+import { resolveProviderDefaults } from "@agentflow/shared";
 
 /**
  * AgentFlow Vault Provider Catalog
@@ -5227,11 +5228,21 @@ export const PROVIDER_CATALOG_DATA: Omit<ProviderSpec, "fields">[] = [
 export const PROVIDER_CATALOG: Map<string, ProviderSpec> = new Map(
   PROVIDER_CATALOG_DATA.map((p) => {
     const bucketDef = BUCKET_DEFINITIONS[p.bucket] || BUCKET_DEFINITIONS.api_key;
+    const resolvedDefaults = resolveProviderDefaults(p.id) || resolveProviderDefaults(p.name);
     return [
       p.id,
       {
         ...p,
-        fields: bucketDef.fields,
+        defaultFields: resolvedDefaults && Object.keys(resolvedDefaults).length > 0 ? resolvedDefaults : undefined,
+        fields: bucketDef.fields.map((f) => {
+          if (resolvedDefaults && resolvedDefaults[f.name as keyof typeof resolvedDefaults] !== undefined) {
+            return {
+              ...f,
+              defaultValue: resolvedDefaults[f.name as keyof typeof resolvedDefaults],
+            };
+          }
+          return f;
+        }),
       },
     ];
   })

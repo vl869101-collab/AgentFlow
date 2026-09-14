@@ -23,9 +23,15 @@ import {
 import { prisma } from "../../lib/prisma.js";
 import { createWorkflowExecution, runExecution } from "../executor.js";
 import { enqueueExecution } from "../queue.js";
+import { telemetry } from "../../lib/otel.js";
 
 export interface ExecuteWorkflowConfig {
   workflowId?: string;
+  workflow?: string;
+  workflowName?: string;
+  workflowSlug?: string;
+  alias?: string;
+  targetWorkflowId?: string;
   source?: "database" | "parameter" | "id";
   mode?: "sync" | "async" | "wait" | "fireAndForget";
   waitForSubWorkflow?: boolean;
@@ -33,7 +39,6 @@ export interface ExecuteWorkflowConfig {
   inputDataMode?: "allInputData" | "custom" | "passThrough";
   customData?: Record<string, unknown>;
   inheritOrgContext?: boolean;
-  workflowName?: string;
   [key: string]: unknown;
 }
 
@@ -44,24 +49,36 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
   async execute(ctx: NodeExecutionContext): Promise<NodeExecutionResult> {
     const config = (ctx.nodeConfig.parameters as ExecuteWorkflowConfig) ?? (ctx.nodeConfig as ExecuteWorkflowConfig) ?? {};
 
-    // 1. Resolver o ID do sub-workflow alvo
-    const targetWorkflowId = String(
+    // 1. Resolver o ID ou alias (nome / slug) do sub-workflow alvo
+    const targetIdentifier = String(
       config.workflowId ??
       config.workflow ??
+      config.workflowName ??
+      config.workflowSlug ??
+      config.alias ??
+      config.targetWorkflowId ??
       ctx.nodeConfig.workflowId ??
+      ctx.nodeConfig.workflow ??
+      ctx.nodeConfig.workflowName ??
+      ctx.nodeConfig.workflowSlug ??
+      ctx.nodeConfig.alias ??
+      ctx.nodeConfig.targetWorkflowId ??
       ""
     ).trim();
 
-    if (!targetWorkflowId) {
-      throw new Error("ExecuteWorkflow node requires a valid target workflowId");
+    if (!targetIdentifier) {
+      throw new Error("ExecuteWorkflow node requires a valid target workflowId or alias");
     }
 
-    // 2. Tenant Isolation & Segurança Organizacional
+    // 2. Tenant Isolation & Resolução Segura de Alias (ID, Nome, Slug)
     // O sub-workflow DEVE pertencer à mesma organização do workflow pai
-    const childWorkflow = await prisma.workflow.findFirst({
+    let childWorkflow = await prisma.workflow.findFirst({
       where: {
-        id: targetWorkflowId,
         orgId: ctx.orgId,
+        OR: [
+          { id: targetIdentifier },
+          { name: targetIdentifier },
+        ],
       },
       include: {
         nodes: true,
@@ -71,8 +88,29 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
     });
 
     if (!childWorkflow) {
+      const allOrgWorkflows = await prisma.workflow.findMany({
+        where: { orgId: ctx.orgId },
+        include: {
+          nodes: true,
+          edges: true,
+          versions: { orderBy: { version: "desc" }, take: 1 },
+        },
+      });
+
+      const normalizedTarget = targetIdentifier.toLowerCase().replace(/[\s_-]+/g, "-");
+      childWorkflow =
+        allOrgWorkflows.find((w: any) => {
+          if (w.id === targetIdentifier) return true;
+          if (w.name?.toLowerCase() === targetIdentifier.toLowerCase()) return true;
+          if (w.slug && w.slug.toLowerCase() === targetIdentifier.toLowerCase()) return true;
+          const normalizedName = String(w.name ?? "").toLowerCase().replace(/[\s_-]+/g, "-");
+          return normalizedName === normalizedTarget;
+        }) ?? null;
+    }
+
+    if (!childWorkflow) {
       throw new Error(
-        `Sub-workflow '${targetWorkflowId}' not found or access denied for organization '${ctx.orgId}'`
+        `Sub-workflow '${targetIdentifier}' not found or access denied for organization '${ctx.orgId}'`
       );
     }
 
@@ -103,7 +141,7 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
 
     // 5. Criar execução do filho vinculada ao parentExecutionId
     const childExecution = await createWorkflowExecution(
-      targetWorkflowId,
+      childWorkflow.id,
       payloadToSend,
       {
         trigger: "subworkflow",
@@ -117,12 +155,15 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
         parentExecutionId: ctx.executionId,
         parentNodeId: ctx.nodeId,
         parentWorkflowId: ctx.workflowId,
+        traceparent: ctx.traceparent,
       });
 
       if (!enqueued) {
         // Se a fila estiver desativada (em ambiente de teste/offline), executa em background sem bloquear
         void runExecution(childExecution.id, {
           parentExecutionId: ctx.executionId,
+          traceparent: ctx.traceparent,
+          parentContext: ctx.traceparent ? telemetry.parseTraceParent(ctx.traceparent) : undefined,
         }).catch((err) => {
           console.error(`[sub-workflow async background error] Execution ${childExecution.id}:`, err);
         });
@@ -130,7 +171,7 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
 
       const resultItem: NodeItem = ensureNodeItem({
         executionId: childExecution.id,
-        workflowId: targetWorkflowId,
+        workflowId: childWorkflow.id,
         parentExecutionId: ctx.executionId,
         status: "PENDING",
         mode: "async",
@@ -142,7 +183,7 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
       return {
         items: [resultItem],
         logs: [
-          `[ExecuteWorkflow] Dispatched async child execution ${childExecution.id} for sub-workflow ${targetWorkflowId}`,
+          `[ExecuteWorkflow] Dispatched async child execution ${childExecution.id} for sub-workflow ${childWorkflow.id}`,
         ],
       };
     }
@@ -150,6 +191,8 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
     // 7. Modo Síncrono (Aguardar término com timeout)
     const executionPromise = runExecution(childExecution.id, {
       parentExecutionId: ctx.executionId,
+      traceparent: ctx.traceparent,
+      parentContext: ctx.traceparent ? telemetry.parseTraceParent(ctx.traceparent) : undefined,
     });
 
     let timeoutTimer: NodeJS.Timeout | undefined;
@@ -157,7 +200,7 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
       timeoutTimer = setTimeout(() => {
         reject(
           new Error(
-            `Sub-workflow '${childWorkflow.name || targetWorkflowId}' timed out after ${timeoutMs}ms (executionId: ${childExecution.id})`
+            `Sub-workflow '${childWorkflow.name || childWorkflow.id}' timed out after ${timeoutMs}ms (executionId: ${childExecution.id})`
           )
         );
       }, timeoutMs);
@@ -188,7 +231,7 @@ export class ExecuteWorkflowNodeHandler implements NodeHandler {
     return {
       items: outputItems,
       logs: [
-        `[ExecuteWorkflow] Successfully executed sub-workflow ${targetWorkflowId} (childExecution: ${childExecution.id}, duration: ${completedChild.duration ?? 0}ms)`,
+        `[ExecuteWorkflow] Successfully executed sub-workflow ${childWorkflow.id} (childExecution: ${childExecution.id}, duration: ${completedChild.duration ?? 0}ms)`,
       ],
     };
   }

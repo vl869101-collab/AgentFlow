@@ -11,6 +11,7 @@ import { checkAndSetWebhookIdempotency } from "../lib/redis.js";
 import { verifyWebhookRequest, verifyMetaSignature } from "../services/webhook-verifier.js";
 import { parseWhatsAppWebhookPayload } from "../services/nodes/whatsapp.js";
 import { telemetry } from "../lib/otel.js";
+import { recordWorkflowAuditEvent } from "../services/audit-ledger.js";
 
 function executeTelegramTrigger(_config: any, body: any) {
   return {
@@ -379,5 +380,128 @@ export async function webhookRoutes(app: FastifyInstance) {
       statusCount: parsedPayload.statuses.length,
       messageCount: parsedPayload.messages.length,
     });
+  });
+
+  // ── Wait Node Webhook Callback Resume (WF-ENG Item 4) ────────
+  app.route({
+    method: ["POST", "GET"],
+    url: "/resume/:token",
+    config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+    handler: async (request: FastifyRequest, reply: FastifyReply) => {
+      const { token } = request.params as { token?: string };
+
+      if (!token || typeof token !== "string" || token.trim().length === 0) {
+        return reply.code(400).send({ error: "Resume token is required", code: "INVALID_TOKEN" });
+      }
+
+      const trimmedToken = token.trim();
+
+      // Look up wait approval record by id or context.resumeToken
+      let waitApproval = await prisma.approval.findUnique({
+        where: { id: trimmedToken },
+      });
+
+      if (!waitApproval) {
+        const allApprovals = await prisma.approval.findMany();
+        waitApproval =
+          allApprovals.find((a: any) => {
+            const ctx = a.context as Record<string, unknown> | undefined;
+            return ctx?.resumeToken === trimmedToken;
+          }) ?? null;
+      }
+
+      if (!waitApproval) {
+        return reply.code(404).send({
+          error: "Wait callback token not found or already consumed",
+          code: "NOT_FOUND",
+        });
+      }
+
+      if (waitApproval.status !== "PENDING") {
+        return reply.code(400).send({
+          error: `Wait execution already ${waitApproval.status.toLowerCase()}`,
+          code: "ALREADY_RESUMED",
+        });
+      }
+
+      const ctx = (waitApproval.context as Record<string, unknown>) ?? {};
+      if (ctx.expiresAt) {
+        const expiresAtTime = new Date(String(ctx.expiresAt)).getTime();
+        if (Date.now() > expiresAtTime) {
+          await prisma.approval.update({
+            where: { id: waitApproval.id },
+            data: { status: "EXPIRED", decidedAt: new Date() },
+          });
+          return reply.code(410).send({ error: "Wait token has expired", code: "TOKEN_EXPIRED" });
+        }
+      }
+
+      const payload =
+        request.body !== undefined && request.body !== null
+          ? request.body
+          : (request.query as Record<string, unknown> | undefined) ?? {};
+
+      const updatedContext = {
+        ...ctx,
+        submittedData: payload,
+        resumedAt: new Date().toISOString(),
+      };
+
+      await prisma.approval.update({
+        where: { id: waitApproval.id },
+        data: {
+          status: "APPROVED",
+          decidedAt: new Date(),
+          context: updatedContext,
+        },
+      });
+
+      const execution = await prisma.workflowExecution.findUnique({
+        where: { id: waitApproval.executionId },
+      });
+
+      if (!execution) {
+        return reply.code(404).send({
+          error: "Associated workflow execution not found",
+          code: "EXECUTION_NOT_FOUND",
+        });
+      }
+
+      await prisma.workflowExecution.update({
+        where: { id: execution.id },
+        data: { status: "RUNNING" as any },
+      });
+
+      void recordWorkflowAuditEvent({
+        executionId: execution.id,
+        nodeId: String(ctx.nodeId ?? "wait"),
+        actor: "webhook",
+        action: "wait.resumed",
+        decision: "APPROVED",
+        payload: {
+          resumeToken: trimmedToken,
+          waitId: waitApproval.id,
+          data: payload,
+        },
+      }).catch(() => {});
+
+      const enqueued = await enqueueExecution(execution.id, {
+        resumeToken: trimmedToken,
+        waitId: waitApproval.id,
+      });
+
+      if (!enqueued) {
+        void runExecution(execution.id).catch((err) => {
+          app.log.error(err, "Failed to resume execution from webhook callback");
+        });
+      }
+
+      return reply.status(200).send({
+        ok: true,
+        executionId: execution.id,
+        status: "RUNNING",
+        nodeId: ctx.nodeId,
+      });
+    },
   });
 }

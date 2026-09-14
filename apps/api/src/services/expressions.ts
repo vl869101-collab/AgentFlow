@@ -1,3 +1,4 @@
+import { parse, type Node as AcornNode } from "acorn";
 import type { NodeItem } from "./nodes/types.js";
 
 export interface ExpressionContext {
@@ -15,12 +16,97 @@ export interface ExpressionContext {
   [key: string]: unknown;
 }
 
-const SENSITIVE_KEY_PATTERN = /(SECRET|KEY|PASS|PWD|TOKEN|DATABASE|URL|AUTH|PRIVATE|CREDENTIAL|AWS_|OPENAI|ANTHROPIC|NVIDIA|STRIPE|REDIS|SALT|BEARER|CERT|SIGNATURE)/i;
+export class ExpressionSecurityError extends Error {
+  readonly code: string;
+  readonly statusCode: number;
+
+  constructor(message: string, code = "EXPRESSION_SECURITY_ERROR") {
+    super(message);
+    this.name = "ExpressionSecurityError";
+    this.code = code;
+    this.statusCode = 400;
+  }
+}
+
+const ALLOWED_NODE_TYPES = new Set([
+  "Program",
+  "ExpressionStatement",
+  "ParenthesizedExpression",
+  "ChainExpression",
+  "Identifier",
+  "Literal",
+  "MemberExpression",
+  "CallExpression",
+  "BinaryExpression",
+  "LogicalExpression",
+  "UnaryExpression",
+  "ConditionalExpression",
+  "ArrayExpression",
+  "ObjectExpression",
+  "Property",
+  "TemplateLiteral",
+  "TemplateElement",
+]);
+
+const FORBIDDEN_IDENTIFIERS = new Set([
+  "process",
+  "globalThis",
+  "global",
+  "eval",
+  "Function",
+  "fetch",
+  "import",
+  "require",
+  "window",
+  "document",
+  "this",
+]);
+
+const FORBIDDEN_PROPERTIES = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
+]);
+
+const SAFE_BUILTINS: Record<string, unknown> = {
+  Math,
+  JSON,
+  Date,
+  String,
+  Number,
+  Boolean,
+  parseInt,
+  parseFloat,
+  isNaN,
+  isFinite,
+  encodeURIComponent,
+  decodeURIComponent,
+  encodeURI,
+  decodeURI,
+  Object: Object.freeze(
+    Object.create(null, {
+      keys: { value: Object.keys, enumerable: true },
+      values: { value: Object.values, enumerable: true },
+      entries: { value: Object.entries, enumerable: true },
+      fromEntries: { value: Object.fromEntries, enumerable: true },
+      assign: { value: Object.assign, enumerable: true },
+    })
+  ),
+};
+
+const SENSITIVE_KEY_PATTERN =
+  /(SECRET|KEY|PASS|PWD|TOKEN|DATABASE|URL|AUTH|PRIVATE|CREDENTIAL|AWS_|OPENAI|ANTHROPIC|NVIDIA|STRIPE|REDIS|SALT|BEARER|CERT|SIGNATURE)/i;
 
 /**
  * Sanitizes environment variables to prevent leaking sensitive secrets in workflow expressions.
  */
-export function sanitizeEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): Record<string, string | undefined> {
+export function sanitizeEnv(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env
+): Record<string, string | undefined> {
   const sanitized: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(env)) {
     if (k && !SENSITIVE_KEY_PATTERN.test(k)) {
@@ -36,7 +122,7 @@ export function sanitizeEnv(env: NodeJS.ProcessEnv | Record<string, string | und
  */
 export function getByPath(obj: unknown, path: string): unknown {
   if (obj === undefined || obj === null || !path) return undefined;
-  
+
   // Normalize bracket notation: a['b'][0] -> a.b.0
   const normalized = path
     .replace(/\[['"`](.*?)['"`]\]/g, ".$1")
@@ -48,6 +134,9 @@ export function getByPath(obj: unknown, path: string): unknown {
 
   for (const part of parts) {
     if (current === undefined || current === null) return undefined;
+    if (FORBIDDEN_PROPERTIES.has(part)) {
+      throw new ExpressionSecurityError(`Access to property '${part}' is prohibited`, "FORBIDDEN_PROPERTY");
+    }
     current = current[part];
   }
 
@@ -67,17 +156,20 @@ export function buildExpressionContext(options: {
   workflowName?: string;
 }): ExpressionContext {
   const rawItem = options.item;
-  const json = rawItem && typeof rawItem === "object" && "json" in rawItem 
-    ? (rawItem as NodeItem).json 
-    : (rawItem as Record<string, any>) ?? {};
-  const binary = rawItem && typeof rawItem === "object" && "binary" in rawItem 
-    ? (rawItem as NodeItem).binary 
-    : undefined;
+  const json =
+    rawItem && typeof rawItem === "object" && "json" in rawItem
+      ? (rawItem as NodeItem).json
+      : (rawItem as Record<string, any>) ?? {};
+  const binary =
+    rawItem && typeof rawItem === "object" && "binary" in rawItem
+      ? (rawItem as NodeItem).binary
+      : undefined;
   const now = new Date();
 
-  const historyMap = options.nodeHistory instanceof Map 
-    ? options.nodeHistory 
-    : new Map(Object.entries(options.nodeHistory ?? {}));
+  const historyMap =
+    options.nodeHistory instanceof Map
+      ? options.nodeHistory
+      : new Map(Object.entries(options.nodeHistory ?? {}));
 
   const itemGetter = (nodeOrIndex?: string | number): NodeItem | undefined => {
     if (typeof nodeOrIndex === "number") {
@@ -118,52 +210,299 @@ export function buildExpressionContext(options: {
 }
 
 /**
- * Evaluates a single inner expression snippet safely (without eval or new Function vulnerabilities).
+ * Recursively evaluates an AST node against an active execution scope.
+ */
+function evaluateNode(node: any, scope: Record<string, unknown>): unknown {
+  if (!node) return undefined;
+
+  if (!ALLOWED_NODE_TYPES.has(node.type)) {
+    throw new ExpressionSecurityError(
+      `Syntax type '${node.type}' is not allowed in expressions`,
+      "DISALLOWED_SYNTAX"
+    );
+  }
+
+  switch (node.type) {
+    case "Program": {
+      if (!node.body || node.body.length === 0) return undefined;
+      if (node.body.length > 1) {
+        throw new ExpressionSecurityError(
+          "Multiple statements are not permitted in expressions",
+          "MULTIPLE_STATEMENTS"
+        );
+      }
+      return evaluateNode(node.body[0], scope);
+    }
+
+    case "ExpressionStatement":
+    case "ParenthesizedExpression":
+    case "ChainExpression":
+      return evaluateNode(node.expression, scope);
+
+    case "Literal":
+      return node.value;
+
+    case "TemplateElement":
+      return node.value.cooked;
+
+    case "TemplateLiteral": {
+      let str = "";
+      for (let i = 0; i < node.quasis.length; i++) {
+        str += node.quasis[i].value.cooked ?? "";
+        if (i < node.expressions.length) {
+          const val = evaluateNode(node.expressions[i], scope);
+          str += val !== undefined && val !== null ? String(val) : "";
+        }
+      }
+      return str;
+    }
+
+    case "Identifier": {
+      if (FORBIDDEN_IDENTIFIERS.has(node.name)) {
+        throw new ExpressionSecurityError(
+          `Access to identifier '${node.name}' is prohibited`,
+          "FORBIDDEN_IDENTIFIER"
+        );
+      }
+      if (Object.prototype.hasOwnProperty.call(scope, node.name)) {
+        return scope[node.name];
+      }
+      if (node.name === "undefined") return undefined;
+      if (node.name === "NaN") return NaN;
+      if (node.name === "Infinity") return Infinity;
+      return undefined;
+    }
+
+    case "MemberExpression": {
+      const obj = evaluateNode(node.object, scope);
+      let propName: unknown;
+      if (node.computed) {
+        propName = evaluateNode(node.property, scope);
+      } else {
+        propName = node.property.name;
+      }
+
+      if (typeof propName === "string" && FORBIDDEN_PROPERTIES.has(propName)) {
+        throw new ExpressionSecurityError(
+          `Access to property '${propName}' is prohibited`,
+          "FORBIDDEN_PROPERTY"
+        );
+      }
+
+      if (obj === null || obj === undefined) {
+        return undefined;
+      }
+
+      return (obj as any)[propName as any];
+    }
+
+    case "CallExpression": {
+      let fn: unknown;
+      let thisArg: unknown = null;
+
+      if (node.callee.type === "MemberExpression") {
+        const obj = evaluateNode(node.callee.object, scope);
+        let propName: unknown;
+        if (node.callee.computed) {
+          propName = evaluateNode(node.callee.property, scope);
+        } else {
+          propName = node.callee.property.name;
+        }
+
+        if (typeof propName === "string" && FORBIDDEN_PROPERTIES.has(propName)) {
+          throw new ExpressionSecurityError(
+            `Access to property '${propName}' is prohibited`,
+            "FORBIDDEN_PROPERTY"
+          );
+        }
+
+        if (obj === null || obj === undefined) {
+          return undefined;
+        }
+
+        fn = (obj as any)[propName as any];
+        thisArg = obj;
+      } else {
+        fn = evaluateNode(node.callee, scope);
+      }
+
+      if (fn === undefined || fn === null) {
+        return undefined;
+      }
+
+      if (typeof fn !== "function") {
+        throw new ExpressionSecurityError(
+          "Target of invocation is not a function",
+          "INVALID_CALL"
+        );
+      }
+
+      if (fn === Function || fn === eval) {
+        throw new ExpressionSecurityError(
+          "Calling forbidden function is prohibited",
+          "FORBIDDEN_CALL"
+        );
+      }
+
+      const args = node.arguments.map((arg: any) => evaluateNode(arg, scope));
+      return Reflect.apply(fn as (...callArgs: unknown[]) => unknown, thisArg, args);
+    }
+
+    case "BinaryExpression": {
+      const left = evaluateNode(node.left, scope);
+      const right = evaluateNode(node.right, scope);
+      switch (node.operator) {
+        case "+":
+          return (left as any) + (right as any);
+        case "-":
+          return (left as any) - (right as any);
+        case "*":
+          return (left as any) * (right as any);
+        case "/":
+          return (left as any) / (right as any);
+        case "%":
+          return (left as any) % (right as any);
+        case "**":
+          return (left as any) ** (right as any);
+        case "==":
+          return (left as any) == (right as any);
+        case "===":
+          return (left as any) === (right as any);
+        case "!=":
+          return (left as any) != (right as any);
+        case "!==":
+          return (left as any) !== (right as any);
+        case "<":
+          return (left as any) < (right as any);
+        case "<=":
+          return (left as any) <= (right as any);
+        case ">":
+          return (left as any) > (right as any);
+        case ">=":
+          return (left as any) >= (right as any);
+        case "in":
+          if (right === null || right === undefined) return false;
+          return (left as any) in (right as any);
+        case "instanceof":
+          if (typeof right !== "function") return false;
+          return (left as any) instanceof (right as any);
+        default:
+          throw new ExpressionSecurityError(
+            `Binary operator '${node.operator}' is not supported`,
+            "UNSUPPORTED_OPERATOR"
+          );
+      }
+    }
+
+    case "LogicalExpression": {
+      if (node.operator === "&&") {
+        const left = evaluateNode(node.left, scope);
+        return left ? evaluateNode(node.right, scope) : left;
+      }
+      if (node.operator === "||") {
+        const left = evaluateNode(node.left, scope);
+        return left ? left : evaluateNode(node.right, scope);
+      }
+      if (node.operator === "??") {
+        const left = evaluateNode(node.left, scope);
+        return left !== null && left !== undefined ? left : evaluateNode(node.right, scope);
+      }
+      throw new ExpressionSecurityError(
+        `Logical operator '${node.operator}' is not supported`,
+        "UNSUPPORTED_OPERATOR"
+      );
+    }
+
+    case "UnaryExpression": {
+      const arg = evaluateNode(node.argument, scope);
+      switch (node.operator) {
+        case "!":
+          return !arg;
+        case "-":
+          return -(arg as any);
+        case "+":
+          return +(arg as any);
+        case "~":
+          return ~(arg as any);
+        case "typeof":
+          return typeof arg;
+        case "void":
+          return void arg;
+        default:
+          throw new ExpressionSecurityError(
+            `Unary operator '${node.operator}' is not supported`,
+            "UNSUPPORTED_OPERATOR"
+          );
+      }
+    }
+
+    case "ConditionalExpression": {
+      const test = evaluateNode(node.test, scope);
+      return test ? evaluateNode(node.consequent, scope) : evaluateNode(node.alternate, scope);
+    }
+
+    case "ArrayExpression":
+      return node.elements.map((el: any) => evaluateNode(el, scope));
+
+    case "ObjectExpression": {
+      const obj: Record<string, unknown> = {};
+      for (const prop of node.properties) {
+        if (prop.type !== "Property") {
+          throw new ExpressionSecurityError(
+            "Only standard properties are allowed in object literals",
+            "DISALLOWED_SYNTAX"
+          );
+        }
+        const key = prop.computed
+          ? evaluateNode(prop.key, scope)
+          : prop.key.name ?? prop.key.value;
+
+        if (typeof key === "string" && FORBIDDEN_PROPERTIES.has(key)) {
+          throw new ExpressionSecurityError(
+            `Setting property '${key}' is prohibited`,
+            "FORBIDDEN_PROPERTY"
+          );
+        }
+        obj[String(key)] = evaluateNode(prop.value, scope);
+      }
+      return obj;
+    }
+
+    default:
+      throw new ExpressionSecurityError(
+        `Syntax type '${node.type}' is not allowed in expressions`,
+        "DISALLOWED_SYNTAX"
+      );
+  }
+}
+
+/**
+ * Evaluates a single inner expression snippet safely using Acorn AST parsing.
  */
 export function evaluateInnerExpression(exprStr: string, context: ExpressionContext): unknown {
   const trimmed = exprStr.trim();
   if (!trimmed) return "";
 
-  // 1. Direct variable reference: $executionId, $workflowId, $now, $today
-  if (trimmed === "$executionId") return context.$executionId ?? "";
-  if (trimmed === "$workflowId") return context.$workflowId ?? "";
-  if (trimmed === "$now") return context.$now ?? new Date().toISOString();
-  if (trimmed === "$today") return context.$today ?? new Date().toISOString().split("T")[0];
-  if (trimmed === "$json") return context.$json ?? {};
+  // Combine safe built-ins and user expression context
+  const scope: Record<string, unknown> = {
+    ...SAFE_BUILTINS,
+    ...context,
+  };
 
-  // 2. $json.path or $json['path']
-  if (trimmed.startsWith("$json")) {
-    const subPath = trimmed.slice(5).replace(/^\./, "");
-    if (!subPath) return context.$json;
-    return getByPath(context.$json, subPath);
+  let ast: AcornNode;
+  try {
+    ast = parse("(" + trimmed + ")", {
+      ecmaVersion: "latest",
+      sourceType: "script",
+    });
+  } catch (err: any) {
+    throw new ExpressionSecurityError(
+      `Invalid expression syntax: ${err?.message || "parse error"}`,
+      "SYNTAX_ERROR"
+    );
   }
 
-  // 3. $item("NodeName").json.field or $item(0).json.field
-  const itemMatch = trimmed.match(/^\$item\((?:['"]([^'"]+)['"]|(\d+))\)(.*)$/);
-  if (itemMatch) {
-    const nodeName = itemMatch[1];
-    const index = itemMatch[2] !== undefined ? parseInt(itemMatch[2], 10) : undefined;
-    const target = nodeName ?? index;
-    const item = typeof context.$item === "function" ? context.$item(target) : undefined;
-    const remaining = itemMatch[3].replace(/^\./, "");
-    if (!remaining) return item;
-    return getByPath(item, remaining);
-  }
-
-  // 4. $node["NodeName"].json.field or $node.NodeName.json.field
-  if (trimmed.startsWith("$node")) {
-    const subPath = trimmed.slice(5).replace(/^\./, "");
-    return getByPath(context.$node, subPath);
-  }
-
-  // 5. $parameter.name
-  if (trimmed.startsWith("$parameter")) {
-    const subPath = trimmed.slice(10).replace(/^\./, "");
-    return getByPath(context.$parameter, subPath);
-  }
-
-  // 6. Generic path fallback on context
-  return getByPath(context, trimmed);
+  return evaluateNode(ast, scope);
 }
 
 /**
@@ -180,8 +519,7 @@ export function evaluateExpression(template: string, context: ExpressionContext)
 
   // Single full-match check: "{{ $json.items }}" -> returns actual array/object/number
   if (matches.length === 1 && matches[0][0].trim() === template.trim()) {
-    const evaluated = evaluateInnerExpression(matches[0][1], context);
-    return evaluated;
+    return evaluateInnerExpression(matches[0][1], context);
   }
 
   // Multi-expression string interpolation
